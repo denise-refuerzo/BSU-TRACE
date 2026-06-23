@@ -4,12 +4,24 @@ import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/admin_document_details_modal.dart';
 import '../../widgets/modals/document_scanner_modal.dart';
+// Add these imports
+import '../../services/session_manager.dart';
+import '../../models/user_role.dart';
 
 class AdminDashboardScreen extends StatelessWidget {
   const AdminDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // GATEKEEPER
+    final role = SessionManager().currentRole;
+    if (role != UserRole.admin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('GSO Admin'), actions: buildAppBarActions(context)),
       drawer: const AppDrawer(),
@@ -17,11 +29,8 @@ class AdminDashboardScreen extends StatelessWidget {
         padding: const EdgeInsets.all(20.0),
         child: Column(
           children: [
-            // --- 1. Institutional Profile Card ---
             _buildProfileCard(),
             const SizedBox(height: 20),
-
-            // --- 2. Dashboard Metrics ---
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -31,15 +40,12 @@ class AdminDashboardScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-
-            // --- 3. Recent Documents Table ---
             _buildRecentDocumentsTable(context),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // UPDATED LOGIC TO SHOW THE SCANNER MODAL
           showDialog(
             context: context,
             builder: (context) => const DocumentScannerModal(),
@@ -134,8 +140,6 @@ class AdminDashboardScreen extends StatelessWidget {
           Container(padding: const EdgeInsets.all(16), color: Colors.red.shade50, child: Row(children: const [Expanded(child: Text('TITLE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))), Expanded(child: Text('STATUS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))), Expanded(child: Text('ACTION', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)))])),
           _buildDocRow(context, 'Annual Procure...', 'PENDING'),
           _buildDocRow(context, 'Property Receipt', 'SIGNED'),
-          
-          // Pagination
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16.0),
             child: Row(

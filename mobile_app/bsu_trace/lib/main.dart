@@ -1,8 +1,7 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
-
-// Models & Theme
-import 'models/user_role.dart';
 import 'theme/app_theme.dart';
+import 'services/session_manager.dart'; 
 
 // Screens
 import 'screens/auth_screen.dart';
@@ -20,10 +19,6 @@ import 'screens/processing_history_screen.dart';
 import 'screens/signee_pending_approvals_screen.dart';
 import 'screens/signee_signature_history_screen.dart';
 
-// Global variable for current session state
-// TODO: Consider migrating to Provider or Riverpod for production
-UserRole currentUserRole = UserRole.user;
-
 void main() {
   runApp(const BsuPortalApp());
 }
@@ -33,26 +28,32 @@ class BsuPortalApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'University Portal',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const AuthScreen(),
-        '/dashboard_user': (context) => const UserDashboardScreen(),
-        '/dashboard_processor': (context) => const ProcessorDashboardScreen(),
-        '/dashboard_signee': (context) => const SigneeDashboardScreen(),
-        '/dashboard_admin': (context) => const AdminDashboardScreen(),
-        '/tracking': (context) => const TrackingScreen(),
-        '/scheduler': (context) => const SchedulerScreen(),
-        '/profile': (context) => const ProfileScreen(),
-        '/procurement': (context) => const ProcurementHubScreen(),
-        '/analytics': (context) => const OperationalAnalyticsScreen(),
-        '/documents': (context) => const DocumentsScreen(),
-        '/history': (context) => const ProcessingHistoryScreen(),
-        '/signee_approvals': (context) => const SigneePendingApprovalsScreen(),
-        '/signee_history': (context) => const SigneeSignatureHistoryScreen(),
+    // ListenableBuilder makes the app reactive to session changes
+    return ListenableBuilder(
+      listenable: SessionManager(),
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'University Portal',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          initialRoute: '/',
+          routes: {
+            '/': (context) => const AuthScreen(),
+            '/dashboard_user': (context) => const UserDashboardScreen(),
+            '/dashboard_processor': (context) => const ProcessorDashboardScreen(),
+            '/dashboard_signee': (context) => const SigneeDashboardScreen(),
+            '/dashboard_admin': (context) => const AdminDashboardScreen(),
+            '/tracking': (context) => const TrackingScreen(),
+            '/scheduler': (context) => const SchedulerScreen(),
+            '/profile': (context) => const ProfileScreen(),
+            '/procurement': (context) => const ProcurementHubScreen(),
+            '/analytics': (context) => const OperationalAnalyticsScreen(),
+            '/documents': (context) => const DocumentsScreen(),
+            '/history': (context) => const ProcessingHistoryScreen(),
+            '/signee_approvals': (context) => const SigneePendingApprovalsScreen(),
+            '/signee_history': (context) => const SigneeSignatureHistoryScreen(),
+          },
+        );
       },
     );
   }

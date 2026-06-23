@@ -3,14 +3,26 @@ import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/modals/document_scanner_modal.dart';
+// Add these imports
+import '../../services/session_manager.dart';
+import '../../models/user_role.dart';
 
 class ProcessorDashboardScreen extends StatelessWidget {
   const ProcessorDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // GATEKEEPER
+    final role = SessionManager().currentRole;
+    if (role != UserRole.processor) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFFFCF6F6), // Matches theme
+      backgroundColor: const Color(0xFFFCF6F6),
       appBar: AppBar(
         title: const Text('BSU Portal (Processor)'), 
         actions: buildAppBarActions(context)
@@ -24,8 +36,6 @@ class ProcessorDashboardScreen extends StatelessWidget {
             const Text('Hello, Processor', style: TextStyle(color: Colors.black54)),
             const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
-            
-            // --- DOCUMENT OVERVIEW ---
             Row(
               children: [
                 _buildStatCard('15', 'INCOMING DOCS', Colors.white, Colors.red.shade100),
@@ -35,19 +45,13 @@ class ProcessorDashboardScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _buildStatCard('160', 'COMPLETED', Colors.white, Colors.green.shade100, isFullWidth: true),
-            
             const SizedBox(height: 24),
             const Text('Current Priority', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            
-            // --- PRIORITY CARD ---
             _buildPriorityCard(),
-            
             const SizedBox(height: 24),
             const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
-            
-            // --- RECENT ACTIVITY LIST ---
             _buildActivityItem('Scholarship App #102', 'OSAS • 10:45 AM', 'Approved', Colors.green),
             _buildActivityItem('Leave Request - Prof. Lim', 'HR Office • Yesterday', 'Pending', Colors.orange),
             _buildActivityItem('Research Proposal Draft', 'Grad School • Yesterday', 'In Review', AppTheme.primaryRed),
@@ -56,7 +60,6 @@ class ProcessorDashboardScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // 2. Add the showDialog logic here
           showDialog(
             context: context,
             builder: (context) => const DocumentScannerModal(),
@@ -102,7 +105,6 @@ class ProcessorDashboardScreen extends StatelessWidget {
           const SizedBox(height: 4),
           const Text('Registrar\'s Office • High Priority', style: TextStyle(color: Colors.grey, fontSize: 13)),
           const SizedBox(height: 20),
-          // Simple Progress Visual
           Row(
             children: [
               _buildStepNode(true, 'Submission'),

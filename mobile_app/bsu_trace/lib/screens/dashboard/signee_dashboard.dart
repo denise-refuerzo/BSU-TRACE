@@ -3,12 +3,24 @@ import '../../theme/app_theme.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/signee_document_details_modal.dart';
+// Add these imports
+import '../../services/session_manager.dart';
+import '../../models/user_role.dart';
 
 class SigneeDashboardScreen extends StatelessWidget {
   const SigneeDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // GATEKEEPER
+    final role = SessionManager().currentRole;
+    if (role != UserRole.signee) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
@@ -21,7 +33,6 @@ class SigneeDashboardScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- 1. METRICS GRID ---
             Row(
               children: [
                 Expanded(
@@ -46,12 +57,8 @@ class SigneeDashboardScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 24),
-
-            // --- 2. EFFICIENCY OVERVIEW CHART ---
             _buildEfficiencyChart(),
             const SizedBox(height: 24),
-
-            // --- 3. DOCUMENTS PENDING ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -69,9 +76,8 @@ class SigneeDashboardScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            // Under the "Documents Pending" section
             _buildDocCard(
-              context: context, // <--- Add this line
+              context: context,
               title: 'Strategic Plan FY2024',
               id: 'BSU-24-9011',
               formType: 'Administrative Memo',
@@ -79,7 +85,7 @@ class SigneeDashboardScreen extends StatelessWidget {
               icon: Icons.description_outlined,
             ),
             _buildDocCard(
-              context: context, // <--- Add this line
+              context: context,
               title: 'Procurement Requisition',
               id: 'BSU-24-8842',
               formType: 'Purchase Order',
@@ -87,8 +93,6 @@ class SigneeDashboardScreen extends StatelessWidget {
               icon: Icons.receipt_long_outlined,
             ),
             const SizedBox(height: 24),
-
-            // --- 4. SYSTEM STATUS ---
             const Text(
               'System Status',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
@@ -101,8 +105,6 @@ class SigneeDashboardScreen extends StatelessWidget {
       ),
     );
   }
-
-  // --- REUSABLE WIDGETS ---
 
   Widget _buildStatCard(String title, String value, IconData icon, Color iconBg, Color iconColor, {Color valueColor = Colors.black87}) {
     return Container(
@@ -186,7 +188,7 @@ class SigneeDashboardScreen extends StatelessWidget {
         if (heightPct > 0)
           Container(
             width: 32,
-            height: (heightPct / 100) * 70, // 70 is max bar height
+            height: (heightPct / 100) * 70,
             decoration: BoxDecoration(
               color: isActive ? AppTheme.primaryRed : Colors.grey.shade300,
               borderRadius: BorderRadius.circular(4),
@@ -242,8 +244,6 @@ class SigneeDashboardScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              
-              // --- FIX: Wrap the Eye Icon to trigger the modal ---
               GestureDetector(
                 onTap: () {
                   showDialog(

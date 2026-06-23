@@ -1,12 +1,57 @@
+// lib/screens/documents_screen.dart
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/modals/document_scanner_modal.dart';
 import '../widgets/modals/processor_document_details_modal.dart';
+import '../config.dart'; // Import your global configuration
 
-class DocumentsScreen extends StatelessWidget {
+class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
+
+  @override
+  State<DocumentsScreen> createState() => _DocumentsScreenState();
+}
+
+class _DocumentsScreenState extends State<DocumentsScreen> {
+  List<dynamic> documents = [];
+  bool isLoading = true;
+  String errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    fetchDocuments();
+  }
+
+  Future<void> fetchDocuments() async {
+    final String url = '${AppConfig.baseUrl}/documents';
+    
+    try {
+      final response = await http.get(Uri.parse(url));
+      
+      if (response.statusCode == 200) {
+        setState(() {
+          documents = json.decode(response.body);
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          errorMessage = 'Failed to load documents: ${response.statusCode}';
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching documents: $e");
+      setState(() {
+        errorMessage = 'Could not connect to server.';
+        isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,61 +62,33 @@ class DocumentsScreen extends StatelessWidget {
         actions: buildAppBarActions(context),
       ),
       drawer: const AppDrawer(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          children: [
-            // --- SEARCH & FILTER ---
-            _buildSearchBar(),
-            const SizedBox(height: 16),
-            _buildFilterDropdown(),
-            const SizedBox(height: 24),
-
-            // --- DOCUMENT LIST ---
-            _buildDocumentCard(
-              context,
-              'Official Transcript Request',
-              'Form 137-A',
-              'Registrar Office',
-              'Incoming',
-              '2 hours ago',
-            ),
-            _buildDocumentCard(
-              context,
-              'Graduation Clearance',
-              'Final Evaluation',
-              'Dean\'s Office',
-              'In Verification',
-              '5 hours ago',
-            ),
-            _buildDocumentCard(
-              context,
-              'ID Card Replacement',
-              'Form 22-B',
-              'Student Affairs',
-              'Pending',
-              'Yesterday',
-            ),
-
-            const SizedBox(height: 24),
-
-            // --- FOOTER ---
-            OutlinedButton(
-              onPressed: () {},
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppTheme.primaryRed),
-                minimumSize: const Size(double.infinity, 50),
-              ),
-              child: const Text('Load More Documents', 
-                  style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 16),
-            const Text('Showing 3 of 124 documents', 
-                style: TextStyle(color: Colors.grey, fontSize: 12)),
-            const SizedBox(height: 80),
-          ],
-        ),
-      ),
+      body: isLoading 
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+          : errorMessage.isNotEmpty 
+              ? Center(child: Text(errorMessage, style: const TextStyle(color: Colors.red)))
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    children: [
+                      _buildSearchBar(),
+                      const SizedBox(height: 16),
+                      _buildFilterDropdown(),
+                      const SizedBox(height: 24),
+                      
+                      // Dynamically render cards based on API data
+                      ...documents.map((doc) => _buildDocumentCard(
+                        context,
+                        doc['title'] ?? 'No Title',
+                        doc['form_type'] ?? 'N/A',
+                        doc['origin_office'] ?? 'N/A',
+                        doc['status'] ?? 'Pending',
+                        'Just now', // You can format doc['created_at'] here
+                      )).toList(),
+                      
+                      const SizedBox(height: 80),
+                    ],
+                  ),
+                ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           showDialog(
@@ -113,7 +130,6 @@ class DocumentsScreen extends StatelessWidget {
   Widget _buildDocumentCard(
       BuildContext context, String title, String form, String origin, String status, String time) {
     
-    // Assign specific colors for statuses
     Color statusColor = status == 'Incoming' 
         ? Colors.red.shade100 
         : (status == 'Pending' ? Colors.orange.shade100 : Colors.blue.shade100);
@@ -131,7 +147,7 @@ class DocumentsScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('TR-2023-00412', 
+              const Text('DOC-REF-001', 
                   style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
               Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
@@ -152,7 +168,7 @@ class DocumentsScreen extends StatelessWidget {
                 onTap: () {
                   showDialog(
                     context: context,
-                    builder: (context) => const ProcessorDocumentDetailsModal(), // Uses specific Processor modal
+                    builder: (context) => const ProcessorDocumentDetailsModal(),
                   );
                 },
                 child: const Text('View Details >', 

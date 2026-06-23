@@ -1,9 +1,10 @@
+// lib/screens/tracking_screen.dart
 import 'package:flutter/material.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../theme/app_theme.dart';
-import '../main.dart';
 import '../models/user_role.dart';
+import '../services/session_manager.dart'; // Import SessionManager
 import 'document_details_screen.dart';
 
 class TrackingScreen extends StatelessWidget {
@@ -35,7 +36,8 @@ class TrackingScreen extends StatelessWidget {
           ],
         ),
       ),
-      floatingActionButton: currentUserRole == UserRole.user
+      // Logic updated to use SessionManager
+      floatingActionButton: SessionManager().currentRole == UserRole.user
           ? FloatingActionButton(
               onPressed: () => showDialog(
                 context: context,

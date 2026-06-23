@@ -2,12 +2,24 @@ import 'package:flutter/material.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/new_document_modal.dart';
+// Add these imports
+import '../../services/session_manager.dart';
+import '../../models/user_role.dart';
 
 class UserDashboardScreen extends StatelessWidget {
   const UserDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // GATEKEEPER
+    final role = SessionManager().currentRole;
+    if (role != UserRole.user) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('BSU Portal (User)'), 
@@ -72,7 +84,7 @@ class UserDashboardScreen extends StatelessWidget {
           ],
         ),
       ),
-            floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton(
         onPressed: () {
           showDialog(
             context: context,
@@ -131,22 +143,6 @@ class UserDashboardScreen extends StatelessWidget {
         const SizedBox(height: 8),
         Text(label, style: TextStyle(fontSize: 10, color: isActive ? const Color(0xFFB01A22) : Colors.grey, fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
       ],
-    );
-  }
-}
-
-// Bottom Sheet Component
-class NewDocumentBottomSheet extends StatelessWidget {
-  const NewDocumentBottomSheet({super.key});
-  
-  @override
-  Widget build(BuildContext context) {
-    // Paste your existing NewDocumentBottomSheet logic here if you want to keep it in this file
-    // Or you can create a new file in lib/widgets/modals/new_document_bottom_sheet.dart
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.all(20),
-      child: const Text('Add your Bottom Sheet contents here'),
     );
   }
 }
