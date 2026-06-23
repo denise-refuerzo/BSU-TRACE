@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode } from 'lucide-react';
 import DocumentsHub from './DocumentsHub';
+import ResourceScheduler from './ResourceScheduler';
 
 export default function OriginatorDashboard() {
   const navigate = useNavigate();
@@ -485,7 +486,9 @@ export default function OriginatorDashboard() {
             </form>
           )}
 
-          {activeTab === 'resources' && <div className="text-center py-12 text-neutral-400">🏫 Facility Reservation and Booking modules coming next.</div>}
+          {activeTab === 'resources' && (
+            <ResourceScheduler userId={userId} />
+          )}
         </div>
       </div>
 
