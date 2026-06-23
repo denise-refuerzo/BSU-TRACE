@@ -34,11 +34,16 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       final response = await http.post(
         Uri.parse('${AppConfig.baseUrl}/login'),
-        body: {
+        // 1. Add the JSON Header
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // 2. Wrap your map in json.encode()
+        body: json.encode({
           'username': _emailController.text,
           'password': _passwordController.text,
-          'role': _selectedRole.name, // Sending selected role for verification
-        },
+          'role': _selectedRole.name,
+        }),
       );
 
       if (response.statusCode == 200) {
