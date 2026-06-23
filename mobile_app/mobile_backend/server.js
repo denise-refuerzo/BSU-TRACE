@@ -1,4 +1,4 @@
-require('dotenv').config(); // Loads environment variables from a .env file locally
+// require('dotenv').config(); // Loads environment variables from a .env file locally
 const express = require('express');
 const bcrypt = require('bcrypt'); // Make sure to run: npm install bcrypt
 const { Pool } = require('pg');   // Make sure to run: npm install pg
