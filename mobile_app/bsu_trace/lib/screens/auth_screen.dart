@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/user_role.dart';
 import '../services/session_manager.dart';
 import '../theme/app_theme.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -24,54 +27,41 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> _handleLogin() async {
-    // 1. Force form validation
-    // If validate() returns false, the function stops here immediately
-    if (_formKey.currentState == null || !_formKey.currentState!.validate()) {
-      return; 
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    // 2. Proceed to Backend Verification
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Authenticating...')));
 
-    bool isAuthenticated = await _verifyUserCredentials(
-      _emailController.text, 
-      _passwordController.text, 
-      _getAccountIdFromRole(_selectedRole)
-    );
-
-    if (isAuthenticated) {
-      SessionManager().login(_selectedRole);
-
-      switch (_selectedRole) {
-        case UserRole.admin: Navigator.pushReplacementNamed(context, '/dashboard_admin'); break;
-        case UserRole.processor: Navigator.pushReplacementNamed(context, '/dashboard_processor'); break;
-        case UserRole.signee: Navigator.pushReplacementNamed(context, '/dashboard_signee'); break;
-        case UserRole.user: Navigator.pushReplacementNamed(context, '/dashboard_user'); break;
-      }
-    } else {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Invalid credentials or you do not have permission for this role.'),
-          backgroundColor: AppTheme.primaryRed,
-        ),
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/login'),
+        body: {
+          'username': _emailController.text,
+          'password': _passwordController.text,
+          'role': _selectedRole.name, // Sending selected role for verification
+        },
       );
-    }
-  }
 
-  int _getAccountIdFromRole(UserRole role) {
-    switch (role) {
-      case UserRole.user: return 1;
-      case UserRole.processor: return 2;
-      case UserRole.signee: return 3;
-      case UserRole.admin: return 4;
-    }
-  }
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final int accountId = data['a_id'];
+        
+        // Update session with the verified role
+        SessionManager().login(accountId.toRole());
 
-  Future<bool> _verifyUserCredentials(String email, String password, int expectedAId) async {
-    // REPLACE THIS WITH YOUR ACTUAL DATABASE/API LOGIC
-    // Ensure you check: if (email == user.email && password == user.password && user.a_id == expectedAId)
-    return true; 
+        switch (SessionManager().currentRole) {
+          case UserRole.admin: Navigator.pushReplacementNamed(context, '/dashboard_admin'); break;
+          case UserRole.processor: Navigator.pushReplacementNamed(context, '/dashboard_processor'); break;
+          case UserRole.signee: Navigator.pushReplacementNamed(context, '/dashboard_signee'); break;
+          default: Navigator.pushReplacementNamed(context, '/dashboard_user'); break;
+        }
+      } else {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid credentials or unauthorized role.')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error.')));
+    }
   }
 
   @override
@@ -81,13 +71,12 @@ class _AuthScreenState extends State<AuthScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
           child: Form(
-            key: _formKey, // Ensure the key is assigned here
+            key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const SizedBox(height: 40),
                 const Icon(Icons.school, color: AppTheme.primaryRed, size: 48),
-                const SizedBox(height: 8),
                 const Text('University Portal', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.primaryRed)),
                 const SizedBox(height: 40),
                 
@@ -106,6 +95,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         _buildAuthTextField('Password', '••••••••', Icons.lock_outline, _passwordController, isPassword: true),
                         const SizedBox(height: 16),
                         
+                        // Restored Role Selection
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                           decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
@@ -126,10 +116,19 @@ class _AuthScreenState extends State<AuthScreen> {
                             ),
                           ),
                         ),
+                        
+                        // Restored Forgot Password
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () { /* Navigate to forgot password screen */ },
+                            child: const Text('Forgot Password?', style: TextStyle(color: AppTheme.primaryRed, fontSize: 12)),
+                          ),
+                        ),
 
-                        const SizedBox(height: 32),
+                        const SizedBox(height: 24),
                         ElevatedButton(
-                          onPressed: _handleLogin, // Triggers the validated function
+                          onPressed: _handleLogin,
                           style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                           child: const Text('SIGN IN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ),
@@ -154,16 +153,9 @@ class _AuthScreenState extends State<AuthScreen> {
         TextFormField(
           controller: controller,
           obscureText: isPassword,
-          // This validator is what prevents submission on empty fields
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Please enter your $label';
-            }
-            return null;
-          },
+          validator: (value) => (value == null || value.isEmpty) ? 'Please enter your $label' : null,
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: Colors.grey),
             prefixIcon: icon != null ? Icon(icon, color: Colors.brown) : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.red.shade100)),

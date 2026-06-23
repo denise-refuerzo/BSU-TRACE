@@ -1,7 +1,8 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'theme/app_theme.dart';
-import 'services/session_manager.dart'; 
+import 'services/session_manager.dart';
+import 'models/user_role.dart';
+import 'widgets/route_guard.dart';
 
 // Screens
 import 'screens/auth_screen.dart';
@@ -28,7 +29,6 @@ class BsuPortalApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ListenableBuilder makes the app reactive to session changes
     return ListenableBuilder(
       listenable: SessionManager(),
       builder: (context, _) {
@@ -39,10 +39,14 @@ class BsuPortalApp extends StatelessWidget {
           initialRoute: '/',
           routes: {
             '/': (context) => const AuthScreen(),
-            '/dashboard_user': (context) => const UserDashboardScreen(),
-            '/dashboard_processor': (context) => const ProcessorDashboardScreen(),
-            '/dashboard_signee': (context) => const SigneeDashboardScreen(),
-            '/dashboard_admin': (context) => const AdminDashboardScreen(),
+            '/dashboard_user': (context) => const RouteGuard(
+              allowedRoles: [UserRole.user], child: UserDashboardScreen()),
+            '/dashboard_processor': (context) => const RouteGuard(
+              allowedRoles: [UserRole.processor], child: ProcessorDashboardScreen()),
+            '/dashboard_signee': (context) => const RouteGuard(
+              allowedRoles: [UserRole.signee], child: SigneeDashboardScreen()),
+            '/dashboard_admin': (context) => const RouteGuard(
+              allowedRoles: [UserRole.admin, UserRole.ictAdmin], child: AdminDashboardScreen()),
             '/tracking': (context) => const TrackingScreen(),
             '/scheduler': (context) => const SchedulerScreen(),
             '/profile': (context) => const ProfileScreen(),
