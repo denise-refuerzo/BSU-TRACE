@@ -7,7 +7,7 @@ const app = express();
 
 // Middleware to parse incoming JSON requests from Flutter
 app.use(express.json());
-
+app.use(express.urlencoded({ extended: true }));
 // Set up the Neon PostgreSQL connection
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
