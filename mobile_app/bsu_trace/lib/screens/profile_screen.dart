@@ -6,7 +6,7 @@ import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../services/session_manager.dart';
 import '../config.dart';
-import '../widgets/modals/change_password_modal.dart'; // Added Import
+import '../widgets/modals/change_password_modal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -18,13 +18,26 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _is2faEnabled = false;
   bool _isLoading = true;
+  bool _isSaving = false; // Tracks if the save request is running
+  
   Map<String, dynamic>? _userData;
   String _errorMessage = '';
+
+  // Controllers to capture edited text
+  final TextEditingController _fullNameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _fetchUserProfile();
+  }
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchUserProfile() async {
@@ -45,6 +58,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (response.statusCode == 200) {
         setState(() {
           _userData = json.decode(response.body);
+          
+          // Populate the text controllers with the fetched data
+          _fullNameController.text = _userData?['full_name'] ?? '';
+          _emailController.text = _userData?['uni_email'] ?? '';
+
           if (_userData != null && _userData!['two_fa_enabled'] != null) {
              _is2faEnabled = _userData!['two_fa_enabled'];
           }
@@ -61,6 +79,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _errorMessage = 'Could not connect to server.';
         _isLoading = false;
       });
+    }
+  }
+
+  // --- NEW: Save Function ---
+  Future<void> _saveProfileChanges() async {
+    final userId = SessionManager().userId;
+    if (userId == null) return;
+
+    setState(() => _isSaving = true);
+
+    final String url = '${AppConfig.baseUrl}/users/$userId';
+
+    try {
+      final response = await http.put(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'full_name': _fullNameController.text.trim(),
+          'uni_email': _emailController.text.trim(),
+          'two_fa_enabled': _is2faEnabled, // Saves the toggle switch state too!
+        }),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated successfully!'), backgroundColor: Colors.green),
+        );
+        // Refresh the profile to update the header Avatar and Name
+        _fetchUserProfile(); 
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update profile.'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connection error. Please try again.'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -83,15 +143,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileContent() {
-    final String fullName = _userData?['full_name'] ?? 'Unknown User';
-    final String email = _userData?['uni_email'] ?? 'No Email Provided';
     final String facultyId = _userData?['faculty_id'] ?? 'Not Assigned';
     final String accountType = _userData?['account_type'] ?? 'USER'; 
     final String department = _userData?['department_name'] ?? 'General Department';
 
+    // We generate initials based on the currently typed name in the controller, 
+    // or fallback to the fetched data
+    String currentName = _fullNameController.text.isNotEmpty ? _fullNameController.text : (_userData?['full_name'] ?? 'U');
     String initials = "U";
-    if (fullName.trim().isNotEmpty) {
-      List<String> nameParts = fullName.trim().split(' ');
+    if (currentName.trim().isNotEmpty) {
+      List<String> nameParts = currentName.trim().split(' ');
       if (nameParts.length > 1) {
         initials = '${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}'.toUpperCase();
       } else {
@@ -118,15 +179,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Text(initials, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.primaryRed))
                       ),
                     ),
-                    Container(
-                      padding: const EdgeInsets.all(6), 
-                      decoration: BoxDecoration(color: AppTheme.primaryRed, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)), 
-                      child: const Icon(Icons.edit, color: Colors.white, size: 14)
-                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                Text(fullName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                Text(currentName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                 Container(
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -134,12 +190,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Text(accountType.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                 ),
                 Text(department, style: const TextStyle(color: Colors.black54)),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), 
-                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(20)), 
-                  child: const Text('Active Status', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12))
-                ),
               ],
             ),
           ),
@@ -148,11 +198,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // --- PERSONAL INFO SECTION ---
           _buildSection(
             title: 'Personal Information',
-            actionText: 'Edit All',
             children: [
-              _buildTextField('Full Name', fullName, Icons.person_outline),
+              _buildTextField('Full Name', _fullNameController, Icons.person_outline),
               const SizedBox(height: 16),
-              _buildTextField('University Email', email, Icons.mail_outline),
+              _buildTextField('University Email', _emailController, Icons.mail_outline),
             ],
           ),
 
@@ -175,12 +224,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildSection(
             title: 'Account Security',
             children: [
-              // Updated Security Tile with onTap trigger
               _buildSecurityTile('Change Password', Icons.lock_outline, onTap: () {
-                showDialog(
-                  context: context, 
-                  builder: (context) => const ChangePasswordModal(),
-                );
+                showDialog(context: context, builder: (context) => const ChangePasswordModal());
               }),
               const Divider(),
               SwitchListTile(
@@ -201,15 +246,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () {}, 
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), 
-                  child: const Text('SAVE CHANGES', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                  onPressed: _isSaving ? null : _saveProfileChanges, // Triggers Save
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryRed, 
+                    padding: const EdgeInsets.symmetric(vertical: 16), 
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                  ), 
+                  child: _isSaving
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('SAVE CHANGES', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
                 )
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () {}, 
+                  onPressed: () => _fetchUserProfile(), // Cancel resets the data to original state
                   style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), 
                   child: const Text('CANCEL', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold))
                 )
@@ -234,21 +285,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // --- REUSABLE WIDGETS ---
   Widget _buildCard({required Widget child}) => Container(width: double.infinity, padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)), child: child);
   
-  Widget _buildSection({required String title, String? actionText, required List<Widget> children}) => Column(
+  Widget _buildSection({required String title, required List<Widget> children}) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), if(actionText != null) Text(actionText, style: const TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12))]),
+      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
       _buildCard(child: Column(children: children)),
       const SizedBox(height: 20),
     ],
   );
   
-  Widget _buildTextField(String label, String value, IconData icon) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)), const SizedBox(height: 8), TextFormField(initialValue: value, decoration: InputDecoration(suffixIcon: Icon(icon, color: Colors.black54), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))))]);
+  // Updated to use TextEditingController instead of hardcoded initial value
+  Widget _buildTextField(String label, TextEditingController controller, IconData icon) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start, 
+    children: [
+      Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)), 
+      const SizedBox(height: 8), 
+      TextFormField(
+        controller: controller, 
+        decoration: InputDecoration(
+          suffixIcon: Icon(icon, color: Colors.black54), 
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))
+        )
+      )
+    ]
+  );
   
   Widget _buildInfoCard(String title, String value) => Container(width: double.infinity, padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black54)), Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))]));
   
-  // Updated to accept onTap parameter
   Widget _buildSecurityTile(String title, IconData icon, {VoidCallback? onTap}) => ListTile(
     contentPadding: EdgeInsets.zero, 
     leading: Icon(icon, color: AppTheme.primaryRed), 

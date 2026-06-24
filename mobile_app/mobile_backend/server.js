@@ -1,4 +1,4 @@
-//require('dotenv').config();
+// require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -6,7 +6,9 @@ const bcrypt = require('bcrypt');
 
 const app = express();
 
-// Middleware
+// ==========================================
+// MIDDLEWARE & CONFIGURATION
+// ==========================================
 app.use(cors());
 app.use(express.json());
 
@@ -14,20 +16,23 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Required for Neon serverless
+    rejectUnauthorized: false // Required for Neon serverless connections
   }
 });
 
+// Test the database connection on startup
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Error acquiring client', err.stack);
   }
-  console.log('Successfully connected to Neon PostgreSQL database');
+  console.log('Successfully connected to the Neon PostgreSQL database');
   release();
 });
 
+
 // ==========================================
 // 1. LOGIN ENDPOINT
+// Route: POST /api/login
 // ==========================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
@@ -60,8 +65,10 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 2. FETCH USER PROFILE ENDPOINT
+// Route: GET /api/users/:id
 // ==========================================
 app.get('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
@@ -96,8 +103,44 @@ app.get('/api/users/:id', async (req, res) => {
   }
 });
 
+
 // ==========================================
-// 3. CHANGE PASSWORD ENDPOINT
+// 3. UPDATE USER PROFILE DETAILS ENDPOINT
+// Route: PUT /api/users/:id
+// ==========================================
+app.put('/api/users/:id', async (req, res) => {
+  const userId = req.params.id;
+  const { full_name, uni_email, two_fa_enabled } = req.body;
+
+  try {
+    const query = `
+      UPDATE public."User"
+      SET full_name = $1, 
+          uni_email = $2, 
+          two_fa_enabled = $3
+      WHERE u_id = $4
+      RETURNING u_id
+    `;
+    
+    const values = [full_name, uni_email, two_fa_enabled, userId];
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json({ message: 'Profile updated successfully' });
+
+  } catch (error) {
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// ==========================================
+// 4. CHANGE PASSWORD ENDPOINT
+// Route: PUT /api/users/:id/password
 // ==========================================
 app.put('/api/users/:id/password', async (req, res) => {
   const userId = req.params.id;
@@ -108,7 +151,7 @@ app.put('/api/users/:id/password', async (req, res) => {
   }
 
   try {
-    // 1. Fetch current hashed password
+    // Fetch current hashed password
     const userResult = await pool.query(
       'SELECT password FROM public."User" WHERE u_id = $1',
       [userId]
@@ -120,17 +163,17 @@ app.put('/api/users/:id/password', async (req, res) => {
 
     const currentHashedPassword = userResult.rows[0].password;
 
-    // 2. Verify current password
+    // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, currentHashedPassword);
     if (!isMatch) {
       return res.status(401).json({ error: 'Incorrect current password.' });
     }
 
-    // 3. Hash new password
+    // Hash new password
     const saltRounds = 10;
     const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
-    // 4. Update the database
+    // Update the database
     await pool.query(
       'UPDATE public."User" SET password = $1 WHERE u_id = $2',
       [newHashedPassword, userId]
@@ -144,8 +187,10 @@ app.put('/api/users/:id/password', async (req, res) => {
   }
 });
 
+
 // ==========================================
-// 4. FETCH DOCUMENTS ENDPOINT
+// 5. FETCH DOCUMENTS LIST ENDPOINT
+// Route: GET /api/documents
 // ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
@@ -173,10 +218,11 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+
 // ==========================================
-// START SERVER
+// SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`BSU-Trace API Server running on port ${PORT}`);
+  console.log(`API Server running on port ${PORT}`);
 });
