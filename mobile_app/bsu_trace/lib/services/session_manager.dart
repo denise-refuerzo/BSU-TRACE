@@ -1,4 +1,3 @@
-// lib/services/session_manager.dart
 import 'package:flutter/material.dart';
 import '../models/user_role.dart';
 
@@ -8,17 +7,22 @@ class SessionManager extends ChangeNotifier {
   SessionManager._internal();
 
   UserRole? _currentRole;
-  
-  UserRole? get currentRole => _currentRole;
-  bool get isLoggedIn => _currentRole != null;
+  int? _userId; // Add this to store the current user's ID
 
-  void login(UserRole role) {
+  UserRole? get currentRole => _currentRole;
+  int? get userId => _userId; // Add a getter
+  bool get isLoggedIn => _currentRole != null && _userId != null;
+
+  // Update the login method to accept the userId
+  void login(UserRole role, int userId) {
     _currentRole = role;
+    _userId = userId;
     notifyListeners();
   }
 
   void logout() {
     _currentRole = null;
+    _userId = null; // Clear the user ID on logout
     notifyListeners();
   }
 }
