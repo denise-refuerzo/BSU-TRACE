@@ -1,4 +1,3 @@
-// lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -7,6 +6,7 @@ import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../services/session_manager.dart';
 import '../config.dart';
+import '../widgets/modals/change_password_modal.dart'; // Added Import
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -42,13 +42,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final response = await http.get(Uri.parse(url));
 
-      // Helpful debugging logs
-      debugPrint('--- PROFILE FETCH DEBUG ---');
-      debugPrint('Attempting to fetch: $url');
-      debugPrint('Response Status Code: ${response.statusCode}');
-      debugPrint('Response Body: ${response.body}');
-      debugPrint('---------------------------');
-
       if (response.statusCode == 200) {
         setState(() {
           _userData = json.decode(response.body);
@@ -64,7 +57,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         });
       }
     } catch (e) {
-      debugPrint('Profile Fetch Error: $e');
       setState(() {
         _errorMessage = 'Could not connect to server.';
         _isLoading = false;
@@ -91,14 +83,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileContent() {
-    // Safely extract data with fallbacks
     final String fullName = _userData?['full_name'] ?? 'Unknown User';
     final String email = _userData?['uni_email'] ?? 'No Email Provided';
     final String facultyId = _userData?['faculty_id'] ?? 'Not Assigned';
     final String accountType = _userData?['account_type'] ?? 'USER'; 
     final String department = _userData?['department_name'] ?? 'General Department';
 
-    // Generate initials for the avatar (e.g., "John Doe" -> "JD")
     String initials = "U";
     if (fullName.trim().isNotEmpty) {
       List<String> nameParts = fullName.trim().split(' ');
@@ -185,7 +175,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildSection(
             title: 'Account Security',
             children: [
-              _buildSecurityTile('Change Password', Icons.history),
+              // Updated Security Tile with onTap trigger
+              _buildSecurityTile('Change Password', Icons.lock_outline, onTap: () {
+                showDialog(
+                  context: context, 
+                  builder: (context) => const ChangePasswordModal(),
+                );
+              }),
               const Divider(),
               SwitchListTile(
                 title: const Text('Two-Factor Authentication', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -194,7 +190,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 activeColor: AppTheme.primaryRed,
                 onChanged: (val) {
                   setState(() => _is2faEnabled = val);
-                  // Optionally add backend call here to update 2FA status
                 },
               ),
             ],
@@ -253,5 +248,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   
   Widget _buildInfoCard(String title, String value) => Container(width: double.infinity, padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black54)), Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))]));
   
-  Widget _buildSecurityTile(String title, IconData icon) => ListTile(contentPadding: EdgeInsets.zero, leading: Icon(icon, color: AppTheme.primaryRed), title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), trailing: const Icon(Icons.chevron_right));
+  // Updated to accept onTap parameter
+  Widget _buildSecurityTile(String title, IconData icon, {VoidCallback? onTap}) => ListTile(
+    contentPadding: EdgeInsets.zero, 
+    leading: Icon(icon, color: AppTheme.primaryRed), 
+    title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), 
+    trailing: const Icon(Icons.chevron_right),
+    onTap: onTap,
+  );
 }

@@ -1,4 +1,4 @@
-//require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -18,7 +18,6 @@ const pool = new Pool({
   }
 });
 
-// Test DB Connection on Startup
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Error acquiring client', err.stack);
@@ -28,19 +27,12 @@ pool.connect((err, client, release) => {
 });
 
 // ==========================================
-// API ENDPOINTS
+// 1. LOGIN ENDPOINT
 // ==========================================
-
-/**
- * 1. LOGIN ENDPOINT
- * Route: POST /api/login
- * Description: Authenticates a user and returns their u_id and a_id (Role ID)
- */
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    // Note: "User" is in quotes because it is capitalized in the schema
     const result = await pool.query(
       'SELECT u_id, password, a_id FROM public."User" WHERE username = $1',
       [username]
@@ -52,14 +44,11 @@ app.post('/api/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // Verify password using bcrypt (matching your seed data format: $2b$10$...)
     const isMatch = await bcrypt.compare(password, user.password);
-    
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Return the user ID and account ID for SessionManager role mapping
     res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id
@@ -71,11 +60,9 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-/**
- * 2. USER PROFILE ENDPOINT
- * Route: GET /api/users/:id
- * Description: Fetches detailed profile data for the ProfileScreen
- */
+// ==========================================
+// 2. FETCH USER PROFILE ENDPOINT
+// ==========================================
 app.get('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
 
@@ -109,14 +96,59 @@ app.get('/api/users/:id', async (req, res) => {
   }
 });
 
-/**
- * 3. DOCUMENTS LIST ENDPOINT
- * Route: GET /api/documents
- * Description: Fetches the live document feed for DocumentsScreen
- */
+// ==========================================
+// 3. CHANGE PASSWORD ENDPOINT
+// ==========================================
+app.put('/api/users/:id/password', async (req, res) => {
+  const userId = req.params.id;
+  const { currentPassword, newPassword } = req.body;
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Both current and new passwords are required.' });
+  }
+
+  try {
+    // 1. Fetch current hashed password
+    const userResult = await pool.query(
+      'SELECT password FROM public."User" WHERE u_id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    const currentHashedPassword = userResult.rows[0].password;
+
+    // 2. Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, currentHashedPassword);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Incorrect current password.' });
+    }
+
+    // 3. Hash new password
+    const saltRounds = 10;
+    const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // 4. Update the database
+    await pool.query(
+      'UPDATE public."User" SET password = $1 WHERE u_id = $2',
+      [newHashedPassword, userId]
+    );
+
+    res.status(200).json({ message: 'Password updated successfully.' });
+
+  } catch (error) {
+    console.error('Password Update Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 4. FETCH DOCUMENTS ENDPOINT
+// ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
-    // Joins the document lifecycle tables to produce the format expected by the Flutter UI
     const query = `
       SELECT 
         i.title, 
@@ -142,9 +174,8 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// SERVER INITIALIZATION
+// START SERVER
 // ==========================================
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`BSU-Trace API Server running on port ${PORT}`);
