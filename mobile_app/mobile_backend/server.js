@@ -351,6 +351,73 @@ app.get('/api/documents/:id/details', async (req, res) => {
 });
 
 // ==========================================
+// 9. FETCH PROCESS TYPES ENDPOINT (For Dropdowns)
+// Route: GET /api/process-types
+// ==========================================
+app.get('/api/process-types', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT p_id, process_name FROM public.process_type ORDER BY p_id ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Process Types Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 10. CREATE NEW DOCUMENT ENDPOINT
+// Route: POST /api/documents
+// ==========================================
+app.post('/api/documents', async (req, res) => {
+  const { u_id, title, p_id } = req.body;
+
+  if (!u_id || !title || !p_id) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  try {
+    // 1. Get the first office from the predefined route for this process type
+    const processResult = await pool.query(
+      'SELECT r.stop_1 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
+      [p_id]
+    );
+
+    if (processResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Process type not found' });
+    }
+
+    const firstOfficeId = processResult.rows[0].stop_1;
+
+    // 2. Generate a unique tracking code & estimated completion date (7 days from now)
+    const qrCode = `TRK-${Date.now()}-${Math.floor(Math.random() * 100)}`;
+    const edcDate = new Date();
+    edcDate.setDate(edcDate.getDate() + 7);
+
+    // 3. Insert into initial_document
+    const insertDocQuery = `
+      INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING ini_id
+    `;
+    const docResult = await pool.query(insertDocQuery, [p_id, u_id, title, edcDate, qrCode]);
+    const newIniId = docResult.rows[0].ini_id;
+
+    // 4. Create the first processed_document entry (s_id = 1 is 'pending') to initiate tracking
+    const insertTrackQuery = `
+      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
+      VALUES ($1, 1, $2, CURRENT_TIMESTAMP)
+    `;
+    await pool.query(insertTrackQuery, [newIniId, firstOfficeId]);
+
+    res.status(201).json({ message: 'Document created successfully', qr_code: qrCode });
+
+  } catch (error) {
+    console.error('Create Document Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;

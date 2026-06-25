@@ -10,7 +10,7 @@ import '../models/user_role.dart';
 import '../services/session_manager.dart';
 import '../config.dart';
 import 'document_details_screen.dart';
-import '../widgets/dialogs/tracking_document_dialog.dart';
+import '../../widgets/modals/new_document_modal.dart';
 
 class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key});
@@ -91,16 +91,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
           ],
         ),
       ),
-      floatingActionButton: SessionManager().currentRole == UserRole.user
-          ? FloatingActionButton(
-              onPressed: () => showDialog(
-                context: context,
-                builder: (context) => const TrackingDocumentDialog(),
-              ),
-              backgroundColor: AppTheme.primaryRed,
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          showDialog(
+            context: context,
+            builder: (context) => const NewDocumentModal(),
+          );
+        },
+        backgroundColor: const Color(0xFFB01A22),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
     );
   }
 
@@ -142,7 +142,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
     // Map Database Status to UI Nodes
     bool isCompleted = status == 'Completed';
-    bool step1Done = true; 
     bool step2Done = status == 'In Verification' || status == 'Signed' || status == 'Action Required' || isCompleted;
     bool step3Done = status == 'Signed' || isCompleted;
     bool step4Done = isCompleted;
