@@ -284,23 +284,33 @@ class _SchedulerContentState extends State<SchedulerContent> {
   }
 
   Widget _buildInventorySection() {
-    // Look up quantities from the database results
-    int chairsTotal = 400; // Fallbacks
-    int tablesTotal = 120;
+    // Default fallback values just in case the server is completely empty
+    int chairsTotal = 400; 
+    int chairsInUse = 0;
     
+    int tablesTotal = 120;
+    int tablesInUse = 0;
+    
+    // Parse the live data from the new backend endpoint
     for (var item in widget.inventory) {
-      if (item['asset_name'] == 'Stackable Chairs') chairsTotal = item['quantity'];
-      if (item['asset_name'] == 'Folding Table') tablesTotal = item['quantity'];
+      if (item['asset_name'] == 'Stackable Chairs') {
+        chairsTotal = item['total'] ?? chairsTotal;
+        chairsInUse = item['in_use'] ?? 0;
+      }
+      if (item['asset_name'] == 'Folding Table') {
+        tablesTotal = item['total'] ?? tablesTotal;
+        tablesInUse = item['in_use'] ?? 0;
+      }
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Logistics Inventory', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text('Logistics Inventory (Today)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        _buildInventoryBar('Folding Tables', (tablesTotal * 0.7).round(), tablesTotal), // Simulating some usage for UX
+        _buildInventoryBar('Folding Tables', tablesInUse, tablesTotal),
         const SizedBox(height: 12),
-        _buildInventoryBar('Stackable Chairs', (chairsTotal * 0.4).round(), chairsTotal),
+        _buildInventoryBar('Stackable Chairs', chairsInUse, chairsTotal),
       ],
     );
   }

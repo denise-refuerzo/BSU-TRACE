@@ -21,7 +21,24 @@ class _NewRequestModalState extends State<NewRequestModal> {
   TimeOfDay? _endTime;
 
   String _selectedResourceType = 'Vehicle';
-  final List<String> _resourceTypes = ['Vehicle', 'Multimedia Room', 'Gymnasium'];
+  
+  // Logic to determine if "Today" is selected
+  bool get _isToday {
+    if (_selectedDate == null) return false;
+    final now = DateTime.now();
+    return _selectedDate!.year == now.year && 
+           _selectedDate!.month == now.month && 
+           _selectedDate!.day == now.day;
+  }
+
+  // Dynamic list of resources based on date
+  List<String> get _resourceTypes {
+    List<String> types = ['Vehicle', 'Multimedia Room', 'Gymnasium'];
+    if (_isToday) {
+      types.addAll(['Stackable Chairs', 'Folding Table']);
+    }
+    return types;
+  }
 
   bool _isSubmitting = false;
 
@@ -36,7 +53,15 @@ class _NewRequestModalState extends State<NewRequestModal> {
         child: child!,
       ),
     );
-    if (picked != null) setState(() => _selectedDate = picked);
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+        // Safety: If date changes and the currently selected type is no longer valid, reset it
+        if (!_resourceTypes.contains(_selectedResourceType)) {
+          _selectedResourceType = 'Vehicle';
+        }
+      });
+    }
   }
 
   Future<void> _pickTime(bool isStart) async {
@@ -87,7 +112,7 @@ class _NewRequestModalState extends State<NewRequestModal> {
           'destination': _purposeController.text.trim(),
           'start_time': _formatTimeForDb(_startTime!),
           'end_time': _formatTimeForDb(_endTime!),
-          'asset_name': _selectedResourceType == 'Vehicle' ? 'Van' : _selectedResourceType,
+          'asset_name': _selectedResourceType, // Sends the specific type directly
         }),
       );
 
@@ -133,7 +158,6 @@ class _NewRequestModalState extends State<NewRequestModal> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- NEW: Header Row with Title and 'X' Close Button ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -202,17 +226,12 @@ class _NewRequestModalState extends State<NewRequestModal> {
             ),
             const SizedBox(height: 32),
 
-            // --- NEW: Cancel Button added beside Submit Button ---
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16), 
-                      side: BorderSide(color: Colors.grey.shade400), 
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                    ),
+                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                     child: const Text('Cancel', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
                   )
                 ),
@@ -220,12 +239,7 @@ class _NewRequestModalState extends State<NewRequestModal> {
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _isSubmitting ? null : _submitRequest,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primaryRed, 
-                      foregroundColor: Colors.white, 
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                    ),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                     child: _isSubmitting 
                       ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                       : const Text('Submit Request', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),

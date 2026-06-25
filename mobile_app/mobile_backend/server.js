@@ -445,18 +445,50 @@ app.get('/api/scheduler/bookings', async (req, res) => {
 });
 
 // ==========================================
-// 12. FETCH LOGISTICS INVENTORY
+// 12. FETCH LOGISTICS INVENTORY (UPDATED FOR LIVE USAGE)
 // Route: GET /api/scheduler/inventory
 // ==========================================
 app.get('/api/scheduler/inventory', async (req, res) => {
   try {
-    const query = `
+    // 1. Get the total capacity of assets from the database
+    const totalQuery = `
       SELECT asset_name, quantity 
       FROM public.asset_details 
       WHERE asset_name IN ('Stackable Chairs', 'Folding Table')
     `;
-    const result = await pool.query(query);
-    res.status(200).json(result.rows);
+    const totalResult = await pool.query(totalQuery);
+
+    // 2. Calculate items currently "in-use" for today's active reservations
+    // We sum up the expected_attendees from the gm_requirements table for today
+    const usageQuery = `
+      SELECT SUM(g.expected_attendees) as total_attendees
+      FROM public.bookings b
+      JOIN public.gm_requirements g ON b.booking_id = g.booking_id
+      WHERE b.reservation_date = CURRENT_DATE 
+      AND b.status IN ('Reserved', 'Confirmed')
+    `;
+    const usageResult = await pool.query(usageQuery);
+    const activeAttendees = parseInt(usageResult.rows[0].total_attendees) || 0;
+
+    // 3. Map the data together (Assuming 1 Chair per attendee, 1 Table per 4 attendees)
+    const inventoryData = totalResult.rows.map(item => {
+      let inUse = 0;
+      
+      if (item.asset_name === 'Stackable Chairs') {
+        inUse = activeAttendees;
+      } else if (item.asset_name === 'Folding Table') {
+        inUse = Math.ceil(activeAttendees / 4); // 4 people per table
+      }
+      
+      return {
+        asset_name: item.asset_name,
+        total: item.quantity,
+        // Prevent the progress bar from overflowing past 100% if overbooked
+        in_use: inUse > item.quantity ? item.quantity : inUse 
+      };
+    });
+
+    res.status(200).json(inventoryData);
   } catch (error) {
     console.error('Inventory Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
