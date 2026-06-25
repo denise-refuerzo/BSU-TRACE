@@ -144,7 +144,7 @@ class AddNewAssetModal extends StatelessWidget {
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.black54, fontSize: 14),
         filled: true,
-        fillColor: Colors.red.shade50.withOpacity(0.5), // Light pink fill
+        fillColor: Colors.red.shade50.withValues(alpha: 0.5), // Light pink fill
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -162,7 +162,7 @@ class AddNewAssetModal extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.red.shade50.withOpacity(0.5),
+        color: Colors.red.shade50.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.red.shade100),
       ),

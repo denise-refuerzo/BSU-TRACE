@@ -218,6 +218,43 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+// ==========================================
+// 6. FETCH USER DASHBOARD STATS ENDPOINT
+// Route: GET /api/users/:id/dashboard-stats
+// ==========================================
+app.get('/api/users/:id/dashboard-stats', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const query = `
+      SELECT 
+        COUNT(i.ini_id) AS total_docs,
+        SUM(CASE WHEN s.current_status = 'pending' THEN 1 ELSE 0 END) AS pending_docs,
+        SUM(CASE WHEN s.current_status = 'Completed' THEN 1 ELSE 0 END) AS completed_docs,
+        -- Assuming 'Archived' logic, otherwise defaults to 0
+        SUM(CASE WHEN s.current_status = 'Archived' THEN 1 ELSE 0 END) AS archived_docs
+      FROM public.initial_document i
+      LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+      LEFT JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.u_id = $1
+    `;
+
+    const result = await pool.query(query, [userId]);
+    
+    // If user has no documents, SUM returns null, so we default to 0
+    const stats = result.rows[0];
+    res.status(200).json({
+      total_docs: stats.total_docs || 0,
+      pending_docs: stats.pending_docs || 0,
+      completed_docs: stats.completed_docs || 0,
+      archived_docs: stats.archived_docs || 0
+    });
+
+  } catch (error) {
+    console.error('Dashboard Stats Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ==========================================
 // SERVER INITIALIZATION

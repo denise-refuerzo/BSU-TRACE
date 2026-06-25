@@ -1,13 +1,78 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/new_document_modal.dart';
-// Add these imports
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
+import '../../config.dart';
 
-class UserDashboardScreen extends StatelessWidget {
+class UserDashboardScreen extends StatefulWidget {
   const UserDashboardScreen({super.key});
+
+  @override
+  State<UserDashboardScreen> createState() => _UserDashboardScreenState();
+}
+
+class _UserDashboardScreenState extends State<UserDashboardScreen> {
+  bool _isLoading = true;
+  String _userName = 'Loading...';
+  String _userRoleDept = 'Loading...';
+  
+  // Dashboard Stats
+  int _totalDocs = 0;
+  int _pendingDocs = 0;
+  int _archivedDocs = 0;
+  int _completedDocs = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  Future<void> _fetchDashboardData() async {
+    final userId = SessionManager().userId;
+
+    if (userId == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      // 1. Fetch User Profile
+      final profileResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId'));
+      
+      // 2. Fetch User Stats (Requires the new backend endpoint provided below)
+      final statsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/dashboard-stats'));
+
+      if (profileResponse.statusCode == 200) {
+        final profileData = json.decode(profileResponse.body);
+        setState(() {
+          _userName = profileData['full_name'] ?? 'Unknown User';
+          _userRoleDept = '${profileData['account_type']} • ${profileData['department_name']}';
+        });
+      }
+
+      if (statsResponse.statusCode == 200) {
+        final statsData = json.decode(statsResponse.body);
+        setState(() {
+          _totalDocs = int.tryParse(statsData['total_docs'].toString()) ?? 0;
+          _pendingDocs = int.tryParse(statsData['pending_docs'].toString()) ?? 0;
+          _archivedDocs = int.tryParse(statsData['archived_docs'].toString()) ?? 0;
+          _completedDocs = int.tryParse(statsData['completed_docs'].toString()) ?? 0;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching dashboard data: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,11 +91,14 @@ class UserDashboardScreen extends StatelessWidget {
         actions: buildAppBarActions(context)
       ),
       drawer: const AppDrawer(),
-      body: SingleChildScrollView(
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: Color(0xFFB01A22)))
+        : SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // PROFILE SECTION
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -39,15 +107,29 @@ class UserDashboardScreen extends StatelessWidget {
                   children: [
                     const Text('Institutional Profile', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
-                    Row(children: const [Icon(Icons.person_outline, size: 16, color: Colors.black54), SizedBox(width: 4), Text('John Doe', style: TextStyle(color: Colors.black54))]),
+                    Row(children: [
+                      const Icon(Icons.person_outline, size: 16, color: Colors.black54), 
+                      const SizedBox(width: 4), 
+                      Text(_userName, style: const TextStyle(color: Colors.black54))
+                    ]),
                     const SizedBox(height: 4),
-                    Row(children: const [Icon(Icons.work_outline, size: 16, color: Colors.black54), SizedBox(width: 4), Text('Faculty • Academic Department', style: TextStyle(color: Colors.black54, fontSize: 12))]),
+                    Row(children: [
+                      const Icon(Icons.work_outline, size: 16, color: Colors.black54), 
+                      const SizedBox(width: 4), 
+                      Text(_userRoleDept, style: const TextStyle(color: Colors.black54, fontSize: 12))
+                    ]),
                   ],
                 ),
-                Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.account_balance, color: Color(0xFFB01A22), size: 32))
+                Container(
+                  padding: const EdgeInsets.all(12), 
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), 
+                  child: const Icon(Icons.account_balance, color: Color(0xFFB01A22), size: 32)
+                )
               ],
             ),
             const SizedBox(height: 24),
+            
+            // STATISTICS GRID
             GridView.count(
               crossAxisCount: 2,
               shrinkWrap: true,
@@ -56,13 +138,15 @@ class UserDashboardScreen extends StatelessWidget {
               crossAxisSpacing: 12,
               childAspectRatio: 1.8,
               children: [
-                _buildStatCard('TOTAL DOCS', '1,284', Icons.folder_open, const Color(0xFFB01A22)),
-                _buildStatCard('PENDING', '12', Icons.pending_actions, const Color(0xFFB01A22)),
-                _buildStatCard('ARCHIVED', '450', Icons.archive_outlined, Colors.blueGrey),
-                _buildStatCard('COMPLETED', '822', Icons.check_circle_outline, Colors.green),
+                _buildStatCard('TOTAL DOCS', _totalDocs.toString(), Icons.folder_open, const Color(0xFFB01A22)),
+                _buildStatCard('PENDING', _pendingDocs.toString(), Icons.pending_actions, const Color(0xFFB01A22)),
+                _buildStatCard('ARCHIVED', _archivedDocs.toString(), Icons.archive_outlined, Colors.blueGrey),
+                _buildStatCard('COMPLETED', _completedDocs.toString(), Icons.check_circle_outline, Colors.green),
               ],
             ),
             const SizedBox(height: 24),
+            
+            // ACTIVE SUBMISSION FLOW
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
@@ -76,7 +160,12 @@ class UserDashboardScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8)),
-                    child: const Text('Current: Waiting for Department Head approval on "Quarterly Report Q3".', style: TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)),
+                    child: Text(
+                      _pendingDocs > 0 
+                        ? 'Current: You have $_pendingDocs document(s) pending review.' 
+                        : 'No pending active submissions at the moment.', 
+                      style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)
+                    ),
                   )
                 ],
               ),
@@ -119,7 +208,7 @@ class UserDashboardScreen extends StatelessWidget {
       children: [
         _buildStepNode('Draft', isActive: true, isCompleted: true),
         Expanded(child: Container(height: 4, color: const Color(0xFFB01A22))),
-        _buildStepNode('Review', isActive: true, isCurrent: true),
+        _buildStepNode('Review', isActive: true, isCurrent: _pendingDocs > 0),
         Expanded(child: Container(height: 4, color: Colors.grey.shade300)),
         _buildStepNode('Approval', isActive: false),
         Expanded(child: Container(height: 4, color: Colors.grey.shade300)),
