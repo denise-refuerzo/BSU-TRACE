@@ -171,7 +171,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
           const SizedBox(height: 4),
           Text(title, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
           const SizedBox(height: 24),
-          _buildTimelineNode('SUBMITTED', step1Done ? 'Completed' : 'Pending', Icons.check, step1Done, step1Done),
+          _buildTimelineNode('SUBMITTED', 'Completed', Icons.check, true, true),
           _buildTimelineNode('PAYMENT VERIFIED', step2Done ? 'Completed' : (step2Active ? 'In processing...' : 'Pending'), Icons.verified_outlined, step2Done, step2Done, isActive: step2Active),
           _buildTimelineNode('REGISTRAR REVIEW', step3Done ? 'Completed' : (step3Active ? 'In processing...' : 'Pending'), Icons.description_outlined, step3Done, step3Done, isActive: step3Active),
           _buildTimelineNode('FINAL APPROVAL', step4Done ? 'Completed' : (step4Active ? 'In processing...' : 'Pending'), Icons.pin_drop_outlined, step4Done, step4Done, isLast: true, isActive: step4Active),
