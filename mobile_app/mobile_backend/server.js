@@ -464,6 +464,66 @@ app.get('/api/scheduler/inventory', async (req, res) => {
 });
 
 // ==========================================
+// 13. CREATE NEW BOOKING (SCHEDULER)
+// Route: POST /api/scheduler/bookings
+// ==========================================
+app.post('/api/scheduler/bookings', async (req, res) => {
+  const { u_id, booking_type, reservation_date, purpose, destination, start_time, end_time, asset_name } = req.body;
+
+  try {
+    // Start a SQL Transaction. If any step fails, it cancels everything.
+    await pool.query('BEGIN'); 
+
+    // 1. Get the user's exact department from the database
+    const deptResult = await pool.query(
+      'SELECT d.department_name FROM public."User" u JOIN public.department d ON u.d_id = d.d_id WHERE u.u_id = $1',
+      [u_id]
+    );
+    const department = deptResult.rows.length > 0 ? deptResult.rows[0].department_name : 'General';
+
+    // 2. Insert into the main Bookings table
+    const bookingQuery = `
+      INSERT INTO public.bookings (u_id, booking_type, department, reservation_date, purpose, status)
+      VALUES ($1, $2, $3, $4, $5, 'Reserved')
+      RETURNING booking_id;
+    `;
+    const bookingResult = await pool.query(bookingQuery, [u_id, booking_type, department, reservation_date, purpose]);
+    const bookingId = bookingResult.rows[0].booking_id;
+
+    // 3. Find the correct Asset ID based on what was requested (Van, Gymnasium, Multimedia Room)
+    const assetQuery = `SELECT asd_id FROM public.asset_details WHERE asset_name = $1 LIMIT 1;`;
+    const assetResult = await pool.query(assetQuery, [asset_name]);
+    const asd_id = assetResult.rows.length > 0 ? assetResult.rows[0].asd_id : 1; 
+
+    // 4. Insert into specific resource requirement tables
+    if (booking_type === 'Vehicle') {
+      const vQuery = `
+        INSERT INTO public.vehicle_requirements (asd_id, sv_id, booking_id, destination, passenger_count, pick_up_time, drop_off_time)
+        VALUES ($1, 3, $2, $3, 1, $4, $5);
+      `;
+      // sv_id = 3 corresponds to 'Both' (Pick-up and Drop-off) in your seed data
+      await pool.query(vQuery, [asd_id, bookingId, destination || purpose, start_time, end_time]);
+    } else {
+      const gmQuery = `
+        INSERT INTO public.gm_requirements (asd_id, booking_id, start_time, end_time, expected_attendees)
+        VALUES ($1, $2, $3, $4, 10);
+      `;
+      await pool.query(gmQuery, [asd_id, bookingId, start_time, end_time]);
+    }
+
+    // Save the transaction
+    await pool.query('COMMIT'); 
+    res.status(201).json({ message: 'Booking created successfully' });
+
+  } catch (error) {
+    // Cancel the transaction if an error occurred
+    await pool.query('ROLLBACK'); 
+    console.error('Create Booking Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
