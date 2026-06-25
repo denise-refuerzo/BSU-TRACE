@@ -16,12 +16,18 @@ class NewDocumentModal extends StatefulWidget {
 class _NewDocumentModalState extends State<NewDocumentModal> {
   final TextEditingController _titleController = TextEditingController();
   
+  // Replace the String list with TextEditingControllers for live editing
+  final List<TextEditingController> _stopControllers = [
+    TextEditingController(text: 'Department Head'),
+    TextEditingController(text: 'Dean\'s Office'),
+  ];
+  
   List<dynamic> _processTypes = [];
   int? _selectedProcessId;
   
   bool _isVerified = false;
   bool _isSubmitting = false;
-  List<String> _stops = ['Department Head', 'Dean\'s Office'];
+  bool _isLoadingProcesses = true; 
 
   @override
   void initState() {
@@ -32,26 +38,38 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   @override
   void dispose() {
     _titleController.dispose();
+    // Clean up all controllers to prevent memory leaks
+    for (var controller in _stopControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  // Fetch predefined process formulas from the database
   Future<void> _fetchProcessTypes() async {
     try {
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types'));
       if (response.statusCode == 200) {
         setState(() {
           _processTypes = json.decode(response.body);
+          _isLoadingProcesses = false;
         });
+      } else {
+        throw Exception('Server error');
       }
     } catch (e) {
       debugPrint('Error fetching process types: $e');
+      setState(() {
+        _isLoadingProcesses = false;
+        _processTypes = [
+          {'p_id': 1, 'process_name': 'Reimbursement of Expenses'},
+          {'p_id': 2, 'process_name': 'Purchase Request (PR)'},
+          {'p_id': 3, 'process_name': 'Liquidation of Cash Advances'}
+        ];
+      });
     }
   }
 
-  // Handle document submission
   Future<void> _submitDocument() async {
-    // 1. Validation Check
     if (_titleController.text.trim().isEmpty || _selectedProcessId == null || !_isVerified) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill all fields and verify the document.', style: TextStyle(color: Colors.white)), backgroundColor: Colors.red),
@@ -65,7 +83,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     setState(() => _isSubmitting = true);
 
     try {
-      // 2. Network Post
       final response = await http.post(
         Uri.parse('${AppConfig.baseUrl}/documents'),
         headers: {'Content-Type': 'application/json'},
@@ -73,11 +90,12 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           'u_id': userId,
           'title': _titleController.text.trim(),
           'p_id': _selectedProcessId,
+          // If you ever need to send the custom stops to your database, you can extract them like this:
+          // 'custom_routes': _stopControllers.map((c) => c.text.trim()).toList(),
         }),
       );
 
       if (response.statusCode == 201) {
-        // Success: Close the modal
         if (mounted) {
           Navigator.pop(context, true); 
           ScaffoldMessenger.of(context).showSnackBar(
@@ -85,7 +103,9 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           );
         }
       } else {
-        throw Exception('Failed to create document');
+        // This will grab the exact error text from the PostgreSQL/Node server!
+        final errorResponse = json.decode(response.body);
+        throw Exception(errorResponse['error'] ?? 'Server error ${response.statusCode}');
       }
     } catch (e) {
       if (mounted) {
@@ -98,7 +118,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     }
   }
 
-  // Helper to dynamically calculate Est Completion (7 days out)
   String _getEstimatedDate() {
     final date = DateTime.now().add(const Duration(days: 7));
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -142,10 +161,18 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                       children: [
                         const Text('MANUAL ROUTING STOPS', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
                         const SizedBox(height: 12),
-                        ...List.generate(_stops.length, (index) => _buildRoutingStop(index + 1, _stops[index])),
+                        
+                        // Dynamically map routing stops via the controllers list
+                        ...List.generate(_stopControllers.length, (index) => _buildRoutingStop(index)),
+                        
                         const SizedBox(height: 16),
                         GestureDetector(
-                          onTap: () => setState(() => _stops.add('New Office')),
+                          onTap: () {
+                            setState(() {
+                              // Insert a blank editable field when user taps Add Custom Stop
+                              _stopControllers.add(TextEditingController());
+                            });
+                          },
                           child: Row(children: const [Icon(Icons.add_circle_outline, color: AppTheme.primaryRed, size: 16), SizedBox(width: 8), Text('Add Custom Stop', style: TextStyle(color: AppTheme.primaryRed, fontSize: 13, fontWeight: FontWeight.bold))])
                         )
                       ]
@@ -153,11 +180,9 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                   ),
                   const SizedBox(height: 20),
                   
-                  // Estimated Completion
                   Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(8)), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('EST. COMPLETION', style: TextStyle(color: Color(0xFF902020), fontSize: 10, fontWeight: FontWeight.bold)), Text(_getEstimatedDate(), style: const TextStyle(color: Color(0xFF902020), fontWeight: FontWeight.bold, fontSize: 13))])),
                   const SizedBox(height: 20),
                   
-                  // Verification
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [SizedBox(width: 24, height: 24, child: Checkbox(value: _isVerified, activeColor: AppTheme.primaryRed, side: BorderSide(color: Colors.grey.shade400), onChanged: (value) { setState(() { _isVerified = value ?? false; }); })), const SizedBox(width: 12), const Expanded(child: Text('I verify that all attached information is accurate and follows institutional guidelines.', style: TextStyle(color: Colors.black87, fontSize: 13, height: 1.4)))])
                 ],
               ),
@@ -170,7 +195,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
               Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: BorderSide(color: Colors.grey.shade400), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), child: const Text('Cancel', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)))), 
               const SizedBox(width: 16), 
               
-              // Animated Submit Button
               Expanded(
                 child: ElevatedButton(
                   onPressed: _isSubmitting ? null : _submitDocument, 
@@ -193,26 +217,73 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   
   Widget _buildTextField(String hint) => TextField(controller: _titleController, decoration: InputDecoration(hintText: hint, hintStyle: const TextStyle(color: Colors.grey), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.red.shade100)), focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primaryRed)), filled: true, fillColor: const Color(0xFFFFF9F9)));
   
-  // Converted to an actual functional Dropdown using your existing design
-  Widget _buildDropdown(String hint) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), 
-    decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)), 
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<int>(
-        isExpanded: true,
-        hint: Text(hint, style: const TextStyle(color: Colors.black87)),
-        icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-        value: _selectedProcessId,
-        items: _processTypes.map<DropdownMenuItem<int>>((dynamic process) {
-          return DropdownMenuItem<int>(
-            value: process['p_id'],
-            child: Text(process['process_name'], overflow: TextOverflow.ellipsis),
-          );
-        }).toList(),
-        onChanged: (int? val) => setState(() => _selectedProcessId = val),
+  Widget _buildDropdown(String hint) {
+    if (_isLoadingProcesses) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
+        child: const Text('Loading processes...', style: TextStyle(color: Colors.grey)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), 
+      decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)), 
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<int>(
+          isExpanded: true,
+          hint: Text(hint, style: const TextStyle(color: Colors.black87)),
+          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
+          value: _selectedProcessId,
+          items: _processTypes.map<DropdownMenuItem<int>>((dynamic process) {
+            return DropdownMenuItem<int>(
+              value: int.tryParse(process['p_id'].toString()),
+              child: Text(process['process_name'].toString(), overflow: TextOverflow.ellipsis),
+            );
+          }).toList(),
+          onChanged: (int? val) => setState(() => _selectedProcessId = val),
+        )
       )
-    )
-  );
+    );
+  }
   
-  Widget _buildRoutingStop(int number, String label) => Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)), child: Row(children: [CircleAvatar(radius: 12, backgroundColor: AppTheme.primaryRed, child: Text('$number', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))), const SizedBox(width: 16), Expanded(child: Text(label, style: const TextStyle(color: Colors.black87, fontSize: 13))), const Icon(Icons.delete_outline, color: Colors.black54, size: 18)]));
+  // This is now an interactive text field!
+  Widget _buildRoutingStop(int index) {
+    int number = index + 1;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8), 
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), // Adjusted padding for TextField
+      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)), 
+      child: Row(
+        children: [
+          CircleAvatar(radius: 12, backgroundColor: AppTheme.primaryRed, child: Text('$number', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))), 
+          const SizedBox(width: 16), 
+          
+          Expanded(
+            child: TextField(
+              controller: _stopControllers[index],
+              style: const TextStyle(color: Colors.black87, fontSize: 13),
+              decoration: const InputDecoration(
+                hintText: 'Enter office name...',
+                hintStyle: TextStyle(color: Colors.grey),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ), 
+          
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                // Dispose controller before removing to avoid memory leaks
+                _stopControllers[index].dispose();
+                _stopControllers.removeAt(index);
+              });
+            },
+            child: const Icon(Icons.delete_outline, color: Colors.red, size: 18)
+          )
+        ]
+      )
+    );
+  }
 }

@@ -418,6 +418,52 @@ app.post('/api/documents', async (req, res) => {
 });
 
 // ==========================================
+// 11. FETCH ALL BOOKINGS FOR SCHEDULER
+// Route: GET /api/scheduler/bookings
+// ==========================================
+app.get('/api/scheduler/bookings', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+          b.booking_id, b.booking_type, b.department, b.reservation_date, b.purpose, b.status,
+          u.full_name AS requestor,
+          COALESCE(g.start_time, v.pick_up_time) AS start_time,
+          COALESCE(g.end_time, v.drop_off_time) AS end_time,
+          v.destination
+      FROM public.bookings b
+      JOIN public."User" u ON b.u_id = u.u_id
+      LEFT JOIN public.gm_requirements g ON b.booking_id = g.booking_id
+      LEFT JOIN public.vehicle_requirements v ON b.booking_id = v.booking_id
+      ORDER BY b.reservation_date ASC, start_time ASC;
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Scheduler Bookings Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 12. FETCH LOGISTICS INVENTORY
+// Route: GET /api/scheduler/inventory
+// ==========================================
+app.get('/api/scheduler/inventory', async (req, res) => {
+  try {
+    const query = `
+      SELECT asset_name, quantity 
+      FROM public.asset_details 
+      WHERE asset_name IN ('Stackable Chairs', 'Folding Table')
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Inventory Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;

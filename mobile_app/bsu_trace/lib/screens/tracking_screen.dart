@@ -1,16 +1,15 @@
-// lib/screens/tracking_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:async'; // <--- NEW: Import Async for the Timer
 import 'package:http/http.dart' as http;
 
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../theme/app_theme.dart';
-import '../models/user_role.dart';
 import '../services/session_manager.dart';
 import '../config.dart';
+import '../widgets/modals/new_document_modal.dart';
 import 'document_details_screen.dart';
-import '../../widgets/modals/new_document_modal.dart';
 
 class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key});
@@ -23,30 +22,44 @@ class _TrackingScreenState extends State<TrackingScreen> {
   bool _isLoading = true;
   List<dynamic> _recentDocuments = [];
   Map<String, dynamic>? _liveDocument;
+  
+  Timer? _syncTimer; // <--- NEW: Declare the timer
 
   @override
   void initState() {
     super.initState();
+    // 1. Initial load
     _fetchTrackingData();
+    
+    // 2. Start background sync
+    _syncTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _fetchTrackingData(isBackground: true);
+    });
   }
 
-  Future<void> _fetchTrackingData() async {
+  @override
+  void dispose() {
+    // Destroy the timer when the user navigates away
+    _syncTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _fetchTrackingData({bool isBackground = false}) async {
     final userId = SessionManager().userId;
     if (userId == null) {
-      setState(() => _isLoading = false);
+      if (!isBackground && mounted) setState(() => _isLoading = false);
       return;
     }
 
     try {
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
       
-      if (response.statusCode == 200) {
+      if (response.statusCode == 200 && mounted) {
         final List<dynamic> data = json.decode(response.body);
         
         setState(() {
           _recentDocuments = data;
           
-          // Grab the most recently updated active document for the Tracking Card
           if (data.isNotEmpty) {
             _liveDocument = data.firstWhere(
               (doc) => doc['status'] != 'Completed',
@@ -58,7 +71,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
     } catch (e) {
       debugPrint('Error fetching tracking data: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (!isBackground && mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 

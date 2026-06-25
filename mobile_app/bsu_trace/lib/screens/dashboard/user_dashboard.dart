@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'dart:async';
 
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
@@ -21,34 +22,46 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   String _userName = 'Loading...';
   String _userRoleDept = 'Loading...';
   
-  // Dashboard Stats
   int _totalDocs = 0;
   int _pendingDocs = 0;
   int _archivedDocs = 0;
   int _completedDocs = 0;
 
+  Timer? _syncTimer; // <--- NEW: Declare the timer
+
   @override
   void initState() {
     super.initState();
-    _fetchDashboardData();
+    // 1. Initial load (shows spinner)
+    _fetchDashboardData(); 
+    
+    // 2. Start the background sync (every 10 seconds)
+    _syncTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _fetchDashboardData(isBackground: true);
+    });
   }
 
-  Future<void> _fetchDashboardData() async {
+  @override
+  void dispose() {
+    // CRITICAL: Always cancel the timer when leaving the screen to prevent memory leaks!
+    _syncTimer?.cancel();
+    super.dispose();
+  }
+
+  // Modified to accept isBackground flag
+  Future<void> _fetchDashboardData({bool isBackground = false}) async {
     final userId = SessionManager().userId;
 
     if (userId == null) {
-      setState(() => _isLoading = false);
+      if (!isBackground && mounted) setState(() => _isLoading = false);
       return;
     }
 
     try {
-      // 1. Fetch User Profile
       final profileResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId'));
-      
-      // 2. Fetch User Stats (Requires the new backend endpoint provided below)
       final statsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/dashboard-stats'));
 
-      if (profileResponse.statusCode == 200) {
+      if (profileResponse.statusCode == 200 && mounted) {
         final profileData = json.decode(profileResponse.body);
         setState(() {
           _userName = profileData['full_name'] ?? 'Unknown User';
@@ -56,7 +69,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         });
       }
 
-      if (statsResponse.statusCode == 200) {
+      if (statsResponse.statusCode == 200 && mounted) {
         final statsData = json.decode(statsResponse.body);
         setState(() {
           _totalDocs = int.tryParse(statsData['total_docs'].toString()) ?? 0;
@@ -68,9 +81,10 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     } catch (e) {
       debugPrint('Error fetching dashboard data: $e');
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      // Only remove the loading screen on the initial load
+      if (!isBackground && mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
