@@ -257,6 +257,43 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
 });
 
 // ==========================================
+// 7. FETCH USER-SPECIFIC DOCUMENTS ENDPOINT
+// Route: GET /api/users/:id/documents
+// ==========================================
+app.get('/api/users/:id/documents', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const query = `
+      WITH RankedDocs AS (
+        SELECT 
+          i.ini_id,
+          i.title,
+          p.process_name AS form_type,
+          o.office_name AS current_location,
+          s.current_status AS status,
+          pd.time_in AS updated_at,
+          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
+        FROM public.initial_document i
+        LEFT JOIN public.process_type p ON i.p_id = p.p_id
+        LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+        LEFT JOIN public.status s ON pd.s_id = s.s_id
+        LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
+        WHERE i.u_id = $1
+      )
+      SELECT * FROM RankedDocs WHERE rn = 1 ORDER BY updated_at DESC;
+    `;
+
+    const result = await pool.query(query, [userId]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('User Documents Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;

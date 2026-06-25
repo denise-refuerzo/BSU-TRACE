@@ -1,14 +1,66 @@
 // lib/screens/tracking_screen.dart
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../theme/app_theme.dart';
 import '../models/user_role.dart';
-import '../services/session_manager.dart'; // Import SessionManager
+import '../services/session_manager.dart';
+import '../config.dart';
 import 'document_details_screen.dart';
+import '../widgets/dialogs/tracking_document_dialog.dart';
 
-class TrackingScreen extends StatelessWidget {
+class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key});
+
+  @override
+  State<TrackingScreen> createState() => _TrackingScreenState();
+}
+
+class _TrackingScreenState extends State<TrackingScreen> {
+  bool _isLoading = true;
+  List<dynamic> _recentDocuments = [];
+  Map<String, dynamic>? _liveDocument;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTrackingData();
+  }
+
+  Future<void> _fetchTrackingData() async {
+    final userId = SessionManager().userId;
+    if (userId == null) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        
+        setState(() {
+          _recentDocuments = data;
+          
+          // Grab the most recently updated active document for the Tracking Card
+          if (data.isNotEmpty) {
+            _liveDocument = data.firstWhere(
+              (doc) => doc['status'] != 'Completed',
+              orElse: () => data.first,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching tracking data: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +70,9 @@ class TrackingScreen extends StatelessWidget {
         actions: buildAppBarActions(context),
       ),
       drawer: const AppDrawer(),
-      body: SingleChildScrollView(
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+        : SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -36,7 +90,6 @@ class TrackingScreen extends StatelessWidget {
           ],
         ),
       ),
-      // Logic updated to use SessionManager
       floatingActionButton: SessionManager().currentRole == UserRole.user
           ? FloatingActionButton(
               onPressed: () => showDialog(
@@ -74,6 +127,29 @@ class TrackingScreen extends StatelessWidget {
   }
 
   Widget _buildTrackingCard() {
+    if (_liveDocument == null) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        width: double.infinity,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
+        child: const Text('No active documents currently being tracked.', style: TextStyle(color: Colors.grey)),
+      );
+    }
+
+    String title = _liveDocument!['title'] ?? 'Unknown Document';
+    String status = _liveDocument!['status'] ?? 'pending';
+
+    // Map Database Status to UI Nodes
+    bool isCompleted = status == 'Completed';
+    bool step1Done = true; 
+    bool step2Done = status == 'In Verification' || status == 'Signed' || status == 'Action Required' || isCompleted;
+    bool step3Done = status == 'Signed' || isCompleted;
+    bool step4Done = isCompleted;
+
+    bool step2Active = status == 'pending';
+    bool step3Active = status == 'In Verification' || status == 'Action Required';
+    bool step4Active = status == 'Signed';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
@@ -84,16 +160,20 @@ class TrackingScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Live Document Tracking', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)), child: const Text('IN PROGRESS', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
+                decoration: BoxDecoration(color: isCompleted ? Colors.green : AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)), 
+                child: Text(isCompleted ? 'COMPLETED' : 'IN PROGRESS', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))
+              ),
             ],
           ),
           const SizedBox(height: 4),
-          const Text('Transcript_Request_#8842.pdf', style: TextStyle(color: Colors.grey)),
+          Text(title, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
           const SizedBox(height: 24),
-          _buildTimelineNode('SUBMITTED', 'Oct 24, 09:15 AM', Icons.check, true, true),
-          _buildTimelineNode('PAYMENT VERIFIED', 'Oct 24, 10:30 AM', Icons.check, true, true),
-          _buildTimelineNode('REGISTRAR REVIEW', 'In processing...', Icons.description_outlined, true, false, isActive: true),
-          _buildTimelineNode('FINAL APPROVAL', 'Pending', Icons.pin_drop_outlined, false, false, isLast: true),
+          _buildTimelineNode('SUBMITTED', step1Done ? 'Completed' : 'Pending', Icons.check, step1Done, step1Done),
+          _buildTimelineNode('PAYMENT VERIFIED', step2Done ? 'Completed' : (step2Active ? 'In processing...' : 'Pending'), Icons.verified_outlined, step2Done, step2Done, isActive: step2Active),
+          _buildTimelineNode('REGISTRAR REVIEW', step3Done ? 'Completed' : (step3Active ? 'In processing...' : 'Pending'), Icons.description_outlined, step3Done, step3Done, isActive: step3Active),
+          _buildTimelineNode('FINAL APPROVAL', step4Done ? 'Completed' : (step4Active ? 'In processing...' : 'Pending'), Icons.pin_drop_outlined, step4Done, step4Done, isLast: true, isActive: step4Active),
         ],
       ),
     );
@@ -130,56 +210,34 @@ class TrackingScreen extends StatelessWidget {
             decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: const BorderRadius.vertical(top: Radius.circular(8))),
             child: Row(children: const [Expanded(child: Text('DOCUMENT NAME', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))), Expanded(child: Text('CURRENT LOCATION', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)))]),
           ),
-          _buildSubmissionRow(context, 'Study_Leave_For...', 'HR Department'),
-          _buildSubmissionRow(context, 'Grad_Clearance_...', 'Faculty Office'),
-          _buildSubmissionRow(context, 'Transcript_Offici...', 'Released'),
+          if (_recentDocuments.isEmpty)
+            const Padding(padding: EdgeInsets.all(16.0), child: Text("No documents found.", style: TextStyle(color: Colors.grey))),
+          ..._recentDocuments.map((doc) => _buildSubmissionRow(
+            context, 
+            doc['title'] ?? 'Unknown', 
+            doc['current_location'] ?? 'Pending Route'
+          )),
         ],
       ),
     );
   }
 
   Widget _buildSubmissionRow(BuildContext context, String name, String location) {
+    // Truncates long document names just like your original static text ("Transcript_Offici...")
+    String displayName = name.length > 18 ? '${name.substring(0, 15)}...' : name;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.red.shade50))),
       child: Row(
         children: [
-          Expanded(child: Text(name, style: const TextStyle(fontSize: 13))),
+          Expanded(child: Text(displayName, style: const TextStyle(fontSize: 13))),
           Expanded(child: Text(location, style: const TextStyle(fontSize: 13, color: Colors.black54))),
           GestureDetector(
             onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DocumentDetailsScreen())),
             child: const Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed, size: 20),
           )
         ],
-      ),
-    );
-  }
-}
-
-class TrackingDocumentDialog extends StatefulWidget {
-  const TrackingDocumentDialog({super.key});
-  @override
-  State<TrackingDocumentDialog> createState() => _TrackingDocumentDialogState();
-}
-
-class _TrackingDocumentDialogState extends State<TrackingDocumentDialog> {
-  bool _isVerified = false;
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('New Document', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const TextField(decoration: InputDecoration(labelText: 'Document Title')),
-            const SizedBox(height: 20),
-            CheckboxListTile(title: const Text('Verify accuracy'), value: _isVerified, onChanged: (val) => setState(() => _isVerified = val!), activeColor: AppTheme.primaryRed),
-            ElevatedButton(onPressed: () => Navigator.pop(context), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed), child: const Text('Submit', style: TextStyle(color: Colors.white))),
-          ],
-        ),
       ),
     );
   }
