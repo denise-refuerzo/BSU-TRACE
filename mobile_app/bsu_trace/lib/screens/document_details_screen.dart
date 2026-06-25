@@ -1,15 +1,70 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../config.dart';
 
 class DocumentDetailsScreen extends StatefulWidget {
-  const DocumentDetailsScreen({super.key});
+  final int docId; // Require the ID to be passed in
+
+  const DocumentDetailsScreen({super.key, required this.docId});
 
   @override
   State<DocumentDetailsScreen> createState() => _DocumentDetailsScreenState();
 }
 
 class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
+  bool _isLoading = true;
   bool _isQrExpanded = false;
+  Map<String, dynamic> _docData = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDocumentDetails();
+  }
+
+  Future<void> _fetchDocumentDetails() async {
+    try {
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/documents/${widget.docId}/details'));
+      if (response.statusCode == 200) {
+        setState(() {
+          _docData = json.decode(response.body);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching doc details: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Helper method to format ISO timestamps neatly
+  String _formatDateTime(String? isoDate) {
+    if (isoDate == null) return 'Pending';
+    try {
+      final d = DateTime.parse(isoDate).toLocal();
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final ampm = d.hour >= 12 ? 'PM' : 'AM';
+      final hour = d.hour == 0 ? 12 : (d.hour > 12 ? d.hour - 12 : d.hour);
+      final min = d.minute.toString().padLeft(2, '0');
+      return '${months[d.month - 1]} ${d.day}, $hour:$min $ampm';
+    } catch (e) {
+      return 'Invalid Date';
+    }
+  }
+
+  // Helper method for Date Only (Estimated Completion)
+  String _formatDateOnly(String? isoDate) {
+    if (isoDate == null) return 'Not Set';
+    try {
+      final d = DateTime.parse(isoDate).toLocal();
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[d.month - 1]} ${d.day}, ${d.year}';
+    } catch (e) {
+      return 'Invalid Date';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,33 +73,31 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         title: const Text('BSU Institutional Portal'),
         iconTheme: const IconThemeData(color: AppTheme.primaryRed),
       ),
-      body: Column(
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+        : Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
+              padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0), // Includes bottom padding fix
               child: Column(
                 children: [
                   _buildHeader(),
                   const SizedBox(height: 16),
                   
-                  // Requestor & Form Type
                   Row(children: [
-                    Expanded(child: _buildInfoBox('Requestor', 'Dean Amelia Thorne', Icons.person_outline)),
+                    Expanded(child: _buildInfoBox('Requestor', _docData['requestor'] ?? 'Unknown', Icons.person_outline)),
                     const SizedBox(width: 16),
-                    Expanded(child: _buildInfoBox('Form Type', 'Administrative', Icons.account_balance)),
+                    Expanded(child: _buildInfoBox('Form Type', _docData['form_type'] ?? 'Unknown', Icons.account_balance)),
                   ]),
                   const SizedBox(height: 16),
 
-                  // Estimated Completion Card
-                  _buildCompletionCard('Oct 24, 2023', 'In Review'),
+                  _buildCompletionCard(_formatDateOnly(_docData['edc']), _docData['status'] ?? 'Unknown'),
                   const SizedBox(height: 16),
 
-                  // Collapsible QR Section
                   _buildCollapsibleQrSection(),
                   const SizedBox(height: 16),
 
-                  // Processing Route (Always visible)
                   _buildProcessingRoute(),
                 ],
               ),
@@ -74,9 +127,9 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('DOCUMENT TITLE', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      const Text('Quarterly Financial Report Q3', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      Text(_docData['title'] ?? 'Untitled Document', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      const Text('🛡 BSU-2023-TR-8842', style: TextStyle(color: Colors.grey))
+      Text('🛡 ${_docData['qr_code'] ?? 'No Tracking Code'}', style: const TextStyle(color: Colors.grey))
     ])
   );
 
@@ -103,8 +156,8 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         ]),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(color: AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)),
-          child: Text(status, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+          decoration: BoxDecoration(color: status == 'Completed' ? Colors.green : AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)),
+          child: Text(status.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
         )
       ],
     ),
@@ -129,7 +182,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
         child: Column(children: [
-          Container(height: 150, width: 150, color: Colors.grey.shade100, child: const Center(child: Text("QR Code"))),
+          Container(height: 150, width: 150, color: Colors.grey.shade100, child: const Center(child: Text("QR Placeholder"))),
           const SizedBox(height: 16),
           const Text('Scan this code at any BSU kiosk to instantly view document status or verify authenticity.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 13))
         ]),
@@ -137,24 +190,68 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     ],
   );
 
-  Widget _buildProcessingRoute() => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Processing Route', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-      const SizedBox(height: 16),
-      _buildRouteStep('Department Head', 'Approved on Oct 12, 09:15 AM', true),
-      _buildRouteStep('Dean\'s Office', 'Approved on Oct 14, 02:30 PM', true),
-      _buildRouteStep('Registrar', 'Current Status: Document Validation', false, isCurrent: true),
-      _buildRouteStep('Finance Office', 'Pending clearance', false, isLast: true),
-    ]),
-  );
+  Widget _buildProcessingRoute() {
+    List<dynamic> history = _docData['history'] ?? [];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, 
+        children: [
+          const Text('Processing Route', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: 16),
+          
+          if (history.isEmpty)
+            const Text('No routing data available.', style: TextStyle(color: Colors.grey)),
+            
+          // Dynamically map the history timeline
+          ...history.asMap().entries.map((entry) {
+            int idx = entry.key;
+            var log = entry.value;
+            
+            bool isLast = idx == history.length - 1;
+            bool isDone = log['current_status'] == 'Completed' || log['current_status'] == 'Signed';
+            bool isCurrent = isLast && !isDone;
+
+            String officeName = log['office_name'] ?? 'Unknown Office';
+            String subtitle = isDone 
+                ? 'Processed on ${_formatDateTime(log['time_in'])}' 
+                : 'Current Status: ${log['current_status']}';
+
+            return _buildRouteStep(officeName, subtitle, isDone, isCurrent: isCurrent, isLast: isLast);
+          }),
+        ]
+      ),
+    );
+  }
 
   Widget _buildRouteStep(String title, String subtitle, bool isDone, {bool isCurrent = false, bool isLast = false}) => IntrinsicHeight(
     child: Row(children: [
-      Column(children: [Container(width: 12, height: 12, decoration: BoxDecoration(color: isDone ? AppTheme.primaryRed : (isCurrent ? AppTheme.primaryRed : Colors.grey.shade300), shape: BoxShape.circle)), if (!isLast) Expanded(child: Container(width: 2, color: Colors.red.shade200, margin: const EdgeInsets.symmetric(vertical: 4)))]),
+      Column(
+        children: [
+          Container(
+            width: 12, height: 12, 
+            decoration: BoxDecoration(
+              color: isDone ? AppTheme.primaryRed : (isCurrent ? AppTheme.primaryRed : Colors.grey.shade300), 
+              shape: BoxShape.circle
+            )
+          ), 
+          if (!isLast) 
+            Expanded(child: Container(width: 2, color: Colors.red.shade200, margin: const EdgeInsets.symmetric(vertical: 4)))
+        ]
+      ),
       const SizedBox(width: 16),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: isDone ? Colors.black : AppTheme.primaryRed)), Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)), const SizedBox(height: 16)]))
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, 
+          children: [
+            Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: isDone || isCurrent ? Colors.black : Colors.grey)), 
+            Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)), 
+            const SizedBox(height: 16)
+          ]
+        )
+      )
     ]),
   );
 }

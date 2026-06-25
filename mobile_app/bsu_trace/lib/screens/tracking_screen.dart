@@ -73,7 +73,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
         : SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
+        // --- CHANGE THIS LINE ---
+        padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -212,18 +213,17 @@ class _TrackingScreenState extends State<TrackingScreen> {
           ),
           if (_recentDocuments.isEmpty)
             const Padding(padding: EdgeInsets.all(16.0), child: Text("No documents found.", style: TextStyle(color: Colors.grey))),
-          ..._recentDocuments.map((doc) => _buildSubmissionRow(
-            context, 
-            doc['title'] ?? 'Unknown', 
-            doc['current_location'] ?? 'Pending Route'
-          )),
+          
+          // Pass the entire document map to the row builder
+          ..._recentDocuments.map((doc) => _buildSubmissionRow(context, doc)),
         ],
       ),
     );
   }
 
-  Widget _buildSubmissionRow(BuildContext context, String name, String location) {
-    // Truncates long document names just like your original static text ("Transcript_Offici...")
+  Widget _buildSubmissionRow(BuildContext context, Map<String, dynamic> doc) {
+    String name = doc['title'] ?? 'Unknown';
+    String location = doc['current_location'] ?? 'Pending Route';
     String displayName = name.length > 18 ? '${name.substring(0, 15)}...' : name;
 
     return Container(
@@ -234,7 +234,10 @@ class _TrackingScreenState extends State<TrackingScreen> {
           Expanded(child: Text(displayName, style: const TextStyle(fontSize: 13))),
           Expanded(child: Text(location, style: const TextStyle(fontSize: 13, color: Colors.black54))),
           GestureDetector(
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DocumentDetailsScreen())),
+            // Pass the specific ID to the details screen!
+            onTap: () => Navigator.push(context, MaterialPageRoute(
+              builder: (context) => DocumentDetailsScreen(docId: doc['ini_id'])
+            )),
             child: const Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed, size: 20),
           )
         ],

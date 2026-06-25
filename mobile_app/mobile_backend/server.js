@@ -294,6 +294,63 @@ app.get('/api/users/:id/documents', async (req, res) => {
 });
 
 // ==========================================
+// 8. FETCH SPECIFIC DOCUMENT DETAILS ENDPOINT
+// Route: GET /api/documents/:id/details
+// ==========================================
+app.get('/api/documents/:id/details', async (req, res) => {
+  const docId = req.params.id;
+
+  try {
+    // 1. Fetch main document info (Requestor, EDC, Title, QR, Status)
+    const detailsQuery = `
+      SELECT 
+        i.ini_id, i.title, i.edc, i.qr_code,
+        u.full_name AS requestor,
+        p.process_name AS form_type,
+        s.current_status AS status
+      FROM public.initial_document i
+      JOIN public."User" u ON i.u_id = u.u_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+      LEFT JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.ini_id = $1
+      ORDER BY pd.time_in DESC
+      LIMIT 1;
+    `;
+    const detailsResult = await pool.query(detailsQuery, [docId]);
+    
+    if (detailsResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // 2. Fetch routing timeline history
+    const historyQuery = `
+      SELECT 
+        o.office_name, 
+        pd.time_in, 
+        pd.time_out, 
+        s.current_status
+      FROM public.processed_document pd
+      JOIN public.offices o ON pd.current_office_id = o.o_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE pd.ini_id = $1
+      ORDER BY pd.time_in ASC;
+    `;
+    const historyResult = await pool.query(historyQuery, [docId]);
+
+    // Combine and send back
+    res.status(200).json({
+      ...detailsResult.rows[0],
+      history: historyResult.rows
+    });
+
+  } catch (error) {
+    console.error('Document Details Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
