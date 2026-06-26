@@ -16,11 +16,8 @@ class NewDocumentModal extends StatefulWidget {
 class _NewDocumentModalState extends State<NewDocumentModal> {
   final TextEditingController _titleController = TextEditingController();
   
-  // Replace the String list with TextEditingControllers for live editing
-  final List<TextEditingController> _stopControllers = [
-    TextEditingController(text: 'Department Head'),
-    TextEditingController(text: 'Dean\'s Office'),
-  ];
+  // Start with an empty list instead of hardcoded data
+  final List<TextEditingController> _stopControllers = [];
   
   List<dynamic> _processTypes = [];
   int? _selectedProcessId;
@@ -28,6 +25,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   bool _isVerified = false;
   bool _isSubmitting = false;
   bool _isLoadingProcesses = true; 
+  bool _isLoadingRoute = false; 
 
   @override
   void initState() {
@@ -38,7 +36,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   @override
   void dispose() {
     _titleController.dispose();
-    // Clean up all controllers to prevent memory leaks
     for (var controller in _stopControllers) {
       controller.dispose();
     }
@@ -60,12 +57,46 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       debugPrint('Error fetching process types: $e');
       setState(() {
         _isLoadingProcesses = false;
+        // Fallback for connectivity issues
         _processTypes = [
           {'p_id': 1, 'process_name': 'Reimbursement of Expenses'},
           {'p_id': 2, 'process_name': 'Purchase Request (PR)'},
           {'p_id': 3, 'process_name': 'Liquidation of Cash Advances'}
         ];
       });
+    }
+  }
+
+  // NEW METHOD: Fetches the routing stops based on process type
+  Future<void> _fetchProcessRoute(int processId) async {
+    setState(() => _isLoadingRoute = true);
+
+    try {
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types/$processId/route'));
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> fetchedStops = data['stops'];
+
+        setState(() {
+          // Dispose of old controllers to avoid memory leaks
+          for (var c in _stopControllers) {
+            c.dispose();
+          }
+          _stopControllers.clear();
+
+          // Populate with actual stops from database
+          for (var stop in fetchedStops) {
+            _stopControllers.add(TextEditingController(text: stop.toString()));
+          }
+        });
+      } else {
+        throw Exception('Failed to load route');
+      }
+    } catch (e) {
+      debugPrint('Error fetching process route: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingRoute = false);
     }
   }
 
@@ -90,7 +121,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           'u_id': userId,
           'title': _titleController.text.trim(),
           'p_id': _selectedProcessId,
-          // If you ever need to send the custom stops to your database, you can extract them like this:
+          // Extract customized routes here if sending them to DB in the future:
           // 'custom_routes': _stopControllers.map((c) => c.text.trim()).toList(),
         }),
       );
@@ -103,7 +134,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           );
         }
       } else {
-        // This will grab the exact error text from the PostgreSQL/Node server!
         final errorResponse = json.decode(response.body);
         throw Exception(errorResponse['error'] ?? 'Server error ${response.statusCode}');
       }
@@ -159,8 +189,18 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('MANUAL ROUTING STOPS', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('MANUAL ROUTING STOPS', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                            if (_isLoadingRoute)
+                               const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(color: AppTheme.primaryRed, strokeWidth: 2))
+                          ],
+                        ),
                         const SizedBox(height: 12),
+                        
+                        if (_stopControllers.isEmpty && !_isLoadingRoute && _selectedProcessId == null)
+                          const Text('Select a process to view route', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12)),
                         
                         // Dynamically map routing stops via the controllers list
                         ...List.generate(_stopControllers.length, (index) => _buildRoutingStop(index)),
@@ -169,7 +209,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                         GestureDetector(
                           onTap: () {
                             setState(() {
-                              // Insert a blank editable field when user taps Add Custom Stop
                               _stopControllers.add(TextEditingController());
                             });
                           },
@@ -241,18 +280,23 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
               child: Text(process['process_name'].toString(), overflow: TextOverflow.ellipsis),
             );
           }).toList(),
-          onChanged: (int? val) => setState(() => _selectedProcessId = val),
+          // Connect Dropdown change to Route fetching mechanism
+          onChanged: (int? val) {
+            if (val != null && val != _selectedProcessId) {
+              setState(() => _selectedProcessId = val);
+              _fetchProcessRoute(val);
+            }
+          },
         )
       )
     );
   }
   
-  // This is now an interactive text field!
   Widget _buildRoutingStop(int index) {
     int number = index + 1;
     return Container(
       margin: const EdgeInsets.only(bottom: 8), 
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), // Adjusted padding for TextField
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), 
       decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(8)), 
       child: Row(
         children: [
@@ -275,7 +319,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           GestureDetector(
             onTap: () {
               setState(() {
-                // Dispose controller before removing to avoid memory leaks
                 _stopControllers[index].dispose();
                 _stopControllers.removeAt(index);
               });

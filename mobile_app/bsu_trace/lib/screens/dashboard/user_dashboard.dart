@@ -9,6 +9,7 @@ import '../../widgets/modals/new_document_modal.dart';
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
 import '../../config.dart';
+import '../document_details_screen.dart'; // <--- NEW: Import details screen
 
 class UserDashboardScreen extends StatefulWidget {
   const UserDashboardScreen({super.key});
@@ -27,15 +28,15 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   int _archivedDocs = 0;
   int _completedDocs = 0;
 
-  Timer? _syncTimer; // <--- NEW: Declare the timer
+  Map<String, dynamic>? _latestDocument; // <--- NEW: Store the most recent document
+
+  Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
-    // 1. Initial load (shows spinner)
     _fetchDashboardData(); 
     
-    // 2. Start the background sync (every 10 seconds)
     _syncTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
       _fetchDashboardData(isBackground: true);
     });
@@ -43,12 +44,10 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
 
   @override
   void dispose() {
-    // CRITICAL: Always cancel the timer when leaving the screen to prevent memory leaks!
     _syncTimer?.cancel();
     super.dispose();
   }
 
-  // Modified to accept isBackground flag
   Future<void> _fetchDashboardData({bool isBackground = false}) async {
     final userId = SessionManager().userId;
 
@@ -60,6 +59,8 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     try {
       final profileResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId'));
       final statsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/dashboard-stats'));
+      // Fetch user's documents list
+      final docsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
 
       if (profileResponse.statusCode == 200 && mounted) {
         final profileData = json.decode(profileResponse.body);
@@ -78,10 +79,20 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
           _completedDocs = int.tryParse(statsData['completed_docs'].toString()) ?? 0;
         });
       }
+
+      if (docsResponse.statusCode == 200 && mounted) {
+        final List<dynamic> docs = json.decode(docsResponse.body);
+        setState(() {
+          if (docs.isNotEmpty) {
+            // Grab the first document (it is pre-sorted by updated_at DESC from the API)
+            _latestDocument = docs.first; 
+          }
+        });
+      }
+
     } catch (e) {
       debugPrint('Error fetching dashboard data: $e');
     } finally {
-      // Only remove the loading screen on the initial load
       if (!isBackground && mounted) {
         setState(() => _isLoading = false);
       }
@@ -169,18 +180,53 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                 children: [
                   const Text('Active Submission Flow', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 24),
-                  _buildHorizontalStepper(),
-                  const SizedBox(height: 24),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8)),
-                    child: Text(
-                      _pendingDocs > 0 
-                        ? 'Current: You have $_pendingDocs document(s) pending review.' 
-                        : 'No pending active submissions at the moment.', 
-                      style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)
+                  
+                  if (_latestDocument != null) ...[
+                    // Feed the real document status into the stepper
+                    _buildHorizontalStepper(_latestDocument!['status'] ?? 'pending'),
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.description_outlined, color: Color(0xFFB01A22), size: 24),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_latestDocument!['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                const SizedBox(height: 4),
+                                Text('${_latestDocument!['current_location'] ?? 'Routing'} • ${_latestDocument!['status'] ?? 'pending'}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          ElevatedButton(
+                            onPressed: () => Navigator.push(context, MaterialPageRoute(
+                              builder: (context) => DocumentDetailsScreen(docId: _latestDocument!['ini_id'])
+                            )),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFB01A22),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                            ),
+                            child: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          )
+                        ],
+                      ),
                     ),
-                  )
+                  ] else ...[
+                    // Fallback if the user has never submitted a document
+                    const Center(
+                      child: Text(
+                        'No active submissions at the moment.', 
+                        style: TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)
+                      )
+                    )
+                  ]
                 ],
               ),
             ),
@@ -216,17 +262,27 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     );
   }
 
-  Widget _buildHorizontalStepper() {
+  // --- NEW: Stepper dynamically driven by actual document status ---
+  Widget _buildHorizontalStepper(String status) {
+    bool isCompleted = status == 'Completed';
+    bool step2Done = status == 'In Verification' || status == 'Signed' || status == 'Action Required' || isCompleted;
+    bool step3Done = status == 'Signed' || isCompleted;
+    bool step4Done = isCompleted;
+
+    bool step2Active = status == 'pending';
+    bool step3Active = status == 'In Verification' || status == 'Action Required';
+    bool step4Active = status == 'Signed';
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        _buildStepNode('Draft', isActive: true, isCompleted: true),
-        Expanded(child: Container(height: 4, color: const Color(0xFFB01A22))),
-        _buildStepNode('Review', isActive: true, isCurrent: _pendingDocs > 0),
-        Expanded(child: Container(height: 4, color: Colors.grey.shade300)),
-        _buildStepNode('Approval', isActive: false),
-        Expanded(child: Container(height: 4, color: Colors.grey.shade300)),
-        _buildStepNode('Finalized', isActive: false),
+        _buildStepNode('Submitted', isActive: true, isCompleted: true),
+        Expanded(child: Container(height: 4, color: step2Done || step2Active ? const Color(0xFFB01A22) : Colors.grey.shade300)),
+        _buildStepNode('Processing', isActive: step2Active || step2Done, isCompleted: step2Done, isCurrent: step2Active),
+        Expanded(child: Container(height: 4, color: step3Done || step3Active ? const Color(0xFFB01A22) : Colors.grey.shade300)),
+        _buildStepNode('Approval', isActive: step3Active || step3Done, isCompleted: step3Done, isCurrent: step3Active),
+        Expanded(child: Container(height: 4, color: step4Done || step4Active ? const Color(0xFFB01A22) : Colors.grey.shade300)),
+        _buildStepNode('Completed', isActive: step4Active || step4Done, isCompleted: step4Done, isCurrent: step4Active),
       ],
     );
   }
@@ -244,7 +300,14 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
           child: isCompleted ? const Icon(Icons.check, color: Colors.white, size: 14) : null,
         ),
         const SizedBox(height: 8),
-        Text(label, style: TextStyle(fontSize: 10, color: isActive ? const Color(0xFFB01A22) : Colors.grey, fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
+        Text(
+          label, 
+          style: TextStyle(
+            fontSize: 10, 
+            color: isActive || isCompleted ? const Color(0xFFB01A22) : Colors.grey, 
+            fontWeight: isActive || isCompleted ? FontWeight.bold : FontWeight.normal
+          )
+        ),
       ],
     );
   }
