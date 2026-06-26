@@ -9,7 +9,7 @@ import '../../widgets/modals/new_document_modal.dart';
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
 import '../../config.dart';
-import '../document_details_screen.dart'; // <--- NEW: Import details screen
+import '../document_details_screen.dart'; 
 
 class UserDashboardScreen extends StatefulWidget {
   const UserDashboardScreen({super.key});
@@ -28,7 +28,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   int _archivedDocs = 0;
   int _completedDocs = 0;
 
-  Map<String, dynamic>? _latestDocument; // <--- NEW: Store the most recent document
+  Map<String, dynamic>? _latestDocument; 
 
   Timer? _syncTimer;
 
@@ -59,7 +59,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     try {
       final profileResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId'));
       final statsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/dashboard-stats'));
-      // Fetch user's documents list
       final docsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
 
       if (profileResponse.statusCode == 200 && mounted) {
@@ -84,7 +83,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
         final List<dynamic> docs = json.decode(docsResponse.body);
         setState(() {
           if (docs.isNotEmpty) {
-            // Grab the first document (it is pre-sorted by updated_at DESC from the API)
             _latestDocument = docs.first; 
           }
         });
@@ -101,7 +99,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // GATEKEEPER
     final role = SessionManager().currentRole;
     if (role != UserRole.user) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -118,121 +115,123 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       drawer: const AppDrawer(),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Color(0xFFB01A22)))
-        : SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // PROFILE SECTION
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Institutional Profile', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      const Icon(Icons.person_outline, size: 16, color: Colors.black54), 
-                      const SizedBox(width: 4), 
-                      Text(_userName, style: const TextStyle(color: Colors.black54))
-                    ]),
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      const Icon(Icons.work_outline, size: 16, color: Colors.black54), 
-                      const SizedBox(width: 4), 
-                      Text(_userRoleDept, style: const TextStyle(color: Colors.black54, fontSize: 12))
-                    ]),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.all(12), 
-                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), 
-                  child: const Icon(Icons.account_balance, color: Color(0xFFB01A22), size: 32)
-                )
-              ],
-            ),
-            const SizedBox(height: 24),
-            
-            // STATISTICS GRID
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.8,
-              children: [
-                _buildStatCard('TOTAL DOCS', _totalDocs.toString(), Icons.folder_open, const Color(0xFFB01A22)),
-                _buildStatCard('PENDING', _pendingDocs.toString(), Icons.pending_actions, const Color(0xFFB01A22)),
-                _buildStatCard('ARCHIVED', _archivedDocs.toString(), Icons.archive_outlined, Colors.blueGrey),
-                _buildStatCard('COMPLETED', _completedDocs.toString(), Icons.check_circle_outline, Colors.green),
-              ],
-            ),
-            const SizedBox(height: 24),
-            
-            // ACTIVE SUBMISSION FLOW
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
+        : RefreshIndicator(
+            color: const Color(0xFFB01A22),
+            onRefresh: () async {
+              await _fetchDashboardData(isBackground: true);
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(), // Important for short pages
+              padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Active Submission Flow', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Institutional Profile', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            const Icon(Icons.person_outline, size: 16, color: Colors.black54), 
+                            const SizedBox(width: 4), 
+                            Text(_userName, style: const TextStyle(color: Colors.black54))
+                          ]),
+                          const SizedBox(height: 4),
+                          Row(children: [
+                            const Icon(Icons.work_outline, size: 16, color: Colors.black54), 
+                            const SizedBox(width: 4), 
+                            Text(_userRoleDept, style: const TextStyle(color: Colors.black54, fontSize: 12))
+                          ]),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(12), 
+                        decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)), 
+                        child: const Icon(Icons.account_balance, color: Color(0xFFB01A22), size: 32)
+                      )
+                    ],
+                  ),
                   const SizedBox(height: 24),
                   
-                  if (_latestDocument != null) ...[
-                    // Feed the real document status into the stepper
-                    _buildHorizontalStepper(_latestDocument!['status'] ?? 'pending'),
-                    const SizedBox(height: 24),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.description_outlined, color: Color(0xFFB01A22), size: 24),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.8,
+                    children: [
+                      _buildStatCard('TOTAL DOCS', _totalDocs.toString(), Icons.folder_open, const Color(0xFFB01A22)),
+                      _buildStatCard('PENDING', _pendingDocs.toString(), Icons.pending_actions, const Color(0xFFB01A22)),
+                      _buildStatCard('ARCHIVED', _archivedDocs.toString(), Icons.archive_outlined, Colors.blueGrey),
+                      _buildStatCard('COMPLETED', _completedDocs.toString(), Icons.check_circle_outline, Colors.green),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Active Submission Flow', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 24),
+                        
+                        if (_latestDocument != null) ...[
+                          _buildHorizontalStepper(_latestDocument!['status'] ?? 'pending'),
+                          const SizedBox(height: 24),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(color: const Color(0xFFFFF9F9), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
+                            child: Row(
                               children: [
-                                Text(_latestDocument!['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 4),
-                                Text('${_latestDocument!['current_location'] ?? 'Routing'} • ${_latestDocument!['status'] ?? 'pending'}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
+                                const Icon(Icons.description_outlined, color: Color(0xFFB01A22), size: 24),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(_latestDocument!['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      const SizedBox(height: 4),
+                                      Text('${_latestDocument!['current_location'] ?? 'Routing'} • ${_latestDocument!['status'] ?? 'pending'}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
+                                    ],
+                                  ),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.push(context, MaterialPageRoute(
+                                    builder: (context) => DocumentDetailsScreen(docId: _latestDocument!['ini_id'])
+                                  )),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFB01A22),
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+                                  ),
+                                  child: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                )
                               ],
                             ),
                           ),
-                          ElevatedButton(
-                            onPressed: () => Navigator.push(context, MaterialPageRoute(
-                              builder: (context) => DocumentDetailsScreen(docId: _latestDocument!['ini_id'])
-                            )),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFB01A22),
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                            ),
-                            child: const Text('View', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ] else ...[
+                          const Center(
+                            child: Text(
+                              'No active submissions at the moment.', 
+                              style: TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)
+                            )
                           )
-                        ],
-                      ),
+                        ]
+                      ],
                     ),
-                  ] else ...[
-                    // Fallback if the user has never submitted a document
-                    const Center(
-                      child: Text(
-                        'No active submissions at the moment.', 
-                        style: TextStyle(fontStyle: FontStyle.italic, color: Colors.black54, fontSize: 13)
-                      )
-                    )
-                  ]
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
+          ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           showDialog(
@@ -262,7 +261,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     );
   }
 
-  // --- NEW: Stepper dynamically driven by actual document status ---
   Widget _buildHorizontalStepper(String status) {
     bool isCompleted = status == 'Completed';
     bool step2Done = status == 'In Verification' || status == 'Signed' || status == 'Action Required' || isCompleted;

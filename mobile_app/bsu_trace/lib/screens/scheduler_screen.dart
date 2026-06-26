@@ -86,9 +86,25 @@ class _SchedulerScreenState extends State<SchedulerScreen> {
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
           : TabBarView(
           children: [
-            SchedulerContent(category: 'Vehicle', bookings: _allBookings, inventory: _inventory),
-            SchedulerContent(category: 'Multimedia Room', bookings: _allBookings, inventory: _inventory),
-            SchedulerContent(category: 'Gymnasium', bookings: _allBookings, inventory: _inventory),
+            // Passed down the refresh function as a callback
+            SchedulerContent(
+              category: 'Vehicle', 
+              bookings: _allBookings, 
+              inventory: _inventory,
+              onRefresh: () => _fetchSchedulerData(isBackground: true)
+            ),
+            SchedulerContent(
+              category: 'Multimedia Room', 
+              bookings: _allBookings, 
+              inventory: _inventory,
+              onRefresh: () => _fetchSchedulerData(isBackground: true)
+            ),
+            SchedulerContent(
+              category: 'Gymnasium', 
+              bookings: _allBookings, 
+              inventory: _inventory,
+              onRefresh: () => _fetchSchedulerData(isBackground: true)
+            ),
           ],
         ),
         floatingActionButton: FloatingActionButton(
@@ -110,8 +126,15 @@ class SchedulerContent extends StatefulWidget {
   final String category;
   final List<dynamic> bookings;
   final List<dynamic> inventory;
+  final Future<void> Function() onRefresh; // <--- NEW: Accept the refresh callback
 
-  const SchedulerContent({super.key, required this.category, required this.bookings, required this.inventory});
+  const SchedulerContent({
+    super.key, 
+    required this.category, 
+    required this.bookings, 
+    required this.inventory,
+    required this.onRefresh // <--- NEW: Initialize it
+  });
 
   @override
   State<SchedulerContent> createState() => _SchedulerContentState();
@@ -143,7 +166,6 @@ class _SchedulerContentState extends State<SchedulerContent> {
     });
   }
 
-  // Helper to format 24hr DB time string to AM/PM (e.g., '08:00:00' -> '08:00 AM')
   String _formatTime(String? timeStr) {
     if (timeStr == null) return 'TBA';
     try {
@@ -163,33 +185,39 @@ class _SchedulerContentState extends State<SchedulerContent> {
   Widget build(BuildContext context) {
     final activeBookings = _filteredBookings;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 100.0), 
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildCalendarHeader(),
-          const SizedBox(height: 16),
-          _buildCalendarGrid(activeBookings),
-          const SizedBox(height: 24),
-          Text('Scheduled Events (${widget.category})', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 16),
-          
-          if (activeBookings.isEmpty)
-            const Text('No events scheduled for this month.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+    // Wrapped the ScrollView with RefreshIndicator
+    return RefreshIndicator(
+      color: AppTheme.primaryRed,
+      onRefresh: widget.onRefresh,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(), // MUST have this for pull down to work properly
+        padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 100.0), 
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildCalendarHeader(),
+            const SizedBox(height: 16),
+            _buildCalendarGrid(activeBookings),
+            const SizedBox(height: 24),
+            Text('Scheduled Events (${widget.category})', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             
-          ...activeBookings.map((event) => _buildEventItem(
-            context,
-            widget.category.toUpperCase(),
-            _formatTime(event['start_time']),
-            event['purpose'] ?? 'Untitled Booking',
-            event['department'] ?? 'General',
-            event
-          )),
-          
-          const SizedBox(height: 24),
-          _buildInventorySection(),
-        ],
+            if (activeBookings.isEmpty)
+              const Text('No events scheduled for this month.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+              
+            ...activeBookings.map((event) => _buildEventItem(
+              context,
+              widget.category.toUpperCase(),
+              _formatTime(event['start_time']),
+              event['purpose'] ?? 'Untitled Booking',
+              event['department'] ?? 'General',
+              event
+            )),
+            
+            const SizedBox(height: 24),
+            _buildInventorySection(),
+          ],
+        ),
       ),
     );
   }
@@ -284,14 +312,12 @@ class _SchedulerContentState extends State<SchedulerContent> {
   }
 
   Widget _buildInventorySection() {
-    // Default fallback values just in case the server is completely empty
     int chairsTotal = 400; 
     int chairsInUse = 0;
     
     int tablesTotal = 120;
     int tablesInUse = 0;
     
-    // Parse the live data from the new backend endpoint
     for (var item in widget.inventory) {
       if (item['asset_name'] == 'Stackable Chairs') {
         chairsTotal = item['total'] ?? chairsTotal;
@@ -303,7 +329,6 @@ class _SchedulerContentState extends State<SchedulerContent> {
       }
     }
 
-    // Calculate available inventory
     int chairsAvailable = (chairsTotal - chairsInUse).clamp(0, chairsTotal);
     int tablesAvailable = (tablesTotal - tablesInUse).clamp(0, tablesTotal);
 
@@ -320,7 +345,6 @@ class _SchedulerContentState extends State<SchedulerContent> {
   }
 
   Widget _buildInventoryBar(String title, int available, int total) {
-    // Determine ratio for the progress bar based on availability
     double availabilityRatio = total > 0 ? (available / total) : 0.0;
 
     return Column(
@@ -333,7 +357,7 @@ class _SchedulerContentState extends State<SchedulerContent> {
             Text('$available available', style: const TextStyle(fontWeight: FontWeight.bold))
           ]
         ),
-        const SizedBox(height: 6), // Added spacing to separate text from the bar
+        const SizedBox(height: 6), 
         LinearProgressIndicator(
           value: availabilityRatio, 
           color: AppTheme.primaryRed, 
@@ -344,7 +368,6 @@ class _SchedulerContentState extends State<SchedulerContent> {
   }
 }
 
-// --- POPUP DIALOG WIDGET (NOW DYNAMIC) ---
 class EventDetailsDialog extends StatelessWidget {
   final Map<String, dynamic> eventData;
 
@@ -381,7 +404,6 @@ class EventDetailsDialog extends StatelessWidget {
     String department = eventData['department'] ?? 'General';
     String timeString = _formatDateTime(eventData['reservation_date'], eventData['start_time']);
     
-    // Use destination field if it's a vehicle, otherwise fallback to standard note
     String extraNote = eventData['destination'] != null ? 'Destination: ${eventData['destination']}' : 'Standard Equipment provided';
 
     return Dialog(

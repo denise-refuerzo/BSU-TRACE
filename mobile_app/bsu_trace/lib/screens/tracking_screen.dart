@@ -32,9 +32,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
   
   Timer? _syncTimer; 
 
-  // --- NEW: Search, Sort, and Pagination States ---
   String _searchQuery = '';
-  bool _sortAscending = false; // false = Newest First (API default), true = Oldest First
+  bool _sortAscending = false; 
   int _currentPage = 0;
   final int _itemsPerPage = 5;
 
@@ -159,15 +158,12 @@ class _TrackingScreenState extends State<TrackingScreen> {
     }
   }
 
-  // --- NEW: Dynamic getter for processed documents (Search & Sort) ---
   List<dynamic> get _processedDocuments {
     var filtered = _recentDocuments.where((doc) {
       final title = (doc['title'] ?? '').toLowerCase();
       return title.contains(_searchQuery.toLowerCase());
     }).toList();
 
-    // The API naturally returns these sorted descending by date (newest first).
-    // Reversing the list gives us ascending order (oldest first).
     if (_sortAscending) {
       filtered = filtered.reversed.toList();
     }
@@ -185,21 +181,28 @@ class _TrackingScreenState extends State<TrackingScreen> {
       drawer: const AppDrawer(),
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
-        : SingleChildScrollView(
-        padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildTrackingCard(),
-            const SizedBox(height: 24),
-            const Text('Recent Submissions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            _buildSearchBar(),
-            const SizedBox(height: 16),
-            _buildRecentSubmissionsTable(context),
-          ],
-        ),
-      ),
+        : RefreshIndicator(
+            color: AppTheme.primaryRed,
+            onRefresh: () async {
+              await _fetchTrackingData(isBackground: true);
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTrackingCard(),
+                  const SizedBox(height: 24),
+                  const Text('Recent Submissions', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
+                  _buildRecentSubmissionsTable(context),
+                ],
+              ),
+            ),
+          ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           showDialog(context: context, builder: (context) => const NewDocumentModal());
@@ -215,7 +218,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
       children: [
         Expanded(
           child: TextField(
-            // --- NEW: Triggers filtering and resets to page 1 ---
             onChanged: (value) {
               setState(() {
                 _searchQuery = value;
@@ -232,7 +234,6 @@ class _TrackingScreenState extends State<TrackingScreen> {
         ),
         const SizedBox(width: 8),
         GestureDetector(
-          // --- NEW: Toggles sort order and resets to page 1 ---
           onTap: () {
             setState(() {
               _sortAscending = !_sortAscending;
@@ -253,7 +254,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 
-Widget _buildTrackingCard() {
+  Widget _buildTrackingCard() {
     if (_liveDocument == null) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -275,16 +276,15 @@ Widget _buildTrackingCard() {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start, // Align to top in case title wraps
+            crossAxisAlignment: CrossAxisAlignment.start, // Fixed layout overflow
             children: [
-              // Wrap the title in an Expanded widget to prevent overflow
-              const Expanded(
+              const Expanded( // Flex space safely avoids overflowing badge
                 child: Text(
                   'Live Document Tracking', 
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
                 ),
               ),
-              const SizedBox(width: 12), // Add a little spacing between text and badge
+              const SizedBox(width: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
                 decoration: BoxDecoration(color: isCompleted ? Colors.green : AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)), 
@@ -474,20 +474,17 @@ Widget _buildTrackingCard() {
     );
   }
 
-  // --- NEW: Extracts paginated logic and controls ---
   Widget _buildRecentSubmissionsTable(BuildContext context) {
     final processedDocs = _processedDocuments;
     int totalItems = processedDocs.length;
     int totalPages = (totalItems / _itemsPerPage).ceil();
 
-    // Safety fallback: if search/filter reduces pages while user is on a high page
     if (_currentPage >= totalPages && totalPages > 0) {
       _currentPage = totalPages - 1;
     } else if (totalPages == 0) {
       _currentPage = 0;
     }
 
-    // Determine slice for current page
     final startIndex = _currentPage * _itemsPerPage;
     final paginatedDocs = processedDocs.skip(startIndex).take(_itemsPerPage).toList();
 
@@ -510,7 +507,6 @@ Widget _buildTrackingCard() {
           ),
         ),
         
-        // --- NEW: Pagination Controls ---
         if (totalPages > 1) ...[
           const SizedBox(height: 16),
           Row(

@@ -5,7 +5,7 @@ import '../theme/app_theme.dart';
 import '../config.dart';
 
 class DocumentDetailsScreen extends StatefulWidget {
-  final int docId; // Require the ID to be passed in
+  final int docId; 
 
   const DocumentDetailsScreen({super.key, required this.docId});
 
@@ -39,7 +39,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     }
   }
 
-  // Helper method to format ISO timestamps neatly
   String _formatDateTime(String? isoDate) {
     if (isoDate == null) return 'Pending';
     try {
@@ -54,7 +53,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
     }
   }
 
-  // Helper method for Date Only (Estimated Completion)
   String _formatDateOnly(String? isoDate) {
     if (isoDate == null) return 'Not Set';
     try {
@@ -78,28 +76,35 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         : Column(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0), // Includes bottom padding fix
-              child: Column(
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 16),
-                  
-                  Row(children: [
-                    Expanded(child: _buildInfoBox('Requestor', _docData['requestor'] ?? 'Unknown', Icons.person_outline)),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildInfoBox('Form Type', _docData['form_type'] ?? 'Unknown', Icons.account_balance)),
-                  ]),
-                  const SizedBox(height: 16),
-
-                  _buildCompletionCard(_formatDateOnly(_docData['edc']), _docData['status'] ?? 'Unknown'),
-                  const SizedBox(height: 16),
-
-                  _buildCollapsibleQrSection(),
-                  const SizedBox(height: 16),
-
-                  _buildProcessingRoute(),
-                ],
+            child: RefreshIndicator(
+              color: AppTheme.primaryRed,
+              onRefresh: () async {
+                await _fetchDocumentDetails();
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(), // Pull-down physics added
+                padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0),
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    const SizedBox(height: 16),
+                    
+                    Row(children: [
+                      Expanded(child: _buildInfoBox('Requestor', _docData['requestor'] ?? 'Unknown', Icons.person_outline)),
+                      const SizedBox(width: 16),
+                      Expanded(child: _buildInfoBox('Form Type', _docData['form_type'] ?? 'Unknown', Icons.account_balance)),
+                    ]),
+                    const SizedBox(height: 16),
+            
+                    _buildCompletionCard(_formatDateOnly(_docData['edc']), _docData['status'] ?? 'Unknown'),
+                    const SizedBox(height: 16),
+            
+                    _buildCollapsibleQrSection(),
+                    const SizedBox(height: 16),
+            
+                    _buildProcessingRoute(),
+                  ],
+                ),
               ),
             ),
           ),
@@ -205,7 +210,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
           if (history.isEmpty)
             const Text('No routing data available.', style: TextStyle(color: Colors.grey)),
             
-          // Dynamically map the history timeline
           ...history.asMap().entries.map((entry) {
             int idx = entry.key;
             var log = entry.value;
