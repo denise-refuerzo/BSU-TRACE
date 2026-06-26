@@ -253,7 +253,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 
-  Widget _buildTrackingCard() {
+Widget _buildTrackingCard() {
     if (_liveDocument == null) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -275,8 +275,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start, // Align to top in case title wraps
             children: [
-              const Text('Live Document Tracking', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              // Wrap the title in an Expanded widget to prevent overflow
+              const Expanded(
+                child: Text(
+                  'Live Document Tracking', 
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+                ),
+              ),
+              const SizedBox(width: 12), // Add a little spacing between text and badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
                 decoration: BoxDecoration(color: isCompleted ? Colors.green : AppTheme.primaryRed, borderRadius: BorderRadius.circular(4)), 
