@@ -168,7 +168,6 @@ class AppDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            buildBottomItem(title: 'Settings', icon: Icons.settings_outlined, onTap: () {}),
             buildBottomItem(title: 'Logout', icon: Icons.logout, onTap: () {
               // Reset session state
               SessionManager().logout();

@@ -303,24 +303,42 @@ class _SchedulerContentState extends State<SchedulerContent> {
       }
     }
 
+    // Calculate available inventory
+    int chairsAvailable = (chairsTotal - chairsInUse).clamp(0, chairsTotal);
+    int tablesAvailable = (tablesTotal - tablesInUse).clamp(0, tablesTotal);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Logistics Inventory (Today)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        _buildInventoryBar('Folding Tables', tablesInUse, tablesTotal),
+        _buildInventoryBar('Folding Tables', tablesAvailable, tablesTotal),
         const SizedBox(height: 12),
-        _buildInventoryBar('Stackable Chairs', chairsInUse, chairsTotal),
+        _buildInventoryBar('Stackable Chairs', chairsAvailable, chairsTotal),
       ],
     );
   }
 
-  Widget _buildInventoryBar(String title, int current, int total) {
+  Widget _buildInventoryBar(String title, int available, int total) {
+    // Determine ratio for the progress bar based on availability
+    double availabilityRatio = total > 0 ? (available / total) : 0.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(title), Text('$current / $total')]),
-        LinearProgressIndicator(value: current / total, color: AppTheme.primaryRed, backgroundColor: Colors.grey.shade200),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+          children: [
+            Text(title), 
+            Text('$available available', style: const TextStyle(fontWeight: FontWeight.bold))
+          ]
+        ),
+        const SizedBox(height: 6), // Added spacing to separate text from the bar
+        LinearProgressIndicator(
+          value: availabilityRatio, 
+          color: AppTheme.primaryRed, 
+          backgroundColor: Colors.grey.shade200
+        ),
       ],
     );
   }

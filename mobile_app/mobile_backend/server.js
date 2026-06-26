@@ -365,6 +365,55 @@ app.get('/api/process-types', async (req, res) => {
 });
 
 // ==========================================
+// 9.5 FETCH ROUTE FOR SPECIFIC PROCESS TYPE
+// Route: GET /api/process-types/:id/route
+// ==========================================
+app.get('/api/process-types/:id/route', async (req, res) => {
+  const processId = req.params.id;
+
+  try {
+    const query = `
+      SELECT 
+        o1.office_name AS stop_1,
+        o2.office_name AS stop_2,
+        o3.office_name AS stop_3,
+        o4.office_name AS stop_4,
+        o5.office_name AS stop_5,
+        o6.office_name AS stop_6,
+        o7.office_name AS stop_7
+      FROM public.process_type p
+      JOIN public.route r ON p.r_id = r.r_id
+      LEFT JOIN public.offices o1 ON r.stop_1 = o1.o_id
+      LEFT JOIN public.offices o2 ON r.stop_2 = o2.o_id
+      LEFT JOIN public.offices o3 ON r.stop_3 = o3.o_id
+      LEFT JOIN public.offices o4 ON r.stop_4 = o4.o_id
+      LEFT JOIN public.offices o5 ON r.stop_5 = o5.o_id
+      LEFT JOIN public.offices o6 ON r.stop_6 = o6.o_id
+      LEFT JOIN public.offices o7 ON r.stop_7 = o7.o_id
+      WHERE p.p_id = $1;
+    `;
+    
+    const result = await pool.query(query, [processId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Route not found for this process type' });
+    }
+
+    // Convert the row into an array of stops, filtering out null entries
+    const row = result.rows[0];
+    const stops = [
+      row.stop_1, row.stop_2, row.stop_3, row.stop_4,
+      row.stop_5, row.stop_6, row.stop_7
+    ].filter(stop => stop !== null);
+
+    res.status(200).json({ stops });
+  } catch (error) {
+    console.error('Fetch Process Route Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // 10. CREATE NEW DOCUMENT ENDPOINT
 // Route: POST /api/documents
 // ==========================================
