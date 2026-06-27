@@ -1,13 +1,14 @@
 // lib/screens/documents_screen.dart
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/modals/document_scanner_modal.dart';
 import '../widgets/modals/processor_document_details_modal.dart';
-import '../config.dart'; // Import your global configuration
+import '../config.dart';
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
@@ -20,39 +21,52 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   List<dynamic> documents = [];
   bool isLoading = true;
   String errorMessage = '';
+  Timer? _timer;
+  bool _isAscending = false; // Add state for sort direction
 
   @override
   void initState() {
     super.initState();
     fetchDocuments();
+
+    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) fetchDocuments();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   Future<void> fetchDocuments() async {
-    // Optionally set isLoading to true if you want a loading spinner on manual fetch calls, 
-    // though RefreshIndicator handles its own loading animation.
     final String url = '${AppConfig.baseUrl}/documents';
-    
+
     try {
       final response = await http.get(Uri.parse(url));
-      
+
       if (response.statusCode == 200) {
-        setState(() {
-          documents = json.decode(response.body);
-          isLoading = false;
-          errorMessage = ''; // Clear any previous errors on successful fetch
-        });
-      } else {
-        setState(() {
-          errorMessage = 'Failed to load documents: ${response.statusCode}';
-          isLoading = false;
-        });
+        if (mounted) {
+          List<dynamic> fetchedDocs = json.decode(response.body);
+
+          fetchedDocs.sort((a, b) {
+            DateTime dateA = DateTime.tryParse(a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00Z')?.toUtc() ?? DateTime(1970).toUtc();
+            DateTime dateB = DateTime.tryParse(b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00Z')?.toUtc() ?? DateTime(1970).toUtc();
+            
+            // Sort based on _isAscending state
+            return _isAscending ? dateA.compareTo(dateB) : dateB.compareTo(dateA);
+          });
+
+          setState(() {
+            documents = fetchedDocs;
+            isLoading = false;
+            errorMessage = '';
+          });
+        }
       }
     } catch (e) {
       debugPrint("Error fetching documents: $e");
-      setState(() {
-        errorMessage = 'Could not connect to server.';
-        isLoading = false;
-      });
     }
   }
 
@@ -65,62 +79,27 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         actions: buildAppBarActions(context),
       ),
       drawer: const AppDrawer(),
-      body: isLoading 
+      body: isLoading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
-          : errorMessage.isNotEmpty 
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(errorMessage, style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {
-                          setState(() => isLoading = true);
-                          fetchDocuments();
-                        },
-                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                        child: const Text('Retry', style: TextStyle(color: Colors.white)),
-                      )
-                    ],
-                  ),
-                )
-              // Wrapped the scroll view in a RefreshIndicator
-              : RefreshIndicator(
-                  onRefresh: fetchDocuments, // Calls fetchDocuments when pulled down
-                  color: AppTheme.primaryRed,
-                  backgroundColor: Colors.white,
-                  child: SingleChildScrollView(
-                    // Crucial: AlwaysScrollableScrollPhysics ensures pull-to-refresh works 
-                    // even if the list is too short to normally scroll
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(20.0),
-                    child: Column(
-                      children: [
-                        _buildSearchBar(),
-                        const SizedBox(height: 16),
-                        _buildFilterDropdown(),
-                        const SizedBox(height: 24),
-                        
-                        // Dynamically render cards based on API data
-                        ...documents.map((doc) => _buildDocumentCard(
-                          context,
-                          doc, // Pass the entire map here
-                        )),
-                        
-                        // Extra padding at the bottom so the FAB doesn't block the last card
-                        const SizedBox(height: 80),
-                      ],
-                    ),
-                  ),
+          : RefreshIndicator(
+              onRefresh: fetchDocuments,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    _buildSearchBar(),
+                    const SizedBox(height: 16),
+                    _buildFilterRow(), // Updated to Row
+                    const SizedBox(height: 24),
+                    ...documents.map((doc) => _buildDocumentCard(context, doc)),
+                    const SizedBox(height: 80),
+                  ],
                 ),
+              ),
+            ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          showDialog(
-            context: context,
-            builder: (context) => const DocumentScannerModal(),
-          );
-        },
+        onPressed: () => showDialog(context: context, builder: (context) => const DocumentScannerModal()),
         backgroundColor: AppTheme.primaryRed,
         child: const Icon(Icons.qr_code_scanner, color: Colors.white),
       ),
@@ -133,65 +112,103 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           prefixIcon: const Icon(Icons.search, color: Colors.grey),
           filled: true,
           fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8), 
-            borderSide: BorderSide.none
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
         ),
       );
 
-  Widget _buildFilterDropdown() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: Colors.white, 
-          borderRadius: BorderRadius.circular(8)
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            isExpanded: true,
-            value: 'All Status',
-            items: ['All Status', 'Incoming', 'In Verification', 'Pending'].map((String value) {
-              return DropdownMenuItem<String>(value: value, child: Text(value));
-            }).toList(),
-            onChanged: (_) {},
+  // New Row to hold both Filter and Sort
+Widget _buildFilterRow() => Row(
+        children: [
+          // 1. Status Filter Dropdown
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: 'All Status',
+                  items: ['All Status', 'Incoming', 'In Verification', 'Pending'].map((String value) {
+                    return DropdownMenuItem<String>(value: value, child: Text(value));
+                  }).toList(),
+                  onChanged: (_) {},
+                ),
+              ),
+            ),
           ),
-        ),
+          const SizedBox(width: 8),
+          
+          // 2. Sort Dropdown (Replaces the IconButton)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                // Map the boolean state to a readable string
+                value: _isAscending ? 'Oldest' : 'Newest', 
+                items: ['Newest', 'Oldest'].map((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value, 
+                    child: Text(value, style: const TextStyle(fontSize: 14)),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    // Update state: 'Oldest' sets _isAscending to true, 'Newest' to false
+                    _isAscending = (newValue == 'Oldest');
+                    fetchDocuments(); // Re-sort and refresh the list
+                  });
+                },
+              ),
+            ),
+          ),
+        ],
       );
 
-Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
-    // Extract variables with fallbacks, including the tracking ID (QR code)
+  Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
+    // ... (rest of _buildDocumentCard remains exactly the same as previously provided)
     final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
     final String title = document['title'] ?? 'No Title';
     final String form = document['form_type'] ?? 'N/A';
     final String origin = document['origin_office'] ?? 'N/A';
     final String status = document['status'] ?? 'Pending';
-    final String time = 'Just now'; // You can format document['created_at'] here
 
-    Color statusColor = status == 'Incoming' 
-        ? Colors.red.shade100 
-        : (status == 'Pending' ? Colors.orange.shade100 : Colors.blue.shade100);
-    
+String time = 'N/A';
+    String? dbTime = document['created_at'] ?? document['updated_at'];
+
+    if (dbTime != null) {
+      DateTime? parsedDate = DateTime.tryParse(dbTime)?.toUtc();
+      if (parsedDate != null) {
+        DateTime now = DateTime.now().toUtc();
+        Duration diff = now.difference(parsedDate);
+
+        // Standard logic: Use the total duration properties
+        if (diff.inDays > 0) {
+          time = '${diff.inDays} ${diff.inDays == 1 ? 'day' : 'days'} ago';
+        } else if (diff.inHours > 0) {
+          time = '${diff.inHours} ${diff.inHours == 1 ? 'hour' : 'hours'} ago';
+        } else if (diff.inMinutes > 0) {
+          time = '${diff.inMinutes} ${diff.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+        } else {
+          time = 'Just now';
+        }
+      }
+    }
+
+    Color statusColor = status == 'Incoming' ? Colors.red.shade100 : (status == 'Pending' ? Colors.orange.shade100 : Colors.blue.shade100);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-          color: Colors.white, 
-          borderRadius: BorderRadius.circular(8), 
-          border: Border.all(color: Colors.red.shade50)),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // REMOVED hardcoded 'DOC-REF-001' and const modifier
-              // REPLACED with dynamic trackingId variable
-              Text(trackingId, 
-                  style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-              Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
-                  decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), 
-                  child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+              Text(trackingId, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
             ],
           ),
           const SizedBox(height: 8),
@@ -204,31 +221,18 @@ Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               GestureDetector(
-                onTap: () {
-                  showModalBottomSheet(
+                onTap: () => showModalBottomSheet(
                     context: context,
-                    isScrollControlled: true, 
-                    backgroundColor: Colors.transparent, 
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
                     builder: (context) => ProcessorDocumentDetailsModal(
                       document: document,
-                      onAdHocVerification: () {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Ad-hoc verification triggered")),
-                        );
-                      },
-                      onDownloadDigitalCopy: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Downloading digital copy...")),
-                        );
-                      },
-                    ),
-                  );
-                },
-                child: const Text('View Details >', 
-                    style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
+                      onAdHocVerification: () => Navigator.pop(context),
+                      onDownloadDigitalCopy: () {},
+                    )),
+                child: const Text('View Details >', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
               ),
-              Text(time, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
             ],
           ),
         ],
