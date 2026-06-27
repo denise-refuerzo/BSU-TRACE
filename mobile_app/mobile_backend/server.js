@@ -196,6 +196,7 @@ app.get('/api/documents', async (req, res) => {
   try {
     const query = `
       SELECT 
+        i.ini_id,           /* <--- Add this line so Flutter knows the document ID */
         i.title, 
         p.process_name AS form_type, 
         o.office_name AS origin_office, 

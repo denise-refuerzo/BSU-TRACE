@@ -1,14 +1,93 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../../config.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/modals/document_scanner_modal.dart';
-// Add these imports
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
 
-class ProcessorDashboardScreen extends StatelessWidget {
+class ProcessorDashboardScreen extends StatefulWidget {
   const ProcessorDashboardScreen({super.key});
+
+  @override
+  State<ProcessorDashboardScreen> createState() => _ProcessorDashboardScreenState();
+}
+
+class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
+  bool _isLoading = true;
+  List<dynamic> _documents = [];
+  int _incomingCount = 0;
+  int _pendingCount = 0;
+  int _completedCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDashboardData();
+  }
+
+  Future<void> _fetchDashboardData() async {
+    try {
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            _documents = data;
+            // Derive stats locally from the full document pool
+            _incomingCount = data.where((d) => d['status'].toString().toLowerCase() == 'pending').length;
+            _pendingCount = data.where((d) => ['processing', 'in review'].contains(d['status'].toString().toLowerCase())).length;
+            _completedCount = data.where((d) => d['status'].toString().toLowerCase() == 'completed').length;
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to load dashboard data.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connection error while fetching data.')),
+        );
+      }
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'completed':
+      case 'approved':
+        return Colors.green;
+      case 'pending':
+        return Colors.orange;
+      case 'in review':
+      case 'processing':
+        return AppTheme.primaryRed;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _formatDateString(String? isoString) {
+    if (isoString == null) return 'Unknown Time';
+    try {
+      final date = DateTime.parse(isoString).toLocal();
+      // Simple format: YYYY-MM-DD
+      return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return 'Recent';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +100,12 @@ class ProcessorDashboardScreen extends StatelessWidget {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    // Find the first document that needs attention for the Priority Card
+    final priorityDoc = _documents.firstWhere(
+      (doc) => doc['status'].toString().toLowerCase() != 'completed',
+      orElse: () => null,
+    );
+
     return Scaffold(
       backgroundColor: const Color(0xFFFCF6F6),
       appBar: AppBar(
@@ -28,36 +113,67 @@ class ProcessorDashboardScreen extends StatelessWidget {
         actions: buildAppBarActions(context)
       ),
       drawer: const AppDrawer(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Hello, Processor', style: TextStyle(color: Colors.black54)),
-            const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                _buildStatCard('15', 'INCOMING DOCS', Colors.white, Colors.red.shade100),
-                const SizedBox(width: 12),
-                _buildStatCard('28', 'PENDING APPROVAL', Colors.white, Colors.orange.shade100),
-              ],
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+        : RefreshIndicator(
+            onRefresh: _fetchDashboardData,
+            color: AppTheme.primaryRed,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Hello, Processor', style: TextStyle(color: Colors.black54)),
+                  const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
+                  
+                  // Dynamic Stats Row
+                  Row(
+                    children: [
+                      _buildStatCard(_incomingCount.toString(), 'INCOMING DOCS', Colors.white, Colors.red.shade100),
+                      const SizedBox(width: 12),
+                      _buildStatCard(_pendingCount.toString(), 'PENDING APPROVAL', Colors.white, Colors.orange.shade100),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildStatCard(_completedCount.toString(), 'COMPLETED', Colors.white, Colors.green.shade100, isFullWidth: true),
+                  const SizedBox(height: 24),
+                  
+                  // Priority Card logic
+                  if (priorityDoc != null) ...[
+                    const Text('Current Priority', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    _buildPriorityCard(priorityDoc),
+                    const SizedBox(height: 24),
+                  ],
+
+                  // Dynamic Activity List
+                  const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  if (_documents.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20.0),
+                      child: Text('No recent activity found.', style: TextStyle(color: Colors.grey)),
+                    )
+                  else
+                    ..._documents.take(5).map((doc) {
+                      final title = doc['title'] ?? 'Untitled Document';
+                      final office = doc['origin_office'] ?? 'Unknown Office';
+                      final date = _formatDateString(doc['created_at']);
+                      final status = doc['status'] ?? 'Unknown';
+
+                      return _buildActivityItem(
+                        title, 
+                        '$office • $date', 
+                        status, 
+                        _getStatusColor(status)
+                      );
+                    }),
+                ],
+              ),
             ),
-            const SizedBox(height: 12),
-            _buildStatCard('160', 'COMPLETED', Colors.white, Colors.green.shade100, isFullWidth: true),
-            const SizedBox(height: 24),
-            const Text('Current Priority', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            _buildPriorityCard(),
-            const SizedBox(height: 24),
-            const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            _buildActivityItem('Scholarship App #102', 'OSAS • 10:45 AM', 'Approved', Colors.green),
-            _buildActivityItem('Leave Request - Prof. Lim', 'HR Office • Yesterday', 'Pending', Colors.orange),
-            _buildActivityItem('Research Proposal Draft', 'Grad School • Yesterday', 'In Review', AppTheme.primaryRed),
-          ],
-        ),
-      ),
+          ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           showDialog(
@@ -75,6 +191,7 @@ class ProcessorDashboardScreen extends StatelessWidget {
     return Expanded(
       flex: isFullWidth ? 0 : 1,
       child: Container(
+        width: isFullWidth ? double.infinity : null,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
         child: Column(
@@ -88,7 +205,17 @@ class ProcessorDashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPriorityCard() {
+  Widget _buildPriorityCard(dynamic doc) {
+    final title = doc['title'] ?? 'Untitled Document';
+    final office = doc['origin_office'] ?? 'Unknown Office';
+    final formType = doc['form_type'] ?? 'Standard Process';
+    final status = (doc['status'] ?? 'PENDING').toString().toUpperCase();
+
+    // Determine tracking steps based on status
+    final isVerified = status != 'PENDING';
+    final isApproved = status == 'APPROVED' || status == 'COMPLETED';
+    final isDispatched = status == 'COMPLETED';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
@@ -98,22 +225,36 @@ class ProcessorDashboardScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Transcript of Records #8821', style: TextStyle(fontWeight: FontWeight.bold)),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)), child: const Text('IN PROGRESS', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold)))
+              Expanded(
+                child: Text(
+                  title, 
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
+                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)), 
+                child: Text(
+                  status, 
+                  style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold)
+                ),
+              )
             ],
           ),
           const SizedBox(height: 4),
-          const Text('Registrar\'s Office • High Priority', style: TextStyle(color: Colors.grey, fontSize: 13)),
+          Text('$office • $formType', style: const TextStyle(color: Colors.grey, fontSize: 13)),
           const SizedBox(height: 20),
           Row(
             children: [
               _buildStepNode(true, 'Submission'),
-              _buildConnector(true),
-              _buildStepNode(true, 'Verification'),
-              _buildConnector(false),
-              _buildStepNode(false, 'Approval'),
-              _buildConnector(false),
-              _buildStepNode(false, 'Dispatch'),
+              _buildConnector(isVerified),
+              _buildStepNode(isVerified, 'Verification'),
+              _buildConnector(isApproved),
+              _buildStepNode(isApproved, 'Approval'),
+              _buildConnector(isDispatched),
+              _buildStepNode(isDispatched, 'Dispatch'),
             ],
           )
         ],
@@ -123,13 +264,34 @@ class ProcessorDashboardScreen extends StatelessWidget {
 
   Widget _buildStepNode(bool isActive, String label) {
     return Column(children: [
-      Container(width: 24, height: 24, decoration: BoxDecoration(color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, shape: BoxShape.circle), child: isActive ? const Icon(Icons.check, color: Colors.white, size: 14) : null),
+      Container(
+        width: 24, 
+        height: 24, 
+        decoration: BoxDecoration(
+          color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, 
+          shape: BoxShape.circle
+        ), 
+        child: isActive ? const Icon(Icons.check, color: Colors.white, size: 14) : null
+      ),
       const SizedBox(height: 4),
-      Text(label, style: TextStyle(fontSize: 9, color: isActive ? AppTheme.primaryRed : Colors.grey, fontWeight: isActive ? FontWeight.bold : FontWeight.normal))
+      Text(
+        label, 
+        style: TextStyle(
+          fontSize: 9, 
+          color: isActive ? AppTheme.primaryRed : Colors.grey, 
+          fontWeight: isActive ? FontWeight.bold : FontWeight.normal
+        )
+      )
     ]);
   }
 
-  Widget _buildConnector(bool isActive) => Expanded(child: Container(height: 2, color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, margin: const EdgeInsets.only(bottom: 15)));
+  Widget _buildConnector(bool isActive) => Expanded(
+    child: Container(
+      height: 2, 
+      color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, 
+      margin: const EdgeInsets.only(bottom: 15)
+    )
+  );
 
   Widget _buildActivityItem(String title, String subtitle, String status, Color statusColor) {
     return Container(
@@ -140,8 +302,16 @@ class ProcessorDashboardScreen extends StatelessWidget {
         children: [
           Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey))])),
-          Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12))
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start, 
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), 
+                Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)
+              ]
+            )
+          ),
+          Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
         ],
       ),
     );

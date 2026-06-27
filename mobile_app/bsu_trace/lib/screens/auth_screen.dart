@@ -19,6 +19,10 @@ class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
   UserRole _selectedRole = UserRole.user;
 
+  // New state variables for loading and password visibility
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -29,9 +33,10 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Authenticating...')),
-    );
+    // Set loading state to true
+    setState(() {
+      _isLoading = true;
+    });
     
     try {
       final response = await http.post(
@@ -49,10 +54,11 @@ class _AuthScreenState extends State<AuthScreen> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final int accountId = data['a_id'];
-        final int userId = data['u_id']; // Extracts the active user ID matching the PostgreSQL schema column
+        final int userId = data['u_id'];
 
-        // Update session tracking layer with both the verified role and user ID
         SessionManager().login(accountId.toRole(), userId);
+
+        if (!mounted) return;
 
         switch (SessionManager().currentRole) {
           case UserRole.admin: 
@@ -69,16 +75,26 @@ class _AuthScreenState extends State<AuthScreen> {
             break;
         }
       } else {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Invalid credentials or unauthorized role.')),
         );
+        // Stop loading on error
+        setState(() {
+          _isLoading = false;
+        });
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Connection error.')),
       );
+      // Stop loading on exception
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -169,16 +185,26 @@ class _AuthScreenState extends State<AuthScreen> {
                         const SizedBox(height: 24),
                         
                         ElevatedButton(
-                          onPressed: _handleLogin,
+                          // Disable button interactions while loading
+                          onPressed: _isLoading ? () {} : _handleLogin,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.primaryRed, 
                             padding: const EdgeInsets.symmetric(vertical: 16), 
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
-                          child: const Text(
-                            'SIGN IN', 
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
+                          child: _isLoading 
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'SIGN IN', 
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
                         ),
                       ],
                     ),
@@ -209,11 +235,26 @@ class _AuthScreenState extends State<AuthScreen> {
         const SizedBox(height: 8),
         TextFormField(
           controller: controller,
-          obscureText: isPassword,
+          // Use the obscure state only if this is a password field
+          obscureText: isPassword ? _obscurePassword : false,
           validator: (value) => (value == null || value.isEmpty) ? 'Please enter your $label' : null,
           decoration: InputDecoration(
             hintText: hint,
             prefixIcon: icon != null ? Icon(icon, color: Colors.brown) : null,
+            // Add a toggle icon if this is a password field
+            suffixIcon: isPassword
+                ? IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.brown,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  )
+                : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8), 
