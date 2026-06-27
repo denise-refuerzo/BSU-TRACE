@@ -196,6 +196,7 @@ app.get('/api/documents', async (req, res) => {
   try {
     const query = `
       SELECT 
+        i.qr_code,
         i.title, 
         p.process_name AS form_type, 
         o.office_name AS origin_office, 
@@ -268,6 +269,7 @@ app.get('/api/users/:id/documents', async (req, res) => {
       WITH RankedDocs AS (
         SELECT 
           i.ini_id,
+          i.qr_code,
           i.title,
           p.process_name AS form_type,
           o.office_name AS current_location,

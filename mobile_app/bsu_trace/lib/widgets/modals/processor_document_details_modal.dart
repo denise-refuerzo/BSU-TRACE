@@ -1,82 +1,277 @@
-// lib/widgets/modals/processor_document_details_modal.dart
 import 'package:flutter/material.dart';
-import '../../theme/app_theme.dart';
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
-  const ProcessorDocumentDetailsModal({super.key});
+  final Map<String, dynamic> document;
+  final VoidCallback onAdHocVerification;
+  final VoidCallback onDownloadDigitalCopy;
+
+  const ProcessorDocumentDetailsModal({
+    super.key,
+    required this.document,
+    required this.onAdHocVerification,
+    required this.onDownloadDigitalCopy,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Expanded(
-                  child: Text('Official Transcript Request', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ),
-                GestureDetector(onTap: () => Navigator.pop(context), child: const Icon(Icons.close, color: Colors.black54)),
-              ],
-            ),
-            const Text('TR-2023-00412', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 24),
+    // ----------------------------------------------------------------------
+    // UPDATED: Aligned extraction keys with the API data from documents_screen
+    // ----------------------------------------------------------------------
+    final String title = document['title'] ?? 'No Title';
+    final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
+    final String formType = document['form_type'] ?? document['process_name'] ?? 'N/A';
+    final String status = document['status'] ?? 'Pending';
+    final String originatingOffice = document['origin_office'] ?? document['originatingOffice'] ?? 'N/A';
 
-            // Info Section
-            Row(
-              children: [
-                Expanded(child: _buildInfo('FORM TYPE', 'Form 137-A')),
-                Expanded(child: _buildInfo('STATUS', 'Incoming', isStatus: true)),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildInfo('ORIGINATING OFFICE', 'Registrar Office'),
-            const SizedBox(height: 24),
+    // Theme Colors
+    const Color primaryRed = Color(0xFFB71C1C);
+    const Color lightPink = Color(0xFFFFEBEE);
 
-            // QR Placeholder
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
-              child: Column(
-                children: [
-                  Container(height: 120, width: 120, color: Colors.white, child: const Icon(Icons.qr_code, size: 80)),
-                  const SizedBox(height: 12),
-                  const Text('Scan to authenticate document copy', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24.0)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag Handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 24.0),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const SizedBox(height: 24),
+          ),
 
-            // Action Buttons
-            ElevatedButton(
-              onPressed: () {},
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed, padding: const EdgeInsets.symmetric(vertical: 16)),
-              child: const Text('Ad-hoc Verification', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          // Header Row
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'serif',
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      trackingId, // Now dynamically displays the correct tracking ID
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: primaryRed,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              InkWell(
+                onTap: () => Navigator.of(context).pop(),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: lightPink,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.close, color: primaryRed, size: 20),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFFEEEEEE), thickness: 1),
+          const SizedBox(height: 16),
+
+          // Details Row 1
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'FORM TYPE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formType,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'STATUS',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: lightPink,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        status,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: primaryRed,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Details Row 2
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'ORIGINATING OFFICE',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[600],
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                originatingOffice,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+          const Divider(color: Color(0xFFEEEEEE), thickness: 1),
+          const SizedBox(height: 16),
+
+          // QR Code Section
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24.0),
+            decoration: BoxDecoration(
+              color: lightPink,
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: () {},
-              style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed)),
-              child: const Text('Download Digital Copy', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.qr_code_2, size: 120, color: Colors.black87),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Scan to authenticate document copy',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[800],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // Action Buttons
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onAdHocVerification,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryRed,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.fact_check_outlined, size: 20),
+              label: const Text(
+                'Ad-hoc Verification',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: onDownloadDigitalCopy,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: primaryRed,
+                side: const BorderSide(color: primaryRed),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Download Digital Copy',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+
+          SizedBox(height: MediaQuery.of(context).padding.bottom > 0 ? 8 : 16),
+        ],
       ),
     );
   }
-
-  Widget _buildInfo(String label, String val, {bool isStatus = false}) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 4),
-      Text(val, style: TextStyle(fontWeight: FontWeight.bold, color: isStatus ? AppTheme.primaryRed : Colors.black)),
-    ],
-  );
 }
