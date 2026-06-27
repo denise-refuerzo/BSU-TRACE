@@ -6,8 +6,8 @@ import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/modals/document_scanner_modal.dart';
-import '../config.dart'; 
-import 'document_details_screen.dart'; // Added the import for the details screen
+import '../widgets/modals/processor_document_details_modal.dart';
+import '../config.dart'; // Import your global configuration
 
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
@@ -53,17 +53,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
   }
 
-  // Helper method to format the ISO timestamp
-  String _formatTime(String? isoDate) {
-    if (isoDate == null) return 'Just now';
-    try {
-      final date = DateTime.parse(isoDate).toLocal();
-      return '${date.month}/${date.day}/${date.year}';
-    } catch (e) {
-      return 'Recent';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,12 +78,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       // Dynamically render cards based on API data
                       ...documents.map((doc) => _buildDocumentCard(
                         context,
-                        doc['ini_id'] ?? 1, // Pass the document ID (Fallback to 1)
                         doc['title'] ?? 'No Title',
                         doc['form_type'] ?? 'N/A',
                         doc['origin_office'] ?? 'N/A',
                         doc['status'] ?? 'Pending',
-                        _formatTime(doc['created_at']), 
+                        'Just now', // You can format doc['created_at'] here
                       )),
                       
                       const SizedBox(height: 80),
@@ -140,12 +128,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       );
 
   Widget _buildDocumentCard(
-      BuildContext context, int docId, String title, String form, String origin, String status, String time) {
+      BuildContext context, String title, String form, String origin, String status, String time) {
     
-    // Normalize status strings for color rendering
-    Color statusColor = status.toLowerCase() == 'incoming' 
+    Color statusColor = status == 'Incoming' 
         ? Colors.red.shade100 
-        : (status.toLowerCase() == 'pending' ? Colors.orange.shade100 : Colors.blue.shade100);
+        : (status == 'Pending' ? Colors.orange.shade100 : Colors.blue.shade100);
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -160,12 +147,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('DOC-REF-${docId.toString().padLeft(3, '0')}', 
-                  style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+              const Text('DOC-REF-001', 
+                  style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
               Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
                   decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), 
-                  child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                  child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
             ],
           ),
           const SizedBox(height: 8),
@@ -179,12 +166,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             children: [
               GestureDetector(
                 onTap: () {
-                  // Navigate to the DocumentDetailsScreen, passing the docId
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DocumentDetailsScreen(docId: docId),
-                    ),
+                  showDialog(
+                    context: context,
+                    builder: (context) => const ProcessorDocumentDetailsModal(),
                   );
                 },
                 child: const Text('View Details >', 
