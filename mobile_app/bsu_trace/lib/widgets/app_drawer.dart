@@ -38,7 +38,7 @@ class AppDrawer extends StatelessWidget {
           }
         },
         child: Container(
-          color: isSelected ? Colors.white.withOpacity(0.05) : Colors.transparent,
+          color: isSelected ? Colors.white.withValues(alpha: 0.05) : Colors.transparent,
           child: Row(
             children: [
               Container(
@@ -147,7 +147,7 @@ class AppDrawer extends StatelessWidget {
               ),
             ),
             
-            Divider(color: Colors.white.withOpacity(0.08), height: 1),
+            Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
             Padding(
               padding: const EdgeInsets.all(24.0),
               child: Row(

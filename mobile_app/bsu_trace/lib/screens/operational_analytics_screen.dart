@@ -189,7 +189,7 @@ class OperationalAnalyticsScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.lightbulb, color: Colors.white, size: 28),
@@ -219,7 +219,7 @@ class OperationalAnalyticsScreen extends StatelessWidget {
             onPressed: () {},
             style: OutlinedButton.styleFrom(
               foregroundColor: Colors.white,
-              side: BorderSide(color: Colors.white.withOpacity(0.5)),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             child: const Text('Dismiss Tip', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -309,7 +309,7 @@ class OperationalAnalyticsScreen extends StatelessWidget {
           ),
         ),
         // Data Cells
-        ...values.map((v) => _buildHeatmapCell(v)).toList(),
+        ...values.map((v) => _buildHeatmapCell(v)),
       ],
     );
   }

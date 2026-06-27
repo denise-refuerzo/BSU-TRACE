@@ -291,7 +291,7 @@ class SigneeDashboardScreen extends StatelessWidget {
   Widget _buildSystemStatus() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.red.shade50.withOpacity(0.5),
+        color: Colors.red.shade50.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.red.shade100),
       ),

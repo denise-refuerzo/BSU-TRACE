@@ -134,7 +134,7 @@ class SigneeHistoryDetailsModal extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade50.withOpacity(0.5),
+                          color: Colors.red.shade50.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.red.shade100),
                         ),
@@ -177,7 +177,7 @@ class SigneeHistoryDetailsModal extends StatelessWidget {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20.0),
-                color: Colors.red.shade50.withOpacity(0.5), // Light pink tint
+                color: Colors.red.shade50.withValues(alpha: 0.5), // Light pink tint
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [

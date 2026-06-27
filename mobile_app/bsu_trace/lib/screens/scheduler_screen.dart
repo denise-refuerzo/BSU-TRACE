@@ -271,7 +271,7 @@ class _SchedulerContentState extends State<SchedulerContent> {
               alignment: Alignment.center,
               margin: const EdgeInsets.all(2),
               decoration: BoxDecoration(
-                color: hasConfirmed ? AppTheme.primaryRed.withOpacity(0.2) : (hasReservation ? Colors.green.withOpacity(0.2) : Colors.transparent),
+                color: hasConfirmed ? AppTheme.primaryRed.withValues(alpha: 0.2) : (hasReservation ? Colors.green.withValues(alpha: 0.2) : Colors.transparent),
                 border: hasConfirmed ? Border.all(color: AppTheme.primaryRed) : (hasReservation ? Border.all(color: Colors.green) : null),
                 borderRadius: BorderRadius.circular(8),
               ),

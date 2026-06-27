@@ -60,7 +60,7 @@ class DocumentScannerModal extends StatelessWidget {
                       decoration: BoxDecoration(
                         border: Border.all(color: AppTheme.primaryRed, width: 3),
                         borderRadius: BorderRadius.circular(16),
-                        color: Colors.white.withOpacity(0.05), // Slight transparent fill
+                        color: Colors.white.withValues(alpha: 0.05), // Slight transparent fill
                       ),
                       child: Stack(
                         alignment: Alignment.center,
@@ -75,7 +75,7 @@ class DocumentScannerModal extends StatelessWidget {
                                 color: AppTheme.primaryRed,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: AppTheme.primaryRed.withOpacity(0.5),
+                                    color: AppTheme.primaryRed.withValues(alpha: 0.5),
                                     blurRadius: 8,
                                     spreadRadius: 2,
                                   )

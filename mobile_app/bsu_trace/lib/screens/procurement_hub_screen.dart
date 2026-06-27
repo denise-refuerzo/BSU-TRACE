@@ -91,7 +91,7 @@ class ProcurementHubScreen extends StatelessWidget {
                 children: [
                   const Text('Procurement Health', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
-                  Text('System performance and fulfillment metrics.', style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                  Text('System performance and fulfillment metrics.', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13)),
                   const SizedBox(height: 24),
                   
                   Row(
@@ -191,7 +191,7 @@ class ProcurementHubScreen extends StatelessWidget {
           height: 4,
           width: double.infinity,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.3), 
+            color: Colors.white.withValues(alpha: 0.3), 
             borderRadius: BorderRadius.circular(2)
           ),
           child: FractionallySizedBox(

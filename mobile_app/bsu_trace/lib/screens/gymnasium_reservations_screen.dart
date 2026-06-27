@@ -60,7 +60,7 @@ class GymnasiumReservationsScreen extends StatelessWidget {
                 hintStyle: const TextStyle(color: Colors.black54, fontSize: 14),
                 prefixIcon: const Icon(Icons.search, color: Colors.black54),
                 filled: true,
-                fillColor: Colors.red.shade50.withOpacity(0.5), 
+                fillColor: Colors.red.shade50.withValues(alpha: 0.5), 
                 contentPadding: const EdgeInsets.symmetric(vertical: 14),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
@@ -78,7 +78,7 @@ class GymnasiumReservationsScreen extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.red.shade50.withOpacity(0.5), 
+                color: Colors.red.shade50.withValues(alpha: 0.5), 
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(color: Colors.red.shade100),
               ),

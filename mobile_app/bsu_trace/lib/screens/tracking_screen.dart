@@ -552,7 +552,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.red.shade50.withOpacity(0.4) : Colors.transparent,
+          color: isSelected ? Colors.red.shade50.withValues(alpha: 0.4) : Colors.transparent,
           border: Border(bottom: BorderSide(color: Colors.red.shade50))
         ),
         child: Row(

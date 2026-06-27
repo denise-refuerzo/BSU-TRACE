@@ -83,7 +83,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         doc['origin_office'] ?? 'N/A',
                         doc['status'] ?? 'Pending',
                         'Just now', // You can format doc['created_at'] here
-                      )).toList(),
+                      )),
                       
                       const SizedBox(height: 80),
                     ],

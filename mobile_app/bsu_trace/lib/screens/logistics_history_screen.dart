@@ -189,7 +189,7 @@ class _LogisticsHistoryScreenState extends State<LogisticsHistoryScreen> {
     Color badgeTextColor = const Color(0xFFC62828);
     
     if (status == 'COMPLETED') {
-      badgeBgColor = Colors.red.shade50.withOpacity(0.5);
+      badgeBgColor = Colors.red.shade50.withValues(alpha: 0.5);
       badgeTextColor = Colors.black54;
     }
 

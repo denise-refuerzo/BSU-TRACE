@@ -138,7 +138,7 @@ class ProcessorDashboardScreen extends StatelessWidget {
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
       child: Row(
         children: [
-          Icon(Icons.description_outlined, color: AppTheme.primaryRed.withOpacity(0.5)),
+          Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey))])),
           Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12))

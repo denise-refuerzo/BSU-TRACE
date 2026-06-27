@@ -174,7 +174,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Container(
                       width: 90, 
                       height: 90, 
-                      decoration: BoxDecoration(color: AppTheme.primaryRed.withOpacity(0.1), borderRadius: BorderRadius.circular(16)), 
+                      decoration: BoxDecoration(color: AppTheme.primaryRed.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)), 
                       child: Center(
                         child: Text(initials, style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: AppTheme.primaryRed))
                       ),
@@ -232,7 +232,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: const Text('Two-Factor Authentication', style: TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: const Text('Enhanced protection for your portal access', style: TextStyle(fontSize: 12)),
                 value: _is2faEnabled,
-                activeColor: AppTheme.primaryRed,
+                activeThumbColor: AppTheme.primaryRed,
                 onChanged: (val) {
                   setState(() => _is2faEnabled = val);
                 },

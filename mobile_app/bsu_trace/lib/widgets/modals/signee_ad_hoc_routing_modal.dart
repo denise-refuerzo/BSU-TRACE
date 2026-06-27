@@ -66,7 +66,7 @@ class SigneeAdHocRoutingModal extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.red.shade50.withOpacity(0.5),
+                color: Colors.red.shade50.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.red.shade200),
               ),
@@ -107,7 +107,7 @@ class SigneeAdHocRoutingModal extends StatelessWidget {
                 hintText: 'Enter reason...',
                 hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
                 filled: true,
-                fillColor: Colors.red.shade50.withOpacity(0.5),
+                fillColor: Colors.red.shade50.withValues(alpha: 0.5),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: Colors.red.shade200),

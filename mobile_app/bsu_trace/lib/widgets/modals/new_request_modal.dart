@@ -75,8 +75,11 @@ class _NewRequestModalState extends State<NewRequestModal> {
     );
     if (picked != null) {
       setState(() {
-        if (isStart) _startTime = picked;
-        else _endTime = picked;
+        if (isStart) {
+          _startTime = picked;
+        } else {
+          _endTime = picked;
+        }
       });
     }
   }
@@ -173,7 +176,7 @@ class _NewRequestModalState extends State<NewRequestModal> {
             const Text('Resource Type', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
-              value: _selectedResourceType,
+              initialValue: _selectedResourceType,
               items: _resourceTypes.map((type) => DropdownMenuItem(value: type, child: Text(type))).toList(),
               onChanged: (val) => setState(() => _selectedResourceType = val!),
               decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
