@@ -219,9 +219,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
       DateTime? parsedDate = DateTime.tryParse(normalizedTime);
       
-      if (parsedDate != null) {
-        DateTime nowPht = DateTime.now().toUtc().add(const Duration(hours: 8));
-        Duration diff = nowPht.difference(parsedDate);
+if (parsedDate != null) {
+        DateTime now = DateTime.now(); 
+        Duration diff = now.difference(parsedDate);
 
         if (diff.isNegative) {
           time = 'Just now'; 
