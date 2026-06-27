@@ -22,7 +22,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   bool isLoading = true;
   String errorMessage = '';
   Timer? _timer;
-  bool _isAscending = false; // Add state for sort direction
+  bool _isAscending = false;
+  
+  // 1. Add state for the selected status filter
+  String _selectedStatus = 'All Status';
 
   @override
   void initState() {
@@ -51,10 +54,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           List<dynamic> fetchedDocs = json.decode(response.body);
 
           fetchedDocs.sort((a, b) {
-            DateTime dateA = DateTime.tryParse(a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00Z')?.toUtc() ?? DateTime(1970).toUtc();
-            DateTime dateB = DateTime.tryParse(b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00Z')?.toUtc() ?? DateTime(1970).toUtc();
+            String dateAStr = a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+            String dateBStr = b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+
+            dateAStr = dateAStr.replaceAll(' ', 'T');
+            if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
+
+            dateBStr = dateBStr.replaceAll(' ', 'T');
+            if (!dateBStr.endsWith('Z') && !dateBStr.contains('+')) dateBStr += '+08:00';
+
+            DateTime dateA = DateTime.tryParse(dateAStr) ?? DateTime.utc(1970);
+            DateTime dateB = DateTime.tryParse(dateBStr) ?? DateTime.utc(1970);
             
-            // Sort based on _isAscending state
             return _isAscending ? dateA.compareTo(dateB) : dateB.compareTo(dateA);
           });
 
@@ -90,9 +101,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   children: [
                     _buildSearchBar(),
                     const SizedBox(height: 16),
-                    _buildFilterRow(), // Updated to Row
+                    _buildFilterRow(),
                     const SizedBox(height: 24),
-                    ...documents.map((doc) => _buildDocumentCard(context, doc)),
+                    
+                    // 2. Filter the documents list based on _selectedStatus state
+                    ...documents.where((doc) {
+                      if (_selectedStatus == 'All Status') return true;
+                      
+                      // Normalize strings to lowercase to ensure matching works safely
+                      String docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
+                      return docStatus == _selectedStatus.toLowerCase();
+                    }).map((doc) => _buildDocumentCard(context, doc)),
+                    
                     const SizedBox(height: 80),
                   ],
                 ),
@@ -116,10 +136,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         ),
       );
 
-  // New Row to hold both Filter and Sort
-Widget _buildFilterRow() => Row(
+  Widget _buildFilterRow() => Row(
         children: [
-          // 1. Status Filter Dropdown
           Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -127,24 +145,40 @@ Widget _buildFilterRow() => Row(
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   isExpanded: true,
-                  value: 'All Status',
-                  items: ['All Status', 'Incoming', 'In Verification', 'Pending'].map((String value) {
-                    return DropdownMenuItem<String>(value: value, child: Text(value));
+                  value: _selectedStatus, // Bind to state
+                  // 3. Align Dropdown items perfectly with the DB `status` table
+                  items: [
+                    'All Status', 
+                    'Pending', 
+                    'In Verification', 
+                    'Signed', 
+                    'Action Required', 
+                    'Completed', 
+                    'Verified', 
+                    'Approved'
+                  ].map((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value, 
+                      child: Text(value, style: const TextStyle(fontSize: 14)),
+                    );
                   }).toList(),
-                  onChanged: (_) {},
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      setState(() {
+                        _selectedStatus = newValue; // Update state and rebuild
+                      });
+                    }
+                  },
                 ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          
-          // 2. Sort Dropdown (Replaces the IconButton)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
-                // Map the boolean state to a readable string
                 value: _isAscending ? 'Oldest' : 'Newest', 
                 items: ['Newest', 'Oldest'].map((String value) {
                   return DropdownMenuItem<String>(
@@ -154,9 +188,8 @@ Widget _buildFilterRow() => Row(
                 }).toList(),
                 onChanged: (String? newValue) {
                   setState(() {
-                    // Update state: 'Oldest' sets _isAscending to true, 'Newest' to false
                     _isAscending = (newValue == 'Oldest');
-                    fetchDocuments(); // Re-sort and refresh the list
+                    fetchDocuments();
                   });
                 },
               ),
@@ -166,36 +199,71 @@ Widget _buildFilterRow() => Row(
       );
 
   Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
-    // ... (rest of _buildDocumentCard remains exactly the same as previously provided)
     final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
     final String title = document['title'] ?? 'No Title';
     final String form = document['form_type'] ?? 'N/A';
     final String origin = document['origin_office'] ?? 'N/A';
-    final String status = document['status'] ?? 'Pending';
+    
+    // Capitalize status for the UI (so db's "pending" shows as "Pending")
+    final String rawStatus = document['status'] ?? 'Pending';
+    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
 
-String time = 'N/A';
+    String time = 'N/A';
     String? dbTime = document['created_at'] ?? document['updated_at'];
 
     if (dbTime != null) {
-      DateTime? parsedDate = DateTime.tryParse(dbTime)?.toUtc();
-      if (parsedDate != null) {
-        DateTime now = DateTime.now().toUtc();
-        Duration diff = now.difference(parsedDate);
+      String normalizedTime = dbTime.replaceAll(' ', 'T');
+      if (!normalizedTime.endsWith('Z') && !normalizedTime.contains('+')) {
+        normalizedTime += '+08:00';
+      }
 
-        // Standard logic: Use the total duration properties
-        if (diff.inDays > 0) {
+      DateTime? parsedDate = DateTime.tryParse(normalizedTime);
+      
+      if (parsedDate != null) {
+        DateTime nowPht = DateTime.now().toUtc().add(const Duration(hours: 8));
+        Duration diff = nowPht.difference(parsedDate);
+
+        if (diff.isNegative) {
+          time = 'Just now'; 
+        } else if (diff.inDays >= 365) {
+          int years = (diff.inDays / 365).floor();
+          time = '$years ${years == 1 ? 'year' : 'years'} ago';
+        } else if (diff.inDays >= 30) {
+          int months = (diff.inDays / 30).floor();
+          time = '$months ${months == 1 ? 'month' : 'months'} ago';
+        } else if (diff.inDays > 0) {
           time = '${diff.inDays} ${diff.inDays == 1 ? 'day' : 'days'} ago';
         } else if (diff.inHours > 0) {
           time = '${diff.inHours} ${diff.inHours == 1 ? 'hour' : 'hours'} ago';
         } else if (diff.inMinutes > 0) {
           time = '${diff.inMinutes} ${diff.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+        } else if (diff.inSeconds > 0) {
+          time = '${diff.inSeconds} ${diff.inSeconds == 1 ? 'second' : 'seconds'} ago';
         } else {
           time = 'Just now';
         }
       }
     }
 
-    Color statusColor = status == 'Incoming' ? Colors.red.shade100 : (status == 'Pending' ? Colors.orange.shade100 : Colors.blue.shade100);
+    // Assign appropriate UI colors for the newly integrated DB Statuses
+    Color statusColor;
+    switch (status.toLowerCase()) {
+      case 'pending':
+      case 'action required':
+        statusColor = Colors.orange.shade100;
+        break;
+      case 'in verification':
+      case 'verified':
+        statusColor = Colors.blue.shade100;
+        break;
+      case 'signed':
+      case 'approved':
+      case 'completed':
+        statusColor = Colors.green.shade100;
+        break;
+      default:
+        statusColor = Colors.grey.shade100;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -208,7 +276,11 @@ String time = 'N/A';
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(trackingId, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-              Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
+                decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), 
+                child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))
+              ),
             ],
           ),
           const SizedBox(height: 8),

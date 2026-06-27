@@ -16,11 +16,10 @@ app.use(express.json());
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Required for Neon serverless connections
+    rejectUnauthorized: false 
   }
 });
 
-// Test the database connection on startup
 pool.connect((err, client, release) => {
   if (err) {
     return console.error('Error acquiring client', err.stack);
@@ -32,7 +31,6 @@ pool.connect((err, client, release) => {
 
 // ==========================================
 // 1. LOGIN ENDPOINT
-// Route: POST /api/login
 // ==========================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
@@ -68,7 +66,6 @@ app.post('/api/login', async (req, res) => {
 
 // ==========================================
 // 2. FETCH USER PROFILE ENDPOINT
-// Route: GET /api/users/:id
 // ==========================================
 app.get('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
@@ -106,7 +103,6 @@ app.get('/api/users/:id', async (req, res) => {
 
 // ==========================================
 // 3. UPDATE USER PROFILE DETAILS ENDPOINT
-// Route: PUT /api/users/:id
 // ==========================================
 app.put('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
@@ -140,7 +136,6 @@ app.put('/api/users/:id', async (req, res) => {
 
 // ==========================================
 // 4. CHANGE PASSWORD ENDPOINT
-// Route: PUT /api/users/:id/password
 // ==========================================
 app.put('/api/users/:id/password', async (req, res) => {
   const userId = req.params.id;
@@ -151,7 +146,6 @@ app.put('/api/users/:id/password', async (req, res) => {
   }
 
   try {
-    // Fetch current hashed password
     const userResult = await pool.query(
       'SELECT password FROM public."User" WHERE u_id = $1',
       [userId]
@@ -163,17 +157,14 @@ app.put('/api/users/:id/password', async (req, res) => {
 
     const currentHashedPassword = userResult.rows[0].password;
 
-    // Verify current password
     const isMatch = await bcrypt.compare(currentPassword, currentHashedPassword);
     if (!isMatch) {
       return res.status(401).json({ error: 'Incorrect current password.' });
     }
 
-    // Hash new password
     const saltRounds = 10;
     const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
-    // Update the database
     await pool.query(
       'UPDATE public."User" SET password = $1 WHERE u_id = $2',
       [newHashedPassword, userId]
@@ -190,7 +181,6 @@ app.put('/api/users/:id/password', async (req, res) => {
 
 // ==========================================
 // 5. FETCH DOCUMENTS LIST ENDPOINT
-// Route: GET /api/documents
 // ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
@@ -201,7 +191,8 @@ app.get('/api/documents', async (req, res) => {
         p.process_name AS form_type, 
         o.office_name AS origin_office, 
         s.current_status AS status, 
-        pd.time_in AS created_at
+        -- Format directly to string in DB to prevent NodeJS from mutating the timezone
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at
       FROM public.initial_document i
       JOIN public.process_type p ON i.p_id = p.p_id
       JOIN public.processed_document pd ON i.ini_id = pd.ini_id
@@ -219,9 +210,9 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 6. FETCH USER DASHBOARD STATS ENDPOINT
-// Route: GET /api/users/:id/dashboard-stats
 // ==========================================
 app.get('/api/users/:id/dashboard-stats', async (req, res) => {
   const userId = req.params.id;
@@ -232,7 +223,6 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         COUNT(i.ini_id) AS total_docs,
         SUM(CASE WHEN s.current_status = 'pending' THEN 1 ELSE 0 END) AS pending_docs,
         SUM(CASE WHEN s.current_status = 'Completed' THEN 1 ELSE 0 END) AS completed_docs,
-        -- Assuming 'Archived' logic, otherwise defaults to 0
         SUM(CASE WHEN s.current_status = 'Archived' THEN 1 ELSE 0 END) AS archived_docs
       FROM public.initial_document i
       LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
@@ -241,8 +231,6 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
     `;
 
     const result = await pool.query(query, [userId]);
-    
-    // If user has no documents, SUM returns null, so we default to 0
     const stats = result.rows[0];
     res.status(200).json({
       total_docs: stats.total_docs || 0,
@@ -257,9 +245,9 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 7. FETCH USER-SPECIFIC DOCUMENTS ENDPOINT
-// Route: GET /api/users/:id/documents
 // ==========================================
 app.get('/api/users/:id/documents', async (req, res) => {
   const userId = req.params.id;
@@ -274,7 +262,9 @@ app.get('/api/users/:id/documents', async (req, res) => {
           p.process_name AS form_type,
           o.office_name AS current_location,
           s.current_status AS status,
-          pd.time_in AS updated_at,
+          -- Format directly to string in DB
+          TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS updated_at,
+          pd.time_in,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
@@ -283,7 +273,10 @@ app.get('/api/users/:id/documents', async (req, res) => {
         LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
         WHERE i.u_id = $1
       )
-      SELECT * FROM RankedDocs WHERE rn = 1 ORDER BY updated_at DESC;
+      SELECT ini_id, qr_code, title, form_type, current_location, status, updated_at 
+      FROM RankedDocs 
+      WHERE rn = 1 
+      ORDER BY time_in DESC;
     `;
 
     const result = await pool.query(query, [userId]);
@@ -295,15 +288,14 @@ app.get('/api/users/:id/documents', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 8. FETCH SPECIFIC DOCUMENT DETAILS ENDPOINT
-// Route: GET /api/documents/:id/details
 // ==========================================
 app.get('/api/documents/:id/details', async (req, res) => {
   const docId = req.params.id;
 
   try {
-    // 1. Fetch main document info (Requestor, EDC, Title, QR, Status)
     const detailsQuery = `
       SELECT 
         i.ini_id, i.title, i.edc, i.qr_code,
@@ -325,12 +317,11 @@ app.get('/api/documents/:id/details', async (req, res) => {
       return res.status(404).json({ error: 'Document not found' });
     }
 
-    // 2. Fetch routing timeline history
     const historyQuery = `
       SELECT 
         o.office_name, 
-        pd.time_in, 
-        pd.time_out, 
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in, 
+        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out, 
         s.current_status
       FROM public.processed_document pd
       JOIN public.offices o ON pd.current_office_id = o.o_id
@@ -340,7 +331,6 @@ app.get('/api/documents/:id/details', async (req, res) => {
     `;
     const historyResult = await pool.query(historyQuery, [docId]);
 
-    // Combine and send back
     res.status(200).json({
       ...detailsResult.rows[0],
       history: historyResult.rows
@@ -352,9 +342,9 @@ app.get('/api/documents/:id/details', async (req, res) => {
   }
 });
 
+
 // ==========================================
-// 9. FETCH PROCESS TYPES ENDPOINT (For Dropdowns)
-// Route: GET /api/process-types
+// 9. FETCH PROCESS TYPES ENDPOINT
 // ==========================================
 app.get('/api/process-types', async (req, res) => {
   try {
@@ -366,9 +356,9 @@ app.get('/api/process-types', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 9.5 FETCH ROUTE FOR SPECIFIC PROCESS TYPE
-// Route: GET /api/process-types/:id/route
 // ==========================================
 app.get('/api/process-types/:id/route', async (req, res) => {
   const processId = req.params.id;
@@ -401,7 +391,6 @@ app.get('/api/process-types/:id/route', async (req, res) => {
       return res.status(404).json({ error: 'Route not found for this process type' });
     }
 
-    // Convert the row into an array of stops, filtering out null entries
     const row = result.rows[0];
     const stops = [
       row.stop_1, row.stop_2, row.stop_3, row.stop_4,
@@ -415,9 +404,9 @@ app.get('/api/process-types/:id/route', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 10. CREATE NEW DOCUMENT ENDPOINT
-// Route: POST /api/documents
 // ==========================================
 app.post('/api/documents', async (req, res) => {
   const { u_id, title, p_id } = req.body;
@@ -427,7 +416,6 @@ app.post('/api/documents', async (req, res) => {
   }
 
   try {
-    // 1. Get the first office from the predefined route for this process type
     const processResult = await pool.query(
       'SELECT r.stop_1 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
       [p_id]
@@ -439,12 +427,10 @@ app.post('/api/documents', async (req, res) => {
 
     const firstOfficeId = processResult.rows[0].stop_1;
 
-    // 2. Generate a unique tracking code & estimated completion date (7 days from now)
     const qrCode = `TRK-${Date.now()}-${Math.floor(Math.random() * 100)}`;
     const edcDate = new Date();
     edcDate.setDate(edcDate.getDate() + 7);
 
-    // 3. Insert into initial_document
     const insertDocQuery = `
       INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code)
       VALUES ($1, $2, $3, $4, $5)
@@ -453,10 +439,10 @@ app.post('/api/documents', async (req, res) => {
     const docResult = await pool.query(insertDocQuery, [p_id, u_id, title, edcDate, qrCode]);
     const newIniId = docResult.rows[0].ini_id;
 
-    // 4. Create the first processed_document entry (s_id = 1 is 'pending') to initiate tracking
+    // Explicitly enforce Asia/Manila timezone upon creation rather than pure UTC
     const insertTrackQuery = `
       INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-      VALUES ($1, 1, $2, CURRENT_TIMESTAMP)
+      VALUES ($1, 1, $2, timezone('Asia/Manila', now()))
     `;
     await pool.query(insertTrackQuery, [newIniId, firstOfficeId]);
 
@@ -468,9 +454,9 @@ app.post('/api/documents', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 11. FETCH ALL BOOKINGS FOR SCHEDULER
-// Route: GET /api/scheduler/bookings
 // ==========================================
 app.get('/api/scheduler/bookings', async (req, res) => {
   try {
@@ -495,13 +481,12 @@ app.get('/api/scheduler/bookings', async (req, res) => {
   }
 });
 
+
 // ==========================================
-// 12. FETCH LOGISTICS INVENTORY (UPDATED FOR LIVE USAGE)
-// Route: GET /api/scheduler/inventory
+// 12. FETCH LOGISTICS INVENTORY
 // ==========================================
 app.get('/api/scheduler/inventory', async (req, res) => {
   try {
-    // 1. Get the total capacity of assets from the database
     const totalQuery = `
       SELECT asset_name, quantity 
       FROM public.asset_details 
@@ -509,8 +494,6 @@ app.get('/api/scheduler/inventory', async (req, res) => {
     `;
     const totalResult = await pool.query(totalQuery);
 
-    // 2. Calculate items currently "in-use" for today's active reservations
-    // We sum up the expected_attendees from the gm_requirements table for today
     const usageQuery = `
       SELECT SUM(g.expected_attendees) as total_attendees
       FROM public.bookings b
@@ -521,20 +504,18 @@ app.get('/api/scheduler/inventory', async (req, res) => {
     const usageResult = await pool.query(usageQuery);
     const activeAttendees = parseInt(usageResult.rows[0].total_attendees) || 0;
 
-    // 3. Map the data together (Assuming 1 Chair per attendee, 1 Table per 4 attendees)
     const inventoryData = totalResult.rows.map(item => {
       let inUse = 0;
       
       if (item.asset_name === 'Stackable Chairs') {
         inUse = activeAttendees;
       } else if (item.asset_name === 'Folding Table') {
-        inUse = Math.ceil(activeAttendees / 4); // 4 people per table
+        inUse = Math.ceil(activeAttendees / 4);
       }
       
       return {
         asset_name: item.asset_name,
         total: item.quantity,
-        // Prevent the progress bar from overflowing past 100% if overbooked
         in_use: inUse > item.quantity ? item.quantity : inUse 
       };
     });
@@ -546,25 +527,22 @@ app.get('/api/scheduler/inventory', async (req, res) => {
   }
 });
 
+
 // ==========================================
 // 13. CREATE NEW BOOKING (SCHEDULER)
-// Route: POST /api/scheduler/bookings
 // ==========================================
 app.post('/api/scheduler/bookings', async (req, res) => {
   const { u_id, booking_type, reservation_date, purpose, destination, start_time, end_time, asset_name } = req.body;
 
   try {
-    // Start a SQL Transaction. If any step fails, it cancels everything.
     await pool.query('BEGIN'); 
 
-    // 1. Get the user's exact department from the database
     const deptResult = await pool.query(
       'SELECT d.department_name FROM public."User" u JOIN public.department d ON u.d_id = d.d_id WHERE u.u_id = $1',
       [u_id]
     );
     const department = deptResult.rows.length > 0 ? deptResult.rows[0].department_name : 'General';
 
-    // 2. Insert into the main Bookings table
     const bookingQuery = `
       INSERT INTO public.bookings (u_id, booking_type, department, reservation_date, purpose, status)
       VALUES ($1, $2, $3, $4, $5, 'Reserved')
@@ -573,18 +551,15 @@ app.post('/api/scheduler/bookings', async (req, res) => {
     const bookingResult = await pool.query(bookingQuery, [u_id, booking_type, department, reservation_date, purpose]);
     const bookingId = bookingResult.rows[0].booking_id;
 
-    // 3. Find the correct Asset ID based on what was requested (Van, Gymnasium, Multimedia Room)
     const assetQuery = `SELECT asd_id FROM public.asset_details WHERE asset_name = $1 LIMIT 1;`;
     const assetResult = await pool.query(assetQuery, [asset_name]);
     const asd_id = assetResult.rows.length > 0 ? assetResult.rows[0].asd_id : 1; 
 
-    // 4. Insert into specific resource requirement tables
     if (booking_type === 'Vehicle') {
       const vQuery = `
         INSERT INTO public.vehicle_requirements (asd_id, sv_id, booking_id, destination, passenger_count, pick_up_time, drop_off_time)
         VALUES ($1, 3, $2, $3, 1, $4, $5);
       `;
-      // sv_id = 3 corresponds to 'Both' (Pick-up and Drop-off) in your seed data
       await pool.query(vQuery, [asd_id, bookingId, destination || purpose, start_time, end_time]);
     } else {
       const gmQuery = `
@@ -594,12 +569,10 @@ app.post('/api/scheduler/bookings', async (req, res) => {
       await pool.query(gmQuery, [asd_id, bookingId, start_time, end_time]);
     }
 
-    // Save the transaction
     await pool.query('COMMIT'); 
     res.status(201).json({ message: 'Booking created successfully' });
 
   } catch (error) {
-    // Cancel the transaction if an error occurred
     await pool.query('ROLLBACK'); 
     console.error('Create Booking Error:', error);
     res.status(500).json({ error: 'Internal server error' });
