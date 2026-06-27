@@ -35,9 +35,11 @@ export default function Login() {
       localStorage.setItem('userId', cleanUserId);
 
       if (data.role === 5) {
-        navigate('/admin/accounts');
+        navigate('/admin/accounts'); // ICT Admin Console
+      } else if (data.role === 2) {
+        navigate('/processor/dashboard'); // 🚀 Redirects to Processor Hub view
       } else {
-        navigate('/dashboard');
+        navigate('/dashboard'); // Originator / Faculty Hub view
       }
     } catch (err) {
       setError(err.message);

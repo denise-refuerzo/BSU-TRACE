@@ -1,12 +1,18 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// Access the Connection String directly from Neon dashboard dashboard properties
+const connectionString = process.env.DATABASE_URL;
+
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
+  connectionString: connectionString,
+  ssl: {
+    rejectUnauthorized: false, // Bypasses unauthorized local certificate errors safely
+  },
+});
+
+pool.on('connect', () => {
+  console.log('📡 Connected successfully to Serverless Neon PostgreSQL Instance!');
 });
 
 module.exports = pool;
