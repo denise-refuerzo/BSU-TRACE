@@ -683,7 +683,7 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch the timeline of Scanned In and Scanned Out events for their office
+    // 2. Fetch timeline, EXCLUDING documents that are still "pending"
     const query = `
       SELECT 
         'Scanned In' AS action_type,
@@ -695,7 +695,10 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.process_type p ON i.p_id = p.p_id
-      WHERE pd.current_office_id = $1 AND pd.time_in IS NOT NULL
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE pd.current_office_id = $1 
+        AND pd.time_in IS NOT NULL
+        AND s.current_status NOT ILIKE 'pending'
 
       UNION ALL
 
@@ -709,7 +712,8 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.process_type p ON i.p_id = p.p_id
-      WHERE pd.current_office_id = $1 AND pd.time_out IS NOT NULL
+      WHERE pd.current_office_id = $1 
+        AND pd.time_out IS NOT NULL
 
       ORDER BY sort_time DESC;
     `;
