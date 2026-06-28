@@ -58,7 +58,6 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
     final String rawStatus = widget.document['status'] ?? 'Pending';
     final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
 
-    // Determines if the document is already past the actionable signing phase
     final bool isAlreadySigned = ['signed', 'completed', 'approved', 'verified'].contains(status.toLowerCase());
 
     return Dialog(
@@ -119,13 +118,13 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
             Divider(color: Colors.red.shade100, thickness: 1),
             const SizedBox(height: 20),
             
-            // Render action buttons ONLY if the document hasn't been signed yet
             if (!isAlreadySigned) ...[
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => showDialog(context: context, builder: (context) => const SigneeAdHocRoutingModal()),
+                      // FIXED: Passing document to AdHoc modal
+                      onPressed: () => showDialog(context: context, builder: (context) => SigneeAdHocRoutingModal(document: widget.document)),
                       style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                       child: const Text('Ad-hoc Routing', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
                     ),
@@ -143,9 +142,7 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
               const SizedBox(height: 12),
             ],
             
-            // Dynamic Sign Button
             ElevatedButton(
-              // Disable the button entirely if it is already signed or currently processing
               onPressed: (isAlreadySigned || _isSigning) ? null : _signDocument,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryRed,

@@ -30,7 +30,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
-  // Helper to determine status based on processed_document fields
   String _resolveStatus(dynamic doc) {
     if (doc['time_out'] != null) return 'Verified';
     if (doc['time_in'] != null) return 'In Verification';
@@ -46,7 +45,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
         if (mounted) {
           setState(() {
             _documents = data;
-            // Updated stats based on processed_document timestamps
             _incomingCount = data.where((d) => d['time_in'] == null).length;
             _inVerificationCount = data.where((d) => d['time_in'] != null && d['time_out'] == null).length;
             _verifiedCount = data.where((d) => d['time_out'] != null).length;
@@ -96,7 +94,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // GATEKEEPER
     final role = SessionManager().currentRole;
     if (role != UserRole.processor) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -105,7 +102,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    // Find the first document that needs attention for the Priority Card
     final priorityDoc = _documents.firstWhere(
       (doc) => _resolveStatus(doc) != 'Verified',
       orElse: () => null,
@@ -133,7 +129,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 20),
                   
-                  // Dynamic Stats Row
                   Row(
                     children: [
                       _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.red.shade100),
@@ -145,7 +140,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   _buildStatCard(_verifiedCount.toString(), 'VERIFIED', Colors.white, Colors.green.shade100, isFullWidth: true),
                   const SizedBox(height: 24),
                   
-                  // Priority Card logic
                   if (priorityDoc != null) ...[
                     const Text('Current Priority', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
@@ -153,7 +147,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                     const SizedBox(height: 24),
                   ],
 
-                  // Dynamic Activity List
                   const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   if (_documents.isEmpty)
@@ -168,12 +161,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                       final date = _formatDateString(doc['created_at']);
                       final status = _resolveStatus(doc);
 
-                      return _buildActivityItem(
-                        title, 
-                        '$office • $date', 
-                        status, 
-                        _getStatusColor(status)
-                      );
+                      return _buildActivityItem(title, '$office • $date', status, _getStatusColor(status));
                     }),
                 ],
               ),
@@ -216,7 +204,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     final formType = doc['form_type'] ?? 'Standard Process';
     final status = _resolveStatus(doc).toUpperCase();
 
-    // Logic for steps
     final bool isVerified = status == 'VERIFIED';
     final bool isInVerification = status == 'IN VERIFICATION';
 
@@ -229,21 +216,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Text(
-                  title, 
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
+              Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
                 decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)), 
-                child: Text(
-                  status, 
-                  style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold)
-                ),
+                child: Text(status, style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold))
               )
             ],
           ),
@@ -267,32 +245,17 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   Widget _buildStepNode(bool isActive, String label) {
     return Column(children: [
       Container(
-        width: 24, 
-        height: 24, 
-        decoration: BoxDecoration(
-          color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, 
-          shape: BoxShape.circle
-        ), 
+        width: 24, height: 24, 
+        decoration: BoxDecoration(color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, shape: BoxShape.circle), 
         child: isActive ? const Icon(Icons.check, color: Colors.white, size: 14) : null
       ),
       const SizedBox(height: 4),
-      Text(
-        label, 
-        style: TextStyle(
-          fontSize: 9, 
-          color: isActive ? AppTheme.primaryRed : Colors.grey, 
-          fontWeight: isActive ? FontWeight.bold : FontWeight.normal
-        )
-      )
+      Text(label, style: TextStyle(fontSize: 9, color: isActive ? AppTheme.primaryRed : Colors.grey, fontWeight: isActive ? FontWeight.bold : FontWeight.normal))
     ]);
   }
 
   Widget _buildConnector(bool isActive) => Expanded(
-    child: Container(
-      height: 2, 
-      color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, 
-      margin: const EdgeInsets.only(bottom: 15)
-    )
+    child: Container(height: 2, color: isActive ? AppTheme.primaryRed : Colors.grey.shade200, margin: const EdgeInsets.only(bottom: 15))
   );
 
   Widget _buildActivityItem(String title, String subtitle, String status, Color statusColor) {
@@ -304,15 +267,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
         children: [
           Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
           const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, 
-              children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), 
-                Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)
-              ]
-            )
-          ),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)])),
           Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
         ],
       ),

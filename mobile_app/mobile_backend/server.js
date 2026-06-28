@@ -752,6 +752,66 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
 });
 
 // ==========================================
+// 18. FETCH ALL OFFICES (For Dropdowns)
+// ==========================================
+app.get('/api/offices', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT o_id, office_name FROM public.offices ORDER BY office_name ASC');
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Fetch Offices Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 19. AD-HOC ROUTING ENDPOINT
+// ==========================================
+app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
+  const { qrCode } = req.params;
+  const { target_office_id, reason } = req.body;
+
+  if (!target_office_id) {
+    return res.status(400).json({ error: 'Target office is required' });
+  }
+
+  try {
+    // 1. Find the document
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const iniId = docResult.rows[0].ini_id;
+
+    // 2. Mark the current active step as processed/departed by setting time_out
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET time_out = timezone('Asia/Manila', now())
+       WHERE ini_id = $1 
+       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC NULLS LAST LIMIT 1)`,
+      [iniId]
+    );
+
+    // 3. Insert the new ad-hoc step for the target office. 
+    // time_in is NULL so it appears as "Pending/Incoming" on that office's dashboard.
+    // s_id = 1 assumes 'Pending' is ID 1 in your status table.
+    await pool.query(
+      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
+       VALUES ($1, 1, $2, NULL)`,
+      [iniId, target_office_id]
+    );
+
+    // Note: The 'reason' field isn't stored here as your schema doesn't have a comments table, 
+    // but the routing logic itself is successfully executing.
+
+    res.status(200).json({ message: 'Document successfully routed ad-hoc' });
+  } catch (error) {
+    console.error('Ad-Hoc Routing Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;

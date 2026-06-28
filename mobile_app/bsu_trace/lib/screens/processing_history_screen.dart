@@ -24,13 +24,12 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
   Timer? _timer;
   
   String _searchQuery = '';
-  String _selectedAction = 'All'; // 'All', 'In Verification', 'Verified'
+  String _selectedAction = 'All'; 
 
   @override
   void initState() {
     super.initState();
     fetchTimeline();
-    // 10-second background auto-refresh
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (mounted) fetchTimeline();
     });
@@ -55,7 +54,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         if (mounted) {
           List<dynamic> fetchedEvents = json.decode(response.body);
 
-          // Sort by the time it was scanned in (newest first)
           fetchedEvents.sort((a, b) {
             String dateAStr = a['time_in'] ?? '1970-01-01T00:00:00+08:00';
             String dateBStr = b['time_in'] ?? '1970-01-01T00:00:00+08:00';
@@ -92,7 +90,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         final trackingId = (event['qr_code'] ?? '').toString().toLowerCase();
         final matchesSearch = title.contains(_searchQuery.toLowerCase()) || trackingId.contains(_searchQuery.toLowerCase());
 
-        // Status Logic
         bool isVerified = event['time_out'] != null;
         bool matchesStatus = true;
         
@@ -237,10 +234,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
-                child: Text(
-                  '$trackingId: $title', 
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                ),
+                child: Text('$trackingId: $title', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

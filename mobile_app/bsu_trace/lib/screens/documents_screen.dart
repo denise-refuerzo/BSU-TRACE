@@ -24,9 +24,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Timer? _timer;
   bool _isAscending = false;
   
-  // State variables for filtering
   String _selectedStatus = 'All Status';
-  String _searchQuery = ''; // Added search state
+  String _searchQuery = '';
+
+  // Centralized status resolution logic
+  String _resolveStatus(Map<String, dynamic> doc) {
+    String dbStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
+    
+    // Prioritize Signed/Approved status from DB
+    if (dbStatus == 'signed' || dbStatus == 'approved') return dbStatus;
+    
+    // Check scan timestamps
+    if (doc['time_out'] != null) return 'verified';
+    if (doc['time_in'] != null) return 'in verification';
+    
+    return dbStatus;
+  }
 
   @override
   void initState() {
@@ -84,31 +97,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Pre-filter the documents here before building the UI to handle both search and status
     List<dynamic> filteredDocuments = documents.where((doc) {
-      // Determine effective status for filtering
-      String docStatus;
-      if (doc['time_out'] != null) {
-        docStatus = 'verified';
-      } else if (doc['time_in'] != null) {
-        docStatus = 'in verification';
-      } else {
-        docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
-      }
-
-      // Status Filter
+      String docStatus = _resolveStatus(doc);
+      
       if (_selectedStatus != 'All Status') {
         if (docStatus != _selectedStatus.toLowerCase()) return false;
       }
       
-      // Search Filter
       if (_searchQuery.isNotEmpty) {
         String query = _searchQuery.toLowerCase();
         String title = (doc['title'] ?? '').toString().toLowerCase();
         String trackingId = (doc['qr_code'] ?? doc['tracking_id'] ?? '').toString().toLowerCase();
         String origin = (doc['origin_office'] ?? '').toString().toLowerCase();
         
-        // Return true if the query matches the title, ID, or origin office
         if (!title.contains(query) && !trackingId.contains(query) && !origin.contains(query)) {
           return false;
         }
@@ -162,7 +163,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Widget _buildSearchBar() => TextField(
         onChanged: (value) {
           setState(() {
-            _searchQuery = value; // Update the search query state when the user types
+            _searchQuery = value;
           });
         },
         decoration: InputDecoration(
@@ -185,14 +186,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   isExpanded: true,
                   value: _selectedStatus,
                   items: [
-                    'All Status', 
-                    'Pending', 
-                    'In Verification', 
-                    'Signed', 
-                    'Action Required', 
-                    'Completed', 
-                    'Verified', 
-                    'Approved'
+                    'All Status', 'Pending', 'In Verification', 'Signed', 
+                    'Action Required', 'Completed', 'Verified', 'Approved'
                   ].map((String value) {
                     return DropdownMenuItem<String>(
                       value: value, 
@@ -241,17 +236,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final String form = document['form_type'] ?? 'N/A';
     final String origin = document['origin_office'] ?? 'N/A';
     
-    // Status Logic: Check for processed_document fields first
-    String displayStatus;
-    if (document['time_out'] != null) {
-      displayStatus = 'Verified';
-    } else if (document['time_in'] != null) {
-      displayStatus = 'In Verification';
-    } else {
-      final String rawStatus = document['status'] ?? 'Pending';
-      displayStatus = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
-    }
-    final String status = displayStatus;
+    final String rawStatus = _resolveStatus(document);
+    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
 
     String time = 'N/A';
     String? dbTime = document['created_at'] ?? document['updated_at'];
@@ -263,34 +249,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }
 
       DateTime? parsedDate = DateTime.tryParse(normalizedTime);
-      
       if (parsedDate != null) {
         DateTime now = DateTime.now(); 
         Duration diff = now.difference(parsedDate);
-
-        if (diff.isNegative) {
-          time = 'Just now'; 
-        } else if (diff.inDays >= 365) {
-          int years = (diff.inDays / 365).floor();
-          time = '$years ${years == 1 ? 'year' : 'years'} ago';
-        } else if (diff.inDays >= 30) {
-          int months = (diff.inDays / 30).floor();
-          time = '$months ${months == 1 ? 'month' : 'months'} ago';
-        } else if (diff.inDays > 0) {
-          time = '${diff.inDays} ${diff.inDays == 1 ? 'day' : 'days'} ago';
-        } else if (diff.inHours > 0) {
-          time = '${diff.inHours} ${diff.inHours == 1 ? 'hour' : 'hours'} ago';
-        } else if (diff.inMinutes > 0) {
-          time = '${diff.inMinutes} ${diff.inMinutes == 1 ? 'minute' : 'minutes'} ago';
-        } else if (diff.inSeconds > 0) {
-          time = '${diff.inSeconds} ${diff.inSeconds == 1 ? 'second' : 'seconds'} ago';
-        } else {
-          time = 'Just now';
-        }
+        if (diff.isNegative) time = 'Just now'; 
+        else if (diff.inDays >= 365) time = '${(diff.inDays/365).floor()} years ago';
+        else if (diff.inDays >= 30) time = '${(diff.inDays/30).floor()} months ago';
+        else if (diff.inDays > 0) time = '${diff.inDays} days ago';
+        else if (diff.inHours > 0) time = '${diff.inHours} hours ago';
+        else if (diff.inMinutes > 0) time = '${diff.inMinutes} minutes ago';
+        else time = 'Just now';
       }
     }
 
-    // Assign appropriate UI colors
     Color statusColor;
     switch (status.toLowerCase()) {
       case 'pending':
@@ -298,11 +269,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         statusColor = Colors.orange.shade100;
         break;
       case 'in verification':
-      case 'verified':
         statusColor = Colors.blue.shade100;
         break;
       case 'signed':
       case 'approved':
+      case 'verified':
       case 'completed':
         statusColor = Colors.green.shade100;
         break;
