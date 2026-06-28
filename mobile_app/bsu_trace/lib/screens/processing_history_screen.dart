@@ -285,9 +285,8 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                             children: [
                               Text(h['office'] ?? 'Unknown Office', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                               const SizedBox(height: 4),
-                              Text('Status: ${h['status'] ?? 'N/A'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                              Text('Scan In:  ${h['time_in'] ?? '--'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                              Text('Scan Out: ${h['time_out'] ?? '--'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              Text('Action: ${h['action'] ?? 'N/A'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                              Text('Date: ${h['timestamp'] ?? '--'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                               if (!isLast) const SizedBox(height: 16),
                             ],
                           ),

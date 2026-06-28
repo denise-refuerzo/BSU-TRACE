@@ -253,21 +253,19 @@ app.get('/api/users/:id/documents', async (req, res) => {
 
   try {
     const query = `
-      WITH DocHistory AS (
+      WITH ActionHistory AS (
         SELECT 
-          pd.ini_id,
+          h.ini_id,
           json_agg(
             json_build_object(
               'office', o.office_name,
-              'status', s.current_status,
-              'time_in', TO_CHAR(pd.time_in, 'Mon DD, YYYY HH12:MI AM'),
-              'time_out', TO_CHAR(pd.time_out, 'Mon DD, YYYY HH12:MI AM')
-            ) ORDER BY pd.time_in ASC
+              'action', h.action_type,
+              'timestamp', TO_CHAR(h.action_timestamp, 'Mon DD, YYYY HH12:MI AM')
+            ) ORDER BY h.action_timestamp ASC
           ) AS history_array
-        FROM public.processed_document pd
-        LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
-        LEFT JOIN public.status s ON pd.s_id = s.s_id
-        GROUP BY pd.ini_id
+        FROM public.office_action_history h
+        LEFT JOIN public.offices o ON h.o_id = o.o_id
+        GROUP BY h.ini_id
       ),
       RankedDocs AS (
         SELECT 
@@ -277,7 +275,6 @@ app.get('/api/users/:id/documents', async (req, res) => {
           p.process_name AS form_type,
           o.office_name AS current_location,
           s.current_status AS status,
-          -- Format directly to string in DB
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS updated_at,
           pd.time_in,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
@@ -290,9 +287,9 @@ app.get('/api/users/:id/documents', async (req, res) => {
       )
       SELECT 
         r.ini_id, r.qr_code, r.title, r.form_type, r.current_location, r.status, r.updated_at,
-        COALESCE(dh.history_array, '[]'::json) AS history
+        COALESCE(ah.history_array, '[]'::json) AS history
       FROM RankedDocs r
-      LEFT JOIN DocHistory dh ON r.ini_id = dh.ini_id
+      LEFT JOIN ActionHistory ah ON r.ini_id = ah.ini_id
       WHERE r.rn = 1 
       ORDER BY r.time_in DESC;
     `;
@@ -631,56 +628,98 @@ app.put('/api/documents/:qrCode/sign', async (req, res) => {
 // ==========================================
 app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
+  const { u_id } = req.body; 
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    await pool.query('BEGIN'); // Start transaction
+
+    // Get current doc info required for the history log
+    const docResult = await pool.query(
+      `SELECT i.ini_id, i.u_id as owner_id, pd.current_office_id, pd.pd_id
+       FROM public.initial_document i
+       JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+       WHERE i.qr_code = $1 ORDER BY pd.time_in DESC LIMIT 1`,
+      [qrCode]
+    );
+
     if (docResult.rows.length === 0) {
+      await pool.query('ROLLBACK');
       return res.status(404).json({ error: 'Document not found' });
     }
-    const iniId = docResult.rows[0].ini_id;
 
-    // Update the latest processed document status to 'In Verification'
+    const { ini_id, owner_id, current_office_id, pd_id } = docResult.rows[0];
+    const actionUserId = u_id || owner_id; // Fallback to avoid database constraint error
+
+    // 1. Update the document's main status
     await pool.query(
       `UPDATE public.processed_document 
        SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
+       WHERE pd_id = $1`,
+      [pd_id]
     );
 
-    res.status(200).json({ message: 'Document scanned IN successfully' });
+    // 2. LOG THE ACTION IN HISTORY
+    await pool.query(
+      `INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+       VALUES ($1, $2, $3, 'Scanned In', timezone('Asia/Manila', now()))`,
+      [ini_id, actionUserId, current_office_id]
+    );
+
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document scanned IN and logged successfully' });
   } catch (error) {
+    await pool.query('ROLLBACK');
     console.error('Scan In Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 16. SCAN OUT DOCUMENT (Processor)
 // ==========================================
 app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
+  const { u_id } = req.body;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    await pool.query('BEGIN');
+
+    const docResult = await pool.query(
+      `SELECT i.ini_id, i.u_id as owner_id, pd.current_office_id, pd.pd_id
+       FROM public.initial_document i
+       JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+       WHERE i.qr_code = $1 ORDER BY pd.time_in DESC LIMIT 1`,
+      [qrCode]
+    );
+
     if (docResult.rows.length === 0) {
+      await pool.query('ROLLBACK');
       return res.status(404).json({ error: 'Document not found' });
     }
-    const iniId = docResult.rows[0].ini_id;
 
-    // Update the latest processed document status to 'Verified' and record the exit time
+    const { ini_id, owner_id, current_office_id, pd_id } = docResult.rows[0];
+    const actionUserId = u_id || owner_id;
+
+    // 1. Update status and exit time
     await pool.query(
       `UPDATE public.processed_document 
        SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1),
            time_out = timezone('Asia/Manila', now())
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
+       WHERE pd_id = $1`,
+      [pd_id]
     );
 
-    res.status(200).json({ message: 'Document scanned OUT successfully' });
+    // 2. LOG THE ACTION IN HISTORY
+    await pool.query(
+      `INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+       VALUES ($1, $2, $3, 'Scanned Out', timezone('Asia/Manila', now()))`,
+      [ini_id, actionUserId, current_office_id]
+    );
+
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document scanned OUT and logged successfully' });
   } catch (error) {
+    await pool.query('ROLLBACK');
     console.error('Scan Out Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
