@@ -614,7 +614,6 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    // FIX: Specifically look for the oldest step that hasn't been scanned in yet
     const docResult = await pool.query(`
       SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
       FROM public.processed_document pd
@@ -631,10 +630,15 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
 
     const { pd_id } = docResult.rows[0];
 
+    // FIX: If it was routed ad-hoc, keep it 'In Verification'. 
+    // Otherwise, standard scans become 'Pending'.
     await pool.query(
       `UPDATE public.processed_document 
        SET time_in = timezone('Asia/Manila', now()),
-           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
+           s_id = CASE 
+                    WHEN s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1) THEN s_id
+                    ELSE (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1)
+                  END
        WHERE pd_id = $1`,
       [pd_id]
     );
@@ -766,14 +770,11 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // FIX: Removed the UPDATE query that forced time_out on the current step.
-    // The current step remains active so the Processor is still forced to physically Scan Out.
-
-    // Insert new pending step at target office
-    // time_in is NULL so it stays "Incoming" on the target office's dashboard
+    // Insert new pending step at target office, specifically tagged as 'In Verification'
+    // time_in is NULL so it stays "Incoming" on the target office's dashboard until they scan it.
     await pool.query(
       `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-       VALUES ($1, 1, $2, NULL)`,
+       VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
       [iniId, target_office_id]
     );
 

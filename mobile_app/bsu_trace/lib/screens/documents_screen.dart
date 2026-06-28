@@ -27,18 +27,24 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
 
-  // Centralized status resolution logic
+  // EXACT STATUS LOGIC IMPLEMENTATION
   String _resolveStatus(Map<String, dynamic> doc) {
-    String dbStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
+    String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
-    // Prioritize Signed/Approved status from DB
-    if (dbStatus == 'signed' || dbStatus == 'approved') return dbStatus;
+    // 1. Unchanged Precedences
+    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed') return dbStatus;
     
-    // Check scan timestamps
+    // 2. Verified
     if (doc['time_out'] != null) return 'verified';
-    if (doc['time_in'] != null) return 'in verification';
     
-    return dbStatus;
+    // 3. Not yet scanned in -> 'Incoming'
+    if (doc['time_in'] == null) return 'incoming';
+    
+    // 4. If it's an ad-hoc route -> 'In Verification'
+    if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
+    
+    // 5. Once scanned in normally -> 'Pending'
+    return 'pending';
   }
 
   @override
@@ -186,7 +192,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   isExpanded: true,
                   value: _selectedStatus,
                   items: [
-                    'All Status', 'Pending', 'In Verification', 'Signed', 
+                    'All Status', 'Incoming', 'Pending', 'In Verification', 'Signed', 
                     'Action Required', 'Completed', 'Verified', 'Approved'
                   ].map((String value) {
                     return DropdownMenuItem<String>(
@@ -237,7 +243,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final String origin = document['origin_office'] ?? 'N/A';
     
     final String rawStatus = _resolveStatus(document);
-    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+    final String status = rawStatus.isEmpty ? 'Unknown' : rawStatus.split(' ').map((str) => str.isNotEmpty ? str[0].toUpperCase() + str.substring(1) : '').join(' ');
 
     String time = 'N/A';
     String? dbTime = document['created_at'] ?? document['updated_at'];
@@ -263,7 +269,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     }
 
     Color statusColor;
-    switch (status.toLowerCase()) {
+    switch (rawStatus.toLowerCase()) {
+      case 'incoming':
+        statusColor = Colors.purple.shade100;
+        break;
       case 'pending':
       case 'action required':
         statusColor = Colors.orange.shade100;
