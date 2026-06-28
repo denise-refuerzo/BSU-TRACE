@@ -184,22 +184,29 @@ app.put('/api/users/:id/password', async (req, res) => {
 // ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
+    // FIX: Using ROW_NUMBER() guarantees only the latest tile is returned per document
     const query = `
-      SELECT 
-        i.qr_code,
-        i.title, 
-        p.process_name AS form_type, 
-        o.office_name AS origin_office, 
-        s.current_status AS status, 
-        pd.time_in,
-        pd.time_out,
-        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at
-      FROM public.initial_document i
-      JOIN public.process_type p ON i.p_id = p.p_id
-      JOIN public.processed_document pd ON i.ini_id = pd.ini_id
-      JOIN public.status s ON pd.s_id = s.s_id
-      JOIN public.offices o ON pd.current_office_id = o.o_id
-      ORDER BY pd.time_in DESC
+      WITH RankedDocs AS (
+        SELECT 
+          i.qr_code,
+          i.title, 
+          p.process_name AS form_type, 
+          o.office_name AS origin_office, 
+          s.current_status AS status, 
+          pd.time_in,
+          pd.time_out,
+          TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
+          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
+        FROM public.initial_document i
+        JOIN public.process_type p ON i.p_id = p.p_id
+        JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+        JOIN public.status s ON pd.s_id = s.s_id
+        JOIN public.offices o ON pd.current_office_id = o.o_id
+      )
+      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at
+      FROM RankedDocs
+      WHERE rn = 1
+      ORDER BY time_in DESC NULLS LAST
     `;
 
     const result = await pool.query(query);
@@ -770,12 +777,20 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // Insert new pending step at target office, specifically tagged as 'In Verification'
-    // time_in is NULL so it stays "Incoming" on the target office's dashboard until they scan it.
+    // FIX: UPDATE the current active step's destination instead of inserting a new tile
+    // This routes it to the target office and immediately flags it as 'In Verification'
     await pool.query(
-      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-       VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
-      [iniId, target_office_id]
+      `UPDATE public.processed_document 
+       SET current_office_id = $1,
+           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
+       WHERE pd_id = (
+         SELECT pd_id 
+         FROM public.processed_document 
+         WHERE ini_id = $2 
+         ORDER BY pd_id DESC 
+         LIMIT 1
+       )`,
+      [target_office_id, iniId]
     );
 
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });

@@ -21,7 +21,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   bool _isLoading = true;
   List<dynamic> _documents = [];
   int _incomingCount = 0;
-  int _inVerificationCount = 0;
+  int _pendingCount = 0;
   int _verifiedCount = 0;
 
   @override
@@ -30,10 +30,22 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
+  // ==========================================
+  // FIXED PRIORITY LOGIC
+  // ==========================================
   String _resolveStatus(dynamic doc) {
-    if (doc['time_out'] != null) return 'Verified';
-    if (doc['time_in'] != null) return 'In Verification';
-    return 'Pending';
+    String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
+    
+    // 1. Immutable
+    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed') return dbStatus;
+    // 2. Scanned Out
+    if (doc['time_out'] != null) return 'verified';
+    // 3. Ad-hoc exception OVERRIDES Incoming
+    if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
+    // 4. Standard process not yet scanned
+    if (doc['time_in'] == null) return 'incoming';
+    // 5. Standard process scanned in
+    return 'pending';
   }
 
   Future<void> _fetchDashboardData() async {
@@ -45,9 +57,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
         if (mounted) {
           setState(() {
             _documents = data;
-            _incomingCount = data.where((d) => d['time_in'] == null).length;
-            _inVerificationCount = data.where((d) => d['time_in'] != null && d['time_out'] == null).length;
-            _verifiedCount = data.where((d) => d['time_out'] != null).length;
+            
+            _incomingCount = data.where((d) => _resolveStatus(d) == 'incoming').length;
+            // Group both 'pending' and 'in verification' under the central active card
+            _pendingCount = data.where((d) => ['pending', 'in verification'].contains(_resolveStatus(d))).length;
+            _verifiedCount = data.where((d) => _resolveStatus(d) == 'verified').length;
+            
             _isLoading = false;
           });
         }
@@ -71,7 +86,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
+      case 'incoming':
+        return Colors.purple;
       case 'verified':
+      case 'signed':
         return Colors.green;
       case 'pending':
         return Colors.orange;
@@ -103,7 +121,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     }
 
     final priorityDoc = _documents.firstWhere(
-      (doc) => _resolveStatus(doc) != 'Verified',
+      (doc) => _resolveStatus(doc) != 'verified',
       orElse: () => null,
     );
 
@@ -131,9 +149,9 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   
                   Row(
                     children: [
-                      _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.red.shade100),
+                      _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.purple.shade100),
                       const SizedBox(width: 12),
-                      _buildStatCard(_inVerificationCount.toString(), 'IN VERIFICATION', Colors.white, Colors.orange.shade100),
+                      _buildStatCard(_pendingCount.toString(), 'PENDING', Colors.white, Colors.orange.shade100),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -159,9 +177,11 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                       final title = doc['title'] ?? 'Untitled Document';
                       final office = doc['origin_office'] ?? 'Unknown Office';
                       final date = _formatDateString(doc['created_at']);
-                      final status = _resolveStatus(doc);
+                      final rawStatus = _resolveStatus(doc);
+                      
+                      final formattedStatus = rawStatus.split(' ').map((s) => s.isNotEmpty ? s[0].toUpperCase() + s.substring(1) : '').join(' ');
 
-                      return _buildActivityItem(title, '$office • $date', status, _getStatusColor(status));
+                      return _buildActivityItem(title, '$office • $date', formattedStatus, _getStatusColor(rawStatus));
                     }),
                 ],
               ),
@@ -202,10 +222,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     final title = doc['title'] ?? 'Untitled Document';
     final office = doc['origin_office'] ?? 'Unknown Office';
     final formType = doc['form_type'] ?? 'Standard Process';
-    final status = _resolveStatus(doc).toUpperCase();
+    
+    final rawStatus = _resolveStatus(doc);
+    final statusDisplay = rawStatus.toUpperCase();
 
-    final bool isVerified = status == 'VERIFIED';
-    final bool isInVerification = status == 'IN VERIFICATION';
+    final bool isVerified = rawStatus == 'verified';
+    final bool isProcessing = rawStatus == 'pending' || rawStatus == 'in verification';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -221,7 +243,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
                 decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)), 
-                child: Text(status, style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold))
+                child: Text(statusDisplay, style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold))
               )
             ],
           ),
@@ -231,8 +253,8 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
           Row(
             children: [
               _buildStepNode(true, 'Submission'),
-              _buildConnector(isInVerification || isVerified),
-              _buildStepNode(isInVerification || isVerified, 'In Verification'),
+              _buildConnector(isProcessing || isVerified),
+              _buildStepNode(isProcessing || isVerified, 'Processing'),
               _buildConnector(isVerified),
               _buildStepNode(isVerified, 'Verified'),
             ],
@@ -268,7 +290,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
           Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)])),
-          Text(status.toUpperCase(), style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
+          Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
         ],
       ),
     );
