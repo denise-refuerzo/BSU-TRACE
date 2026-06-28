@@ -1,14 +1,97 @@
+// lib/screens/dashboard/signee_dashboard.dart
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/signee_document_details_modal.dart';
-// Add these imports
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
+import '../../config.dart';
 
-class SigneeDashboardScreen extends StatelessWidget {
+class SigneeDashboardScreen extends StatefulWidget {
   const SigneeDashboardScreen({super.key});
+
+  @override
+  State<SigneeDashboardScreen> createState() => _SigneeDashboardScreenState();
+}
+
+class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
+  bool isLoading = true;
+  Timer? _timer;
+
+  // Live Statistics
+  int pendingCount = 0;
+  int signedCount = 0;
+  int verificationCount = 0;
+  int sentBackCount = 0;
+  
+  // Live Documents List
+  List<dynamic> pendingDocuments = [];
+
+  @override
+  void initState() {
+    super.initState();
+    fetchDashboardData();
+    
+    // Auto-refresh data every 10 seconds silently
+    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) fetchDashboardData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchDashboardData() async {
+    try {
+      final docResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
+      
+      if (docResponse.statusCode == 200) {
+        final List<dynamic> docs = json.decode(docResponse.body);
+
+        int pCount = 0;
+        int sCount = 0;
+        int vCount = 0;
+        int sbCount = 0;
+        List<dynamic> recentPending = [];
+
+        for (var doc in docs) {
+          String status = (doc['status'] ?? '').toString().toLowerCase();
+          
+          if (status == 'pending' || status == 'action required') {
+            pCount++;
+            recentPending.add(doc);
+          } else if (status == 'signed' || status == 'approved' || status == 'completed') {
+            sCount++;
+          } else if (status == 'in verification' || status == 'verified') {
+            vCount++;
+          } else if (status == 'sent back' || status == 'rejected') {
+            sbCount++;
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            pendingCount = pCount;
+            signedCount = sCount;
+            verificationCount = vCount;
+            sentBackCount = sbCount;
+            pendingDocuments = recentPending.take(5).toList();
+            isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching signee dashboard data: $e');
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,84 +108,89 @@ class SigneeDashboardScreen extends StatelessWidget {
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
         title: const Text('Signee Dashboard'),
-        actions: buildAppBarActions(context),
+        actions: buildAppBarActions(context), // Refresh button removed here
       ),
       drawer: const AppDrawer(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard('PENDING', '12', Icons.pending_actions, Colors.red.shade50, AppTheme.primaryRed, valueColor: AppTheme.primaryRed),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard('SIGNED', '148', Icons.draw_outlined, Colors.blue.shade50, Colors.blue.shade700),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildStatCard('VERIFICATION', '05', Icons.shield_outlined, Colors.grey.shade200, Colors.grey.shade700),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _buildStatCard('SENT BACK', '02', Icons.assignment_return_outlined, Colors.red.shade50, AppTheme.primaryRed, valueColor: AppTheme.primaryRed),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildEfficiencyChart(),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Documents Pending',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
-                ),
-                Row(
-                  children: const [
-                    Text('View All', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward, color: AppTheme.primaryRed, size: 16),
+      body: isLoading 
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+          : RefreshIndicator(
+              onRefresh: fetchDashboardData,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatCard('PENDING', pendingCount.toString().padLeft(2, '0'), Icons.pending_actions, Colors.red.shade50, AppTheme.primaryRed, valueColor: AppTheme.primaryRed),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStatCard('SIGNED', signedCount.toString().padLeft(2, '0'), Icons.draw_outlined, Colors.blue.shade50, Colors.blue.shade700),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatCard('VERIFICATION', verificationCount.toString().padLeft(2, '0'), Icons.shield_outlined, Colors.grey.shade200, Colors.grey.shade700),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStatCard('SENT BACK', sentBackCount.toString().padLeft(2, '0'), Icons.assignment_return_outlined, Colors.red.shade50, AppTheme.primaryRed, valueColor: AppTheme.primaryRed),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    _buildEfficiencyChart(),
+                    const SizedBox(height: 24),
+                    
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Documents Pending',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
+                        ),
+                        Row(
+                          children: const [
+                            Text('View All', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
+                            SizedBox(width: 4),
+                            Icon(Icons.arrow_forward, color: AppTheme.primaryRed, size: 16),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    if (pendingDocuments.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Center(child: Text("No pending documents requiring your signature.", style: TextStyle(color: Colors.grey))),
+                      )
+                    else
+                      ...pendingDocuments.map((doc) => _buildDocCard(
+                        context: context,
+                        document: doc, // Pass the full document map here!
+                        icon: Icons.description_outlined,
+                      )),
+                      
+                    const SizedBox(height: 24),
+                    const Text(
+                      'System Status',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildSystemStatus(),
+                    const SizedBox(height: 40),
                   ],
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildDocCard(
-              context: context,
-              title: 'Strategic Plan FY2024',
-              id: 'BSU-24-9011',
-              formType: 'Administrative Memo',
-              office: "Chancellor's Office",
-              icon: Icons.description_outlined,
-            ),
-            _buildDocCard(
-              context: context,
-              title: 'Procurement Requisition',
-              id: 'BSU-24-8842',
-              formType: 'Purchase Order',
-              office: 'Finance & Logistics',
-              icon: Icons.receipt_long_outlined,
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'System Status',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
-            ),
-            const SizedBox(height: 16),
-            _buildSystemStatus(),
-            const SizedBox(height: 40),
-          ],
-        ),
-      ),
     );
   }
 
@@ -209,12 +297,15 @@ class SigneeDashboardScreen extends StatelessWidget {
 
   Widget _buildDocCard({
     required BuildContext context, 
-    required String title, 
-    required String id, 
-    required String formType, 
-    required String office, 
+    required Map<String, dynamic> document, // Update to accept the full map
     required IconData icon
   }) {
+    // Extract variables directly from the passed map
+    final String title = document['title'] ?? 'No Title';
+    final String id = document['qr_code'] ?? 'N/A';
+    final String formType = document['form_type'] ?? 'Document';
+    final String office = document['origin_office'] ?? 'Origin Office';
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(20),
@@ -248,7 +339,9 @@ class SigneeDashboardScreen extends StatelessWidget {
                 onTap: () {
                   showDialog(
                     context: context,
-                    builder: (context) => const SigneeDocumentDetailsModal(),
+                    builder: (context) => SigneeDocumentDetailsModal(
+                      document: document // Pass it down to the modal here
+                    ),
                   );
                 },
                 child: const Padding(

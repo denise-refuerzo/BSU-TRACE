@@ -3,280 +3,238 @@ import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 
 class SigneeHistoryDetailsModal extends StatelessWidget {
-  const SigneeHistoryDetailsModal({super.key});
+  final Map<String, dynamic> document;
+
+  const SigneeHistoryDetailsModal({super.key, required this.document});
 
   @override
   Widget build(BuildContext context) {
+    // Extract dynamic data from the document map
+    final String qrCode = document['qr_code'] ?? 'N/A';
+    final String title = document['title'] ?? 'No Title';
+    final String formType = document['form_type'] ?? 'N/A';
+    final String originOffice = document['origin_office'] ?? 'N/A';
+    
+    final String rawStatus = document['status'] ?? 'Processed';
+    final String status = rawStatus.isEmpty ? 'Processed' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: Colors.transparent, // Let ClipRRect handle corners
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      backgroundColor: Colors.white,
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          color: Colors.white,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // --- HEADER ---
-              Container(
-                color: AppTheme.primaryRed,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Document Detail Log',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'REFERENCE ID: #SIGN-2024-0612',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: const Icon(Icons.close, color: Colors.white, size: 24),
-                    ),
-                  ],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // --- DRAG HANDLE ---
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
+            ),
+            const SizedBox(height: 20),
 
-              // --- SCROLLABLE BODY ---
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
+            // --- HEADER ---
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // --- CUSTOM HORIZONTAL STEPPER ---
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildStepNode('DRAFTED', isCompleted: true),
-                          _buildConnector(isCompleted: true),
-                          _buildStepNode('PROCESSED', isCompleted: true),
-                          _buildConnector(isCompleted: true),
-                          _buildStepNode('AD-HOC', isCurrent: true),
-                          _buildConnector(isCompleted: false),
-                          _buildStepNode('FINAL SIGN', number: '4'),
-                        ],
+                      Text(
+                        'HISTORY RECORD: $qrCode', 
+                        style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(height: 32),
-                      Divider(color: Colors.grey.shade100, thickness: 1, height: 1),
-                      const SizedBox(height: 24),
-
-                      // --- INFO GRID ---
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _buildInfo('TITLE', 'Curriculum Revision\nRequest #402'),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildInfo('FORM TYPE', 'Academic Form -\nRevision Type A'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _buildInfo(
-                              'CURRENT STATUS',
-                              'Pending Ad-hoc\nApproval',
-                              valueColor: AppTheme.primaryRed,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildInfo('PROCESSOR NAME', 'Dr. Helena Vance'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _buildInfo('TIME IN', 'Jun 12, 2024 - 09:42\nAM'),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildInfo('AD-HOC OFFICE', 'Dean of Faculty\nCouncil'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      _buildInfo('SIGNEE NAME', 'Prof. Marcus Sterling'),
-                      const SizedBox(height: 24),
-
-                      // --- RETURN NOTE BOX ---
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade50.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.shade100),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: const [
-                                Icon(Icons.assignment_return_outlined, size: 16, color: AppTheme.primaryRed),
-                                SizedBox(width: 8),
-                                Text(
-                                  'RETURN NOTE / REMARKS',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppTheme.primaryRed,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'The course syllabus attached is missing the updated laboratory safety guidelines mandated for the 2024 academic year. Please revise Section 4.2 to include the new hazardous materials handling protocols and resubmit for department-level review. Ensure all faculty signatures are present on the amendment page.',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.black87,
-                                height: 1.5,
-                              ),
-                            ),
-                          ],
-                        ),
+                      const SizedBox(height: 8),
+                      Text(
+                        title, 
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, height: 1.3, color: Colors.black87),
                       ),
                     ],
                   ),
                 ),
-              ),
+                const SizedBox(width: 16),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: const Icon(Icons.close, color: Colors.black54),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
 
-              // --- FOOTER BUTTONS ---
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20.0),
-                color: Colors.red.shade50.withValues(alpha: 0.5), // Light pink tint
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(context),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          side: BorderSide(color: Colors.red.shade200),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          backgroundColor: Colors.white,
-                        ),
-                        child: const Text('Close', style: TextStyle(color: Colors.black87, fontSize: 14)),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          // Handle Print Log logic
-                          Navigator.pop(context);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryRed,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          elevation: 0,
-                        ),
-                        child: const Text('Print Log', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      ),
-                    ),
-                  ],
+            // --- INFO CARDS ---
+            Row(
+              children: [
+                Expanded(child: _buildInfoCard('FORM TYPE', formType)),
+                const SizedBox(width: 12),
+                Expanded(child: _buildInfoCard('ORIGIN OFFICE', originOffice)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _buildRequestorCard('System Originator', 'SO'), 
+            const SizedBox(height: 32),
+
+            // --- PROCESSING ROUTE ---
+            const Text(
+              'PROCESSING TIMELINE',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5),
+            ),
+            const SizedBox(height: 16),
+            
+            _buildTimelineStep(
+              dotColor: Colors.green,
+              lineColor: Colors.green.shade300,
+              title: 'Initial Submission',
+              titleColor: Colors.black87,
+              subtitle: 'Completed',
+              isLast: false,
+            ),
+            _buildTimelineStep(
+              dotColor: Colors.green,
+              lineColor: Colors.green.shade300,
+              title: 'Processed by Office',
+              titleColor: Colors.black87,
+              subtitle: 'Verified',
+              isLast: false,
+            ),
+            _buildTimelineStep(
+              dotColor: Colors.green,
+              lineColor: Colors.transparent,
+              title: 'Signee Action',
+              titleColor: Colors.black87,
+              subtitle: 'Status: $status',
+              isLast: true,
+            ),
+            
+            const SizedBox(height: 20),
+            Divider(color: Colors.grey.shade200, thickness: 1),
+            const SizedBox(height: 20),
+
+            // --- ACTION BUTTONS ---
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Downloading digital copy...')),
+                  );
+                },
+                icon: const Icon(Icons.download_outlined, color: Colors.white, size: 20),
+                label: const Text('Download Record', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryRed,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close', style: TextStyle(color: Colors.black54, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5)),
+          const SizedBox(height: 6),
+          Text(value, style: const TextStyle(fontSize: 13, color: Colors.black87)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRequestorCard(String name, String initials) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('REQUESTOR', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: Colors.grey.shade300,
+                child: Text(initials, style: const TextStyle(fontSize: 10, color: Colors.black87, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 12),
+              Text(name, style: const TextStyle(fontSize: 14, color: Colors.black87)),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 
-  // --- REUSABLE WIDGETS ---
-
-  Widget _buildStepNode(String label, {bool isCompleted = false, bool isCurrent = false, String? number}) {
-    Color primary = AppTheme.primaryRed;
-    return Column(
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: isCompleted ? primary : (isCurrent ? Colors.white : Colors.red.shade100),
-            shape: BoxShape.circle,
-            border: isCurrent ? Border.all(color: primary, width: 2) : null,
+  Widget _buildTimelineStep({
+    required Color dotColor,
+    required Color lineColor,
+    required String title,
+    required Color titleColor,
+    required String subtitle,
+    required bool isLast,
+  }) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+                child: Center(
+                  child: Icon(Icons.check, size: 10, color: Colors.white),
+                ),
+              ),
+              if (!isLast)
+                Expanded(child: Container(width: 2, color: lineColor)),
+            ],
           ),
-          child: isCompleted
-              ? const Icon(Icons.check, color: Colors.white, size: 16)
-              : (isCurrent
-                  ? Center(child: Container(width: 8, height: 8, decoration: BoxDecoration(color: primary, shape: BoxShape.circle)))
-                  : Center(child: Text(number ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)))),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
-            color: isCompleted || isCurrent ? primary : Colors.grey,
-            letterSpacing: 0.5,
+          const SizedBox(width: 16),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: titleColor)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                ],
+              ),
+            ),
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildConnector({required bool isCompleted}) {
-    return Expanded(
-      child: Container(
-        margin: const EdgeInsets.only(top: 14), // Align with the center of the 28px circle
-        height: 3,
-        color: isCompleted ? AppTheme.primaryRed : Colors.red.shade100,
+        ],
       ),
-    );
-  }
-
-  Widget _buildInfo(String label, String value, {Color valueColor = Colors.black87}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(fontSize: 14, color: valueColor, height: 1.3),
-        ),
-      ],
     );
   }
 }

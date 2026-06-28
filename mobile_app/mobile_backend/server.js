@@ -580,6 +580,96 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 });
 
 // ==========================================
+// 14. SIGN DOCUMENT ENDPOINT
+// ==========================================
+app.put('/api/documents/:qrCode/sign', async (req, res) => {
+  const { qrCode } = req.params;
+
+  try {
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const iniId = docResult.rows[0].ini_id;
+
+    // Target the latest routing step for this document, mark as Signed, and record the exit time
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1),
+           time_out = timezone('Asia/Manila', now())
+       WHERE ini_id = $1 
+       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
+      [iniId]
+    );
+
+    res.status(200).json({ message: 'Document signed successfully' });
+  } catch (error) {
+    console.error('Sign Document Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 15. SCAN IN DOCUMENT (Processor)
+// ==========================================
+app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
+  const { qrCode } = req.params;
+
+  try {
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const iniId = docResult.rows[0].ini_id;
+
+    // Update the latest processed document status to 'In Verification'
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
+       WHERE ini_id = $1 
+       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
+      [iniId]
+    );
+
+    res.status(200).json({ message: 'Document scanned IN successfully' });
+  } catch (error) {
+    console.error('Scan In Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+// ==========================================
+// 16. SCAN OUT DOCUMENT (Processor)
+// ==========================================
+app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
+  const { qrCode } = req.params;
+
+  try {
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const iniId = docResult.rows[0].ini_id;
+
+    // Update the latest processed document status to 'Verified' and record the exit time
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1),
+           time_out = timezone('Asia/Manila', now())
+       WHERE ini_id = $1 
+       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
+      [iniId]
+    );
+
+    res.status(200).json({ message: 'Document scanned OUT successfully' });
+  } catch (error) {
+    console.error('Scan Out Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
