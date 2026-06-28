@@ -21,8 +21,8 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   bool _isLoading = true;
   List<dynamic> _documents = [];
   int _incomingCount = 0;
-  int _pendingCount = 0;
-  int _completedCount = 0;
+  int _inVerificationCount = 0;
+  int _verifiedCount = 0;
 
   @override
   void initState() {
@@ -34,7 +34,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   String _resolveStatus(dynamic doc) {
     if (doc['time_out'] != null) return 'Verified';
     if (doc['time_in'] != null) return 'In Verification';
-    return (doc['status'] ?? 'Pending').toString();
+    return 'Pending';
   }
 
   Future<void> _fetchDashboardData() async {
@@ -46,10 +46,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
         if (mounted) {
           setState(() {
             _documents = data;
-            // Updated count logic based on processed_document timestamps
+            // Updated stats based on processed_document timestamps
             _incomingCount = data.where((d) => d['time_in'] == null).length;
-            _pendingCount = data.where((d) => d['time_in'] != null && d['time_out'] == null).length;
-            _completedCount = data.where((d) => d['time_out'] != null).length;
+            _inVerificationCount = data.where((d) => d['time_in'] != null && d['time_out'] == null).length;
+            _verifiedCount = data.where((d) => d['time_out'] != null).length;
             _isLoading = false;
           });
         }
@@ -74,8 +74,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'verified':
-      case 'completed':
-      case 'approved':
         return Colors.green;
       case 'pending':
         return Colors.orange;
@@ -87,7 +85,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   }
 
   String _formatDateString(String? isoString) {
-    if (isoString == null) return 'Unknown Time';
+    if (isoString == null) return 'Recent';
     try {
       final date = DateTime.parse(isoString).toLocal();
       return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
@@ -140,11 +138,11 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                     children: [
                       _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.red.shade100),
                       const SizedBox(width: 12),
-                      _buildStatCard(_pendingCount.toString(), 'IN VERIFICATION', Colors.white, Colors.orange.shade100),
+                      _buildStatCard(_inVerificationCount.toString(), 'IN VERIFICATION', Colors.white, Colors.orange.shade100),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildStatCard(_completedCount.toString(), 'VERIFIED', Colors.white, Colors.green.shade100, isFullWidth: true),
+                  _buildStatCard(_verifiedCount.toString(), 'VERIFIED', Colors.white, Colors.green.shade100, isFullWidth: true),
                   const SizedBox(height: 24),
                   
                   // Priority Card logic

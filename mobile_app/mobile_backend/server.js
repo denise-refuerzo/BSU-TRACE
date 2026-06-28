@@ -591,11 +591,10 @@ app.put('/api/documents/:qrCode/sign', async (req, res) => {
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // Target the latest routing step for this document, mark as Signed, and record the exit time
+    // Target the latest routing step and mark as Signed WITHOUT setting time_out
     await pool.query(
       `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1),
-           time_out = timezone('Asia/Manila', now())
+       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1)
        WHERE ini_id = $1 
        AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
       [iniId]
