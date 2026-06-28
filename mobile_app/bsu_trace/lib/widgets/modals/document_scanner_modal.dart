@@ -1,4 +1,5 @@
 // lib/widgets/modals/document_scanner_modal.dart
+import 'dart:convert'; // Added to decode the backend error message
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
@@ -44,14 +45,28 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
           ),
         );
       } else {
-        throw Exception('Document not found');
+        // Parse custom error message from the backend
+        String errorMessage = 'Error: Could not process document.';
+        try {
+          final errorData = json.decode(response.body);
+          if (errorData['error'] != null) {
+            errorMessage = errorData['error'];
+          }
+        } catch (_) {}
+        
+        throw Exception(errorMessage);
       }
     } catch (e) {
       if (!mounted) return;
+      
+      // Clean up the error message for the user interface
+      String displayError = e.toString().replaceAll('Exception: ', '');
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Error: Could not process document. Verify the Tracking ID.'),
+        SnackBar(
+          content: Text(displayError),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4), // Give them time to read the reason
         ),
       );
     } finally {

@@ -24,7 +24,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
   Timer? _timer;
   
   String _searchQuery = '';
-  String _selectedAction = 'All Actions';
+  String _selectedAction = 'All'; // 'All', 'In Progress', 'Completed'
 
   @override
   void initState() {
@@ -46,7 +46,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
-    // Use the new timeline endpoint specific to the processor's actions
     final String url = '${AppConfig.baseUrl}/users/$userId/processing-timeline';
 
     try {
@@ -56,10 +55,10 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         if (mounted) {
           List<dynamic> fetchedEvents = json.decode(response.body);
 
-          // Ensure sorting by newest action timestamp
+          // Sort by the time it was scanned in (newest first)
           fetchedEvents.sort((a, b) {
-            String dateAStr = a['action_timestamp'] ?? '1970-01-01T00:00:00+08:00';
-            String dateBStr = b['action_timestamp'] ?? '1970-01-01T00:00:00+08:00';
+            String dateAStr = a['time_in'] ?? '1970-01-01T00:00:00+08:00';
+            String dateBStr = b['time_in'] ?? '1970-01-01T00:00:00+08:00';
 
             dateAStr = dateAStr.replaceAll(' ', 'T');
             if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
@@ -93,15 +92,19 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         final trackingId = (event['qr_code'] ?? '').toString().toLowerCase();
         final matchesSearch = title.contains(_searchQuery.toLowerCase()) || trackingId.contains(_searchQuery.toLowerCase());
 
-        String actionType = event['action_type'] ?? '';
-        bool matchesStatus = _selectedAction == 'All Actions' || actionType.toLowerCase() == _selectedAction.toLowerCase();
+        bool isCompleted = event['time_out'] != null;
+        bool matchesStatus = true;
+        
+        if (_selectedAction == 'In Progress') matchesStatus = !isCompleted;
+        if (_selectedAction == 'Completed') matchesStatus = isCompleted;
 
         return matchesSearch && matchesStatus;
       }).toList();
     });
   }
 
-  String _formatDate(String isoString) {
+  String _formatDate(String? isoString) {
+    if (isoString == null || isoString.isEmpty) return 'Pending...';
     try {
       final DateTime dt = DateTime.parse(isoString).toLocal();
       final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -145,7 +148,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                     )
                   else
                     // Build timeline list
-                    ...filteredEvents.map((event) => _buildTimelineCard(event)),
+                    ...filteredEvents.map((event) => _buildRecordCard(event)),
                     
                   const SizedBox(height: 80),
                 ],
@@ -186,7 +189,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
           child: DropdownButton<String>(
             isExpanded: true,
             value: _selectedAction,
-            items: ['All Actions', 'Scanned In', 'Scanned Out']
+            items: ['All', 'In Progress', 'Completed']
                 .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
             onChanged: (String? newValue) {
               if (newValue != null) {
@@ -200,17 +203,14 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         ),
       );
 
-  Widget _buildTimelineCard(Map<String, dynamic> event) {
+  Widget _buildRecordCard(Map<String, dynamic> event) {
     final String trackingId = event['qr_code'] ?? 'N/A';
     final String title = event['title'] ?? 'No Title';
     final String category = event['form_type'] ?? 'Document';
-    final String actionType = event['action_type'] ?? 'Unknown';
-    final String timestampStr = event['action_timestamp'] ?? '';
-
-    // Color logic depending on action
-    Color actionColor = actionType.toLowerCase() == 'scanned in' 
-        ? Colors.blue 
-        : Colors.green;
+    
+    final String? timeInStr = event['time_in'];
+    final String? timeOutStr = event['time_out'];
+    final bool isCompleted = timeOutStr != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -218,7 +218,10 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
       decoration: BoxDecoration(
         color: Colors.white, 
         borderRadius: BorderRadius.circular(8), 
-        border: Border(left: BorderSide(color: actionColor, width: 4)),
+        border: Border(left: BorderSide(
+          color: isCompleted ? Colors.blue : Colors.orange, 
+          width: 4
+        )),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -230,25 +233,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                actionType.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 12, 
-                  fontWeight: FontWeight.bold, 
-                  color: actionColor,
-                  letterSpacing: 0.5,
-                )
-              ),
-              Text(
-                _formatDate(timestampStr), 
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
+          // Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -258,10 +243,68 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isCompleted ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  isCompleted ? 'Completed' : 'In Progress',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: isCompleted ? Colors.blue : Colors.orange.shade800,
+                  ),
+                ),
+              )
             ],
           ),
           const SizedBox(height: 4),
-          Text(category, style: const TextStyle(fontSize: 14, color: Colors.black54))
+          Text(category, style: const TextStyle(fontSize: 13, color: Colors.black54)),
+          
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+          ),
+
+          // Scanned In Row
+          Row(
+            children: [
+              const Icon(Icons.login, size: 16, color: Colors.green),
+              const SizedBox(width: 8),
+              const Text('Scanned In:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              const Spacer(),
+              Text(_formatDate(timeInStr), style: const TextStyle(fontSize: 13, color: Colors.black87)),
+            ],
+          ),
+          
+          const SizedBox(height: 8),
+
+          // Scanned Out Row
+          Row(
+            children: [
+              Icon(Icons.logout, size: 16, color: isCompleted ? Colors.blue : Colors.grey),
+              const SizedBox(width: 8),
+              Text(
+                'Scanned Out:', 
+                style: TextStyle(
+                  fontSize: 13, 
+                  fontWeight: FontWeight.w500,
+                  color: isCompleted ? Colors.black : Colors.grey,
+                )
+              ),
+              const Spacer(),
+              Text(
+                _formatDate(timeOutStr), 
+                style: TextStyle(
+                  fontSize: 13, 
+                  color: isCompleted ? Colors.black87 : Colors.grey,
+                  fontStyle: isCompleted ? FontStyle.normal : FontStyle.italic
+                )
+              ),
+            ],
+          ),
         ],
       ),
     );

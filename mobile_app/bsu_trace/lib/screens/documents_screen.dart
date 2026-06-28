@@ -24,8 +24,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Timer? _timer;
   bool _isAscending = false;
   
-  // 1. Add state for the selected status filter
+  // State variables for filtering
   String _selectedStatus = 'All Status';
+  String _searchQuery = ''; // Added search state
 
   @override
   void initState() {
@@ -83,6 +84,30 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 1. Pre-filter the documents here before building the UI to handle both search and status
+    List<dynamic> filteredDocuments = documents.where((doc) {
+      // Status Filter
+      if (_selectedStatus != 'All Status') {
+        String docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
+        if (docStatus != _selectedStatus.toLowerCase()) return false;
+      }
+      
+      // Search Filter
+      if (_searchQuery.isNotEmpty) {
+        String query = _searchQuery.toLowerCase();
+        String title = (doc['title'] ?? '').toString().toLowerCase();
+        String trackingId = (doc['qr_code'] ?? doc['tracking_id'] ?? '').toString().toLowerCase();
+        String origin = (doc['origin_office'] ?? '').toString().toLowerCase();
+        
+        // Return true if the query matches the title, ID, or origin office
+        if (!title.contains(query) && !trackingId.contains(query) && !origin.contains(query)) {
+          return false;
+        }
+      }
+
+      return true;
+    }).toList();
+
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
@@ -104,14 +129,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     _buildFilterRow(),
                     const SizedBox(height: 24),
                     
-                    // 2. Filter the documents list based on _selectedStatus state
-                    ...documents.where((doc) {
-                      if (_selectedStatus == 'All Status') return true;
-                      
-                      // Normalize strings to lowercase to ensure matching works safely
-                      String docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
-                      return docStatus == _selectedStatus.toLowerCase();
-                    }).map((doc) => _buildDocumentCard(context, doc)),
+                    if (filteredDocuments.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 40),
+                        child: Text("No documents found.", style: TextStyle(color: Colors.grey)),
+                      )
+                    else
+                      ...filteredDocuments.map((doc) => _buildDocumentCard(context, doc)),
                     
                     const SizedBox(height: 80),
                   ],
@@ -127,6 +151,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Widget _buildSearchBar() => TextField(
+        onChanged: (value) {
+          setState(() {
+            _searchQuery = value; // Update the search query state when the user types
+          });
+        },
         decoration: InputDecoration(
           hintText: 'Search Documents...',
           prefixIcon: const Icon(Icons.search, color: Colors.grey),
@@ -145,8 +174,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   isExpanded: true,
-                  value: _selectedStatus, // Bind to state
-                  // 3. Align Dropdown items perfectly with the DB `status` table
+                  value: _selectedStatus,
                   items: [
                     'All Status', 
                     'Pending', 
@@ -165,7 +193,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   onChanged: (String? newValue) {
                     if (newValue != null) {
                       setState(() {
-                        _selectedStatus = newValue; // Update state and rebuild
+                        _selectedStatus = newValue; 
                       });
                     }
                   },
@@ -219,7 +247,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
       DateTime? parsedDate = DateTime.tryParse(normalizedTime);
       
-if (parsedDate != null) {
+      if (parsedDate != null) {
         DateTime now = DateTime.now(); 
         Duration diff = now.difference(parsedDate);
 

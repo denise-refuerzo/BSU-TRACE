@@ -646,20 +646,42 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    // 1. Fetch the document's latest processing step and its current status
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, i.ini_id, s.current_status, pd.time_out
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1
+      ORDER BY pd.time_in DESC 
+      LIMIT 1
+    `, [qrCode]);
+
     if (docResult.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
-    const iniId = docResult.rows[0].ini_id;
 
-    // Update the latest processed document status to 'Verified' and record the exit time
+    const { ini_id, current_status, time_out } = docResult.rows[0];
+
+    // 2. Guard clauses to prevent scanning out invalid documents
+    if (time_out !== null) {
+      return res.status(400).json({ error: 'Document has already been scanned out.' });
+    }
+    if (current_status.toLowerCase() === 'pending') {
+      return res.status(400).json({ error: 'Document must be scanned IN first.' });
+    }
+    if (current_status.toLowerCase() === 'in verification') {
+      return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
+    }
+
+    // 3. Update the latest processed document status to 'Verified' and record the exit time
     await pool.query(
       `UPDATE public.processed_document 
        SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1),
            time_out = timezone('Asia/Manila', now())
        WHERE ini_id = $1 
        AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
+      [ini_id]
     );
 
     res.status(200).json({ message: 'Document scanned OUT successfully' });
