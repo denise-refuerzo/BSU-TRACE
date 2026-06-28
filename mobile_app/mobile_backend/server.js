@@ -777,11 +777,11 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // FIX: UPDATE the current active step's destination instead of inserting a new tile
-    // This routes it to the target office and immediately flags it as 'In Verification'
+    // ADDED: is_adhoc = true 
     await pool.query(
       `UPDATE public.processed_document 
        SET current_office_id = $1,
+           is_adhoc = true,
            s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
        WHERE pd_id = (
          SELECT pd_id 
