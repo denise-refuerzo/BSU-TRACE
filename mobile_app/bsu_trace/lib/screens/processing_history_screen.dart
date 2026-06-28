@@ -24,7 +24,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
   Timer? _timer;
   
   String _searchQuery = '';
-  String _selectedAction = 'All'; // 'All', 'In Progress', 'Completed'
+  String _selectedAction = 'All'; // 'All', 'In Verification', 'Verified'
 
   @override
   void initState() {
@@ -92,11 +92,12 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         final trackingId = (event['qr_code'] ?? '').toString().toLowerCase();
         final matchesSearch = title.contains(_searchQuery.toLowerCase()) || trackingId.contains(_searchQuery.toLowerCase());
 
-        bool isCompleted = event['time_out'] != null;
+        // Status Logic
+        bool isVerified = event['time_out'] != null;
         bool matchesStatus = true;
         
-        if (_selectedAction == 'In Progress') matchesStatus = !isCompleted;
-        if (_selectedAction == 'Completed') matchesStatus = isCompleted;
+        if (_selectedAction == 'In Verification') matchesStatus = !isVerified;
+        if (_selectedAction == 'Verified') matchesStatus = isVerified;
 
         return matchesSearch && matchesStatus;
       }).toList();
@@ -147,7 +148,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                       child: Text("No scanning records found.", style: TextStyle(color: Colors.grey)),
                     )
                   else
-                    // Build timeline list
                     ...filteredEvents.map((event) => _buildRecordCard(event)),
                     
                   const SizedBox(height: 80),
@@ -189,7 +189,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
           child: DropdownButton<String>(
             isExpanded: true,
             value: _selectedAction,
-            items: ['All', 'In Progress', 'Completed']
+            items: ['All', 'In Verification', 'Verified']
                 .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
             onChanged: (String? newValue) {
               if (newValue != null) {
@@ -210,7 +210,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
     
     final String? timeInStr = event['time_in'];
     final String? timeOutStr = event['time_out'];
-    final bool isCompleted = timeOutStr != null;
+    final bool isVerified = timeOutStr != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -219,7 +219,7 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         color: Colors.white, 
         borderRadius: BorderRadius.circular(8), 
         border: Border(left: BorderSide(
-          color: isCompleted ? Colors.blue : Colors.orange, 
+          color: isVerified ? Colors.blue : Colors.orange, 
           width: 4
         )),
         boxShadow: [
@@ -233,7 +233,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -246,15 +245,15 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isCompleted ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
+                  color: isVerified ? Colors.blue.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  isCompleted ? 'Completed' : 'In Progress',
+                  isVerified ? 'Verified' : 'In Verification',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: isCompleted ? Colors.blue : Colors.orange.shade800,
+                    color: isVerified ? Colors.blue : Colors.orange.shade800,
                   ),
                 ),
               )
@@ -268,7 +267,6 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
             child: Divider(height: 1, color: Color(0xFFEEEEEE)),
           ),
 
-          // Scanned In Row
           Row(
             children: [
               const Icon(Icons.login, size: 16, color: Colors.green),
@@ -281,17 +279,16 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
           
           const SizedBox(height: 8),
 
-          // Scanned Out Row
           Row(
             children: [
-              Icon(Icons.logout, size: 16, color: isCompleted ? Colors.blue : Colors.grey),
+              Icon(Icons.logout, size: 16, color: isVerified ? Colors.blue : Colors.grey),
               const SizedBox(width: 8),
               Text(
                 'Scanned Out:', 
                 style: TextStyle(
                   fontSize: 13, 
                   fontWeight: FontWeight.w500,
-                  color: isCompleted ? Colors.black : Colors.grey,
+                  color: isVerified ? Colors.black : Colors.grey,
                 )
               ),
               const Spacer(),
@@ -299,8 +296,8 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                 _formatDate(timeOutStr), 
                 style: TextStyle(
                   fontSize: 13, 
-                  color: isCompleted ? Colors.black87 : Colors.grey,
-                  fontStyle: isCompleted ? FontStyle.normal : FontStyle.italic
+                  color: isVerified ? Colors.black87 : Colors.grey,
+                  fontStyle: isVerified ? FontStyle.normal : FontStyle.italic
                 )
               ),
             ],

@@ -405,7 +405,6 @@ app.get('/api/process-types/:id/route', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // 10. CREATE NEW DOCUMENT ENDPOINT
 // ==========================================
@@ -440,10 +439,10 @@ app.post('/api/documents', async (req, res) => {
     const docResult = await pool.query(insertDocQuery, [p_id, u_id, title, edcDate, qrCode]);
     const newIniId = docResult.rows[0].ini_id;
 
-    // Explicitly enforce Asia/Manila timezone upon creation rather than pure UTC
+    // FIX: Set time_in to NULL so it isn't automatically marked "In Verification" upon creation
     const insertTrackQuery = `
       INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-      VALUES ($1, 1, $2, timezone('Asia/Manila', now()))
+      VALUES ($1, 1, $2, NULL)
     `;
     await pool.query(insertTrackQuery, [newIniId, firstOfficeId]);
 
@@ -454,7 +453,6 @@ app.post('/api/documents', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 11. FETCH ALL BOOKINGS FOR SCHEDULER
