@@ -30,12 +30,10 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ error: 'Invalid username or password' });
 
-    // Conditional Step: If user enabled 2FA and hasn't provided the PIN yet
     if (user.two_fa_enabled && !pinCode) {
       return res.json({ require2FA: true });
     }
 
-    // Verify PIN if 2FA is active
     if (user.two_fa_enabled && pinCode) {
       if (user.two_fa_code !== pinCode) {
         return res.status(401).json({ error: 'Invalid security PIN combination code' });
@@ -56,7 +54,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// 2. RETRIEVE DETAILED PROFILE METADATA (UPDATED WITH OFFICE FIELD JOINS)
+// 2. RETRIEVE DETAILED PROFILE METADATA 
 app.get('/api/profile/:userId', async (req, res) => {
   try {
     const result = await pool.query(
@@ -130,7 +128,7 @@ app.get('/api/process-types', async (req, res) => {
       LEFT JOIN public.offices o7 ON r.stop_7 = o7.o_id`;
     const result = await pool.query(query);
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: 'Failed to pull' }); }
+  } catch (err) { res.status(500).json({ error: 'Failed to pull templates' }); }
 });
 
 app.get('/api/documents/:userId', async (req, res) => {
@@ -155,7 +153,8 @@ app.post('/api/documents', async (req, res) => {
   try {
     const uniqueQrPayload = `TRK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const docResult = await pool.query(
-      `INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      `INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code, created_at) 
+       VALUES ($1, $2, $3, $4, $5, TIMEZONE('Asia/Manila', NOW())) RETURNING *`,
       [processTypeId, userId, title, edc || null, uniqueQrPayload]
     );
     const newDoc = docResult.rows[0];
@@ -180,9 +179,8 @@ app.post('/api/accounts', async (req, res) => {
 });
 
 // ==========================================
-// 5. SCHOOL RESOURCES SCHEDULER ENDPOINTS
+// SCHOOL RESOURCES SCHEDULER ENDPOINTS
 // ==========================================
-
 app.get('/api/resources/bookings', async (req, res) => {
   try {
     const query = `
@@ -258,16 +256,13 @@ app.post('/api/resources/book', async (req, res) => {
     res.status(201).json({ message: "Reservation recorded successfully! Awaiting status validation." });
   } catch (err) {
     await client.query('ROLLBACK');
-    console.error("Database Transaction Error inside /api/resources/book:", err);
     res.status(500).json({ error: err.message || "Failed transactional database commitment sequence." });
   } finally {
     client.release();
   }
 });
 
-// =====================================================================================
-// 📌 UPDATED OFFICE ACTIVE QUEUE (INCLUDES ALL SYSTEM FILES CURRENTLY SITTING IN LOGIC OFFICE)
-// =====================================================================================
+// FETCH INCOMING DOCUMENTS FILTERED BY THE PROCESSOR'S ASSIGNED OFFICE
 app.get('/api/processor/documents/:officeId', async (req, res) => {
   const { officeId } = req.params;
   try {
@@ -282,7 +277,9 @@ app.get('/api/processor/documents/:officeId', async (req, res) => {
         curr_o.office_name as current_office, 
         next_o.office_name as next_office,
         pdoc.time_in,
-        pdoc.time_out
+        pdoc.time_out,
+        pdoc.is_adhoc,
+        pdoc.adhoc_return_office_id
       FROM public.processed_document pdoc
       JOIN public.initial_document idoc ON pdoc.ini_id = idoc.ini_id
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
@@ -301,9 +298,8 @@ app.get('/api/processor/documents/:officeId', async (req, res) => {
 });
 
 // ==========================================
-// SMART SCANNER ENDPOINTS WITH STRICT TIMESTAMPS
+// SMART SCANNER ENDPOINTS WITH MANILA TIMEZONE
 // ==========================================
-
 app.post('/api/documents/scan-in', async (req, res) => {
   const { qrCode, processorUserId } = req.body;
   try {
@@ -315,7 +311,7 @@ app.post('/api/documents/scan-in', async (req, res) => {
     }
 
     const docRes = await pool.query(`
-      SELECT pd.pd_id, pd.current_office_id, pd.time_in, idoc.title, off.office_name as expected_office_name
+      SELECT pd.pd_id, pd.ini_id, pd.current_office_id, pd.time_in, idoc.title, off.office_name as expected_office_name
       FROM public.processed_document pd
       JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
       JOIN public.offices off ON pd.current_office_id = off.o_id
@@ -323,7 +319,7 @@ app.post('/api/documents/scan-in', async (req, res) => {
     `, [qrCode]);
 
     if (docRes.rows.length === 0) {
-      return res.status(442).json({ error: "Rejection: Document token is either invalid or already fully completed." });
+      return res.status(422).json({ error: "Rejection: Document token is either invalid or already fully completed." });
     }
 
     const activeLog = docRes.rows[0];
@@ -336,7 +332,7 @@ app.post('/api/documents/scan-in', async (req, res) => {
 
     if (activeLog.time_in !== null) {
       return res.status(400).json({ 
-        error: `Notice: "${activeLog.title}" has already been clocked into your office. If you are finished processing, please switch the scanner mode to Time-Out.` 
+        error: `Notice: "${activeLog.title}" has already been clocked into your office.` 
       });
     }
 
@@ -345,6 +341,12 @@ app.post('/api/documents/scan-in', async (req, res) => {
       SET time_in = TIMEZONE('Asia/Manila', NOW()) 
       WHERE pd_id = $1
     `, [activeLog.pd_id]);
+
+    await pool.query(`
+      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+      VALUES ($1, $2, $3, 'Scanned In', TIMEZONE('Asia/Manila', NOW()))
+    `, [activeLog.ini_id, processorUserId, processorOfficeId]);
+
     res.json({ message: `Successfully registered Time-In for document: "${activeLog.title}"` });
 
   } catch (err) {
@@ -354,8 +356,11 @@ app.post('/api/documents/scan-in', async (req, res) => {
 });
 
 app.post('/api/documents/scan-out', async (req, res) => {
-  const { qrCode } = req.body;
+  const { qrCode, processorUserId } = req.body;
   try {
+    const procRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
+    const processorOfficeId = procRes.rows[0]?.o_id;
+
     const checkStatusRes = await pool.query(`
       SELECT pd.pd_id, pd.time_in, st.current_status, pd.next_office_id, pd.ini_id, idoc.title
       FROM public.processed_document pd
@@ -365,7 +370,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
     `, [qrCode]);
 
     if (checkStatusRes.rows.length === 0) {
-      return res.status(404).json({ error: "Document not found or already checked out." });
+      return res.status(444).json({ error: "Document not found or already checked out." });
     }
 
     const currentActiveStep = checkStatusRes.rows[0];
@@ -379,7 +384,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
 
     if (currentStatusClean === 'pending' || currentStatusClean === 'in verification') {
       return res.status(400).json({ 
-        error: "Rejection: This document cannot be signed out yet. It requires pending approval/signature from the office Signee." 
+        error: "Rejection: This document cannot be signed out yet. It requires approval/signature from the office Signee." 
       });
     }
 
@@ -430,6 +435,14 @@ app.post('/api/documents/scan-out', async (req, res) => {
         `, [currentActiveStep.ini_id, targetCurrentOffice, foundNextStop]);
       }
     }
+
+    if (processorOfficeId) {
+      await pool.query(`
+        INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+        VALUES ($1, $2, $3, 'Scanned Out', TIMEZONE('Asia/Manila', NOW()))
+      `, [currentActiveStep.ini_id, processorUserId, processorOfficeId]);
+    }
+
     res.json({ message: "Document safely checked out and pushed to next workflow queue block." });
 
   } catch (err) {
@@ -438,9 +451,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
   }
 });
 
-// =====================================================================================
-// 📌 MASTER PIPELINE LOOKUP UPGRADE (INCLUDES ALL GLOBAL DOCUMENTS HEADED FOR YOUR OFFICE)
-// =====================================================================================
+// FETCH EXTENDED PIPELINE RECORDS FOR THE MASTER DOCUMENTS TAB
 app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
   const { officeId } = req.params;
   try {
@@ -457,23 +468,17 @@ app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
         next_o.office_name as next_office,
         pdoc_office.time_in,
         pdoc_office.time_out,
-        pdoc_active.current_office_id
+        pdoc_active.current_office_id,
+        pdoc_active.is_adhoc AS current_step_is_adhoc
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       JOIN public.route r ON pt.r_id = r.r_id
-      
-      -- Join to capture your specific office tracking timestamps
       LEFT JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id AND pdoc_office.current_office_id = $1
-      
-      -- Join to track where the document currently lives right now
       LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
-      
       LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
       LEFT JOIN public.offices curr_o ON pdoc_active.current_office_id = curr_o.o_id
       LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON pdoc_active.s_id = st.s_id
-      
-      -- Filter condition: Show if it has been here, is here now, OR your office is part of its mandatory structural route sequences
       WHERE pdoc_office.pd_id IS NOT NULL 
          OR pdoc_active.current_office_id = $1
          OR r.stop_1 = $1 OR r.stop_2 = $1 OR r.stop_3 = $1 OR r.stop_4 = $1 OR r.stop_5 = $1 OR r.stop_6 = $1 OR r.stop_7 = $1
@@ -489,44 +494,52 @@ app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
 
 // EXECUTE AD-HOC DETOUR VERIFICATION REROUTE
 app.post('/api/processor/documents/ad-hoc', async (req, res) => {
-  const { iniId, targetOfficeId, currentOfficeId } = req.body;
+  const { iniId, targetOfficeId, currentOfficeId, executorUserId } = req.body;
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-      const activeStepRes = await client.query(`
-        SELECT pd_id, next_office_id, time_in 
-        FROM public.processed_document 
-        WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
-      `, [parseInt(iniId), parseInt(currentOfficeId)]);
+    const activeStepRes = await client.query(`
+      SELECT pd_id, next_office_id, time_in 
+      FROM public.processed_document 
+      WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
+    `, [parseInt(iniId), parseInt(currentOfficeId)]);
 
-      if (activeStepRes.rows.length === 0) {
-        throw new Error("No active, open tracking step found for this document in your office.");
-      }
+    if (activeStepRes.rows.length === 0) {
+      throw new Error("No active, open tracking step found for this document in your office.");
+    }
 
-      const currentStep = activeStepRes.rows[0];
+    const currentStep = activeStepRes.rows[0];
 
-      if (currentStep.time_in === null) {
-        throw new Error("Rejection: Cannot request an ad-hoc detour. This document has not been scanned for Time-In at your office.");
-      }
+    if (currentStep.time_in === null) {
+      throw new Error("Rejection: Cannot request an ad-hoc detour. This document has not been scanned for Time-In at your office.");
+    }
 
-    await client.query(`
+    await client.query (`
       UPDATE public.processed_document
-      SET s_id = 2, next_office_id = $1
-      WHERE pd_id = $2
-    `, [parseInt(targetOfficeId), currentStep.pd_id]);
-
-    await client.query(`
-      UPDATE public.processed_document
-      SET time_out = TIMEZONE('Asia/Manila', NOW())
-      WHERE pd_id = $2
+      SET s_id = 2 -- 'In Verification'
+      WHERE pd_id = $1
     `, [currentStep.pd_id]);
 
     await client.query(`
-      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, is_adhoc, adhoc_return_office_id, time_in)
-      VALUES ($1, 2, $2, $3, true, $3, NULL)
-    `, [parseInt(iniId), parseInt(targetOfficeId), currentStep.next_office_id]);
+      INSERT INTO public.processed_document (
+        ini_id, 
+        s_id, 
+        current_office_id, 
+        next_office_id, 
+        is_adhoc, 
+        adhoc_return_office_id, 
+        time_in, 
+        time_out
+      )
+      VALUES ($1, 1, $2, $3, true, $3, NULL, NULL)
+    `, [parseInt(iniId), parseInt(targetOfficeId), parseInt(currentOfficeId)]);
+
+    await client.query(`
+      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+      VALUES ($1, $2, $3, 'Ad-Hoc Detour Routed', TIMEZONE('Asia/Manila', NOW()))
+    `, [parseInt(iniId), parseInt(executorUserId), parseInt(currentOfficeId)]);
 
     await client.query('COMMIT');
     res.json({ message: "Ad-hoc verification detour successfully injected into tracking pipeline!" });
@@ -537,6 +550,56 @@ app.post('/api/processor/documents/ad-hoc', async (req, res) => {
     res.status(500).json({ error: err.message || "Failed to commit ad-hoc routing detour step." });
   } finally {
     client.release();
+  }
+});
+
+// ====================================================================
+// FIXED: FETCH HISTORY DATA LEDGER FOR ALL PROCESSORS IN THE SPECIFIC OFFICE
+// ====================================================================
+app.get('/api/processor/history/:officeId', async (req, res) => {
+  const { officeId } = req.params;
+  try {
+    const query = `
+      SELECT 
+        h.history_id,
+        h.action_type,
+        h.action_timestamp,
+        u.full_name,
+        idoc.title,
+        idoc.qr_code,
+        idoc.ini_id,
+        idoc.edc,
+        pt.process_name,
+        COALESCE(INITCAP(st.current_status), 'Active Path') as status,
+        curr_o.office_name as current_office,
+        next_o.office_name as next_office,
+        pdoc.time_in,
+        pdoc.time_out,
+        pdoc.is_adhoc
+      FROM public.office_action_history h
+      JOIN public."User" u ON h.u_id = u.u_id
+      JOIN public.initial_document idoc ON h.ini_id = idoc.ini_id
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      -- FIXED: Correlate the specific history action snapshot row via an isolated subquery matrix step
+      LEFT JOIN LATERAL (
+        SELECT pd.time_in, pd.time_out, pd.is_adhoc, pd.s_id, pd.current_office_id, pd.next_office_id
+        FROM public.processed_document pd
+        WHERE pd.ini_id = h.ini_id 
+          AND pd.current_office_id = h.o_id
+        ORDER BY ABS(EXTRACT(EPOCH FROM (pd.time_in - h.action_timestamp))) ASC NULLS LAST
+        LIMIT 1
+      ) pdoc ON TRUE
+      LEFT JOIN public.offices curr_o ON pdoc.current_office_id = curr_o.o_id
+      LEFT JOIN public.offices next_o ON pdoc.next_office_id = next_o.o_id
+      LEFT JOIN public.status st ON pdoc.s_id = st.s_id
+      WHERE h.o_id = $1
+      ORDER BY h.action_timestamp DESC;
+    `;
+    const result = await pool.query(query, [parseInt(officeId)]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Audit trail lookup log mapping error:", err);
+    res.status(500).json({ error: "Failed to map historical action segments." });
   }
 });
 

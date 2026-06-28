@@ -15,14 +15,15 @@ export default function ProcessorDashboard() {
   const [notifications, setNotifications] = useState([]);
   
   // Domain Data States
-  const [incomingDocs, setIncomingDocs] = useState([]); // Documents currently sitting open in your office queue (time_out IS NULL)
-  const [pipelineDocs, setPipelineDocs] = useState([]);   // ALL historical steps associated with your office workspace (including timed-out ones)
+  const [incomingDocs, setIncomingDocs] = useState([]);
+  const [pipelineDocs, setPipelineDocs] = useState([]);  
+  const [actionHistory, setActionHistory] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [processTypes, setProcessTypes] = useState([]);
   
   // Interactive Modal Triggers
-  const [showDetailsModal, setShowDetailsModal] = useState(false); // Dashboard Modal
-  const [showPipelineModal, setShowPipelineModal] = useState(false); // Documents Tab Modal
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showPipelineModal, setShowPipelineModal] = useState(false);
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [scanMode, setScanMode] = useState('time-in');
@@ -44,6 +45,7 @@ export default function ProcessorDashboard() {
   // Search & Filter Hooks
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All'); 
+  const [historyFilter, setHistoryFilter] = useState('All');
   const [processorOfficeName, setProcessorOfficeName] = useState('Loading Office...');
   const [processorOfficeId, setProcessorOfficeId] = useState(null);
 
@@ -51,9 +53,10 @@ export default function ProcessorDashboard() {
   const [selectedAdHocOffice, setSelectedAdHocOffice] = useState('');
   const [isAdHocProcessing, setIsAdHocProcessing] = useState(false);
 
-  // Pagination State Controls (Items Per Page = 5)
+  // Pagination State Controls
   const [dashboardPage, setDashboardPage] = useState(1);
   const [pipelinePage, setPipelinePage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
   const itemsPerPage = 5;
 
   useEffect(() => {
@@ -84,7 +87,6 @@ export default function ProcessorDashboard() {
         setProcessorOfficeName(data.office_name || 'CICS Office');
         setProcessorOfficeId(data.o_id);
         
-        // Populate profile form values
         setProfileName(data.full_name || '');
         setProfileEmail(data.uni_email || '');
         setFacultyId(data.faculty_id || 'NOT ASSIGNED');
@@ -94,13 +96,13 @@ export default function ProcessorDashboard() {
 
         fetchIncomingDocumentLogs(data.o_id);
         fetchPipelineDocs(data.o_id);
+        fetchOfficeActionHistory(data.o_id);
       }
     } catch (err) { 
       console.error("Error connecting metadata:", err); 
     }
   };
 
-  // FETCH INCOMING ACTIVE STREAMS (WHERE CURRENT_OFFICE_ID = YOU AND TIME_OUT IS NULL)
   const fetchIncomingDocumentLogs = async (officeId) => {
     if (!officeId) return;
     try {
@@ -117,7 +119,6 @@ export default function ProcessorDashboard() {
     } catch (err) { console.error("Frontend document log sync error:", err); }
   };
 
-  // FETCH ALL HISTORY STEPS (INCLUDING TIME_OUT STEPS AND DETOURS)
   const fetchPipelineDocs = async (officeId) => {
     if (!officeId) return;
     try {
@@ -125,6 +126,15 @@ export default function ProcessorDashboard() {
       const data = await res.json();
       if (res.ok) setPipelineDocs(data);
     } catch (err) { console.error("Pipeline sync error:", err); }
+  };
+
+  const fetchOfficeActionHistory = async (officeId) => {
+    if (!officeId) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/processor/history/${officeId}`);
+      const data = await res.json();
+      if (res.ok) setActionHistory(data);
+    } catch (err) { console.error("History transaction log retrieval error:", err); }
   };
 
   const fetchWorkflowTemplates = async () => {
@@ -143,7 +153,7 @@ export default function ProcessorDashboard() {
         setOfficesList(data);
       }
     } catch (err) { 
-      console.error("Error building ad-hoc office lookup dictionary:", err); 
+      console.error("Error building office lookup:", err); 
     }
   };
 
@@ -258,7 +268,8 @@ export default function ProcessorDashboard() {
         body: JSON.stringify({
           iniId: selectedDoc.ini_id,
           targetOfficeId: parseInt(selectedAdHocOffice),
-          currentOfficeId: processorOfficeId
+          currentOfficeId: processorOfficeId,
+          executorUserId: parseInt(userId)
         })
       });
       const data = await res.json();
@@ -266,8 +277,7 @@ export default function ProcessorDashboard() {
         alert(`🟢 Detour Activated: ${data.message}`);
         setShowPipelineModal(false);
         setSelectedAdHocOffice('');
-        fetchIncomingDocumentLogs(processorOfficeId);
-        fetchPipelineDocs(processorOfficeId);
+        fetchProcessorMeta();
       } else {
         alert(`🔴 ${data.error}`);
       }
@@ -293,8 +303,7 @@ export default function ProcessorDashboard() {
         alert(`🟢 Transaction Approved:\n${data.message}`);
         setShowScannerModal(false);
         setSimulatedQrPayload('');
-        fetchIncomingDocumentLogs(processorOfficeId);
-        fetchPipelineDocs(processorOfficeId);
+        fetchProcessorMeta();
       } else {
         alert(`🔴 ${data.error || 'Processing verification failed.'}`);
       }
@@ -314,16 +323,14 @@ export default function ProcessorDashboard() {
   };
 
   // =========================================================
-  // 🔍 REAL-TIME INTERCEPTOR FILTERS (SYNCHRONIZED METRICS)
+  // 🔍 REAL-TIME INTERCEPTOR FILTERS 
   // =========================================================
-
-  // DASHBOARD FILTERING LOGIC
   const filteredDocs = incomingDocs.filter(doc => {
     const matchesSearch = doc.title.toLowerCase().includes(search.toLowerCase()) || 
                           doc.qr_code.toLowerCase().includes(search.toLowerCase());
     
     if (filterStatus === 'Awaiting Scan-In') {
-      return matchesSearch && (doc.time_in === null || doc.time_in === undefined) && (!doc.time_out);
+      return matchesSearch && (doc.time_in === null || doc.time_in === undefined);
     }
     if (filterStatus === 'Pending') {
       return matchesSearch; 
@@ -334,19 +341,18 @@ export default function ProcessorDashboard() {
     return matchesSearch;
   });
 
-  // PIPELINE FILTERING LOGIC
   const filteredPipelineDocs = pipelineDocs.filter(doc => {
     const matchesSearch = doc.title.toLowerCase().includes(search.toLowerCase()) || 
                           doc.qr_code.toLowerCase().includes(search.toLowerCase());
     
     if (filterStatus === 'Awaiting Scan-In') {
-      return matchesSearch && (doc.time_in === null || doc.time_in === undefined) && (!doc.time_out);
+      return matchesSearch && (doc.time_in === null || doc.time_in === undefined) && !doc.time_out;
     }
     if (filterStatus === 'Pending') {
       return matchesSearch && !doc.time_out; 
     }
     if (filterStatus === 'In Verification') {
-      return matchesSearch && doc.status?.toLowerCase() === 'in verification' && !doc.time_out;
+      return matchesSearch && doc.status?.toLowerCase() === 'in verification';
     }
     if (filterStatus === 'Completed') {
       return matchesSearch && doc.time_out !== null && doc.time_out !== undefined; 
@@ -354,7 +360,17 @@ export default function ProcessorDashboard() {
     return matchesSearch;
   });
 
-  // Calculate paginated slices
+  const filteredHistoryLogs = actionHistory.filter(log => {
+    const matchesSearch = log.title.toLowerCase().includes(search.toLowerCase()) ||
+                          log.full_name.toLowerCase().includes(search.toLowerCase()) ||
+                          log.qr_code.toLowerCase().includes(search.toLowerCase());
+    if (historyFilter !== 'All') {
+      return matchesSearch && log.action_type === historyFilter;
+    }
+    return matchesSearch;
+  });
+
+  // Paginated slices
   const indexOfLastDash = dashboardPage * itemsPerPage;
   const indexOfFirstDash = indexOfLastDash - itemsPerPage;
   const currentDashDocs = filteredDocs.slice(indexOfFirstDash, indexOfLastDash);
@@ -365,11 +381,12 @@ export default function ProcessorDashboard() {
   const currentPipeDocs = filteredPipelineDocs.slice(indexOfFirstPipe, indexOfLastPipe);
   const totalPipePages = Math.ceil(filteredPipelineDocs.length / itemsPerPage);
 
-  // =========================================================
-  // 📊 RE-COMPILING THE STATISTICAL KPI CALCULATIONS
-  // =========================================================
-  
-  // 1. Incoming Documents: Any active item on campus that has this office in its routing sequence but hasn't completed it yet.
+  const indexOfLastHistoryItem = historyPage * itemsPerPage;
+  const indexOfFirstHistoryItem = indexOfLastHistoryItem - itemsPerPage;
+  const currentHistoryPageRows = filteredHistoryLogs.slice(indexOfFirstHistoryItem, indexOfLastHistoryItem);
+  const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
+
+  // KPI Calculations
   const incomingCount = pipelineDocs.filter(d => {
     if (d.time_out !== null && d.time_out !== undefined) return false;
     if (d.current_office_id === processorOfficeId) return true;
@@ -385,16 +402,9 @@ export default function ProcessorDashboard() {
     return false;
   }).length;
 
-  // 2. Awaiting Scan-In: Physical items that have arrived in your workspace queue but do not possess a scan time_in mark yet.
   const awaitingScanInCount = incomingDocs.filter(d => d.time_in === null || d.time_in === undefined).length;
-
-  // 3. Pending Documents: Total open elements mapped straight to incoming active matrix parameters
   const pendingCount = incomingDocs.length;
-
-  // 4. Completed Documents: Total items containing completed out-stamps
   const completedProcessingCount = pipelineDocs.filter(d => d.time_out !== null && d.time_out !== undefined).length;
-
-  // 5. In Verification: Active detours inside pipelineDocs
   const inVerificationCount = pipelineDocs.filter(d => d.status?.toLowerCase() === 'in verification' && (d.time_out === null || d.time_out === undefined)).length;
 
   return (
@@ -418,7 +428,7 @@ export default function ProcessorDashboard() {
             <button onClick={() => { setActiveTab('documents'); setSearch(''); setFilterStatus('All'); setPipelinePage(1); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'documents' ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
               <FileText size={18} /> Documents
             </button>
-            <button onClick={() => setActiveTab('history')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
+            <button onClick={() => { setActiveTab('history'); setSearch(''); setHistoryFilter('All'); setHistoryPage(1); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
               <History size={18} /> History
             </button>
           </nav>
@@ -447,7 +457,7 @@ export default function ProcessorDashboard() {
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
           <div className="text-left">
             <h2 className="text-lg font-black text-neutral-900">
-              {activeTab === 'profile' ? 'Profile Hub' : activeTab === 'documents' ? 'Office Processing System' : 'Processor Dashboard'}
+              {activeTab === 'profile' ? 'Profile Hub' : activeTab === 'documents' ? 'Office Processing System' : activeTab === 'history' ? 'Office Transaction Ledger' : 'Processor Dashboard'}
             </h2>
             <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wide">Assigned: {processorOfficeName}</p>
           </div>
@@ -487,7 +497,6 @@ export default function ProcessorDashboard() {
           {activeTab === 'dashboard' && (
             <div className="space-y-8 max-w-6xl mx-auto text-left">
               
-              {/* CORE DASHBOARD KPI BLOCKS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm relative overflow-hidden">
                   <span className="text-[10px] uppercase font-black text-neutral-400 tracking-wider">Incoming Documents</span>
@@ -592,7 +601,7 @@ export default function ProcessorDashboard() {
             </div>
           )}
 
-          {/* TAB 2: OPERATIONAL DOCUMENTS PIPELINE VIEW WITH DYNAMIC 5-METRIC TRACKING */}
+          {/* TAB 2: OPERATIONAL DOCUMENTS PIPELINE VIEW */}
           {activeTab === 'documents' && (
             <div className="space-y-8 max-w-6xl mx-auto text-left animate-in fade-in duration-200">
               <div>
@@ -600,7 +609,6 @@ export default function ProcessorDashboard() {
                 <p className="text-xs text-neutral-500 font-medium mt-0.5">Review and process active administrative requests</p>
               </div>
 
-              {/* DYNAMIC PIPELINE MATRIX GRID */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
                   { title: 'Incoming Docs', count: incomingCount, border: 'border-l-blue-500', icon: '📂' },
@@ -647,7 +655,6 @@ export default function ProcessorDashboard() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-neutral-50 text-neutral-400 border-b border-neutral-200 font-black uppercase text-[10px] tracking-wider">
-                        {/* 🛠️ REMOVED THE w-2/5 WIDTH PROPERTY FOR BALANCED SPACING */}
                         <th className="p-4">Title</th>
                         <th className="p-4">Form Type</th>
                         <th className="p-4">Current Status</th>
@@ -702,7 +709,111 @@ export default function ProcessorDashboard() {
             </div>
           )}
 
-          {/* TAB 3: PROFILE HUB */}
+          {/* TAB 3: OFFICE TRANSACTION ACTION LEDGER HISTORY */}
+          {activeTab === 'history' && (
+  <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-200">
+    <div>
+      <h2 className="text-2xl font-black text-neutral-900 tracking-tight">Office Transaction History</h2>
+      <p className="text-xs text-neutral-500 font-medium mt-0.5">Audit log of all processing events inside your office sector.</p>
+    </div>
+
+    <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+        <h3 className="text-sm font-black text-neutral-950 tracking-tight">Audit Trail Ledger</h3>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-neutral-400" size={14} />
+            <input type="text" placeholder="Search by user, title, or ID..." value={search} onChange={e => { setSearch(e.target.value); setHistoryPage(1); }} className="pl-9 pr-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-neutral-50 w-56 font-medium" />
+          </div>
+          <div className="flex items-center gap-1 border border-neutral-300 rounded-lg px-2 py-1.5 bg-neutral-50">
+            <Filter size={14} className="text-neutral-400" />
+            <select value={historyFilter} onChange={e => { setHistoryFilter(e.target.value); setHistoryPage(1); }} className="bg-transparent text-xs outline-none cursor-pointer font-bold text-neutral-600">
+              <option value="All">All Actions</option>
+              <option value="Scanned In">Scanned In</option>
+              <option value="Scanned Out">Scanned Out</option>
+              <option value="Ad-Hoc Detour Routed">Ad-Hoc Detour</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="bg-neutral-50 text-neutral-400 border-b border-neutral-200 font-black uppercase text-[10px] tracking-wider">
+              <th className="p-4">Timestamp</th>
+              <th className="p-4">Action Event</th>
+              <th className="p-4">Executed By</th>
+              <th className="p-4">Document Title</th>
+              <th className="p-4 text-center">Verification</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100 font-medium">
+          {currentHistoryPageRows.map((log, index) => {
+                    const rawTimestamp = log.action_timestamp; 
+                    let formattedTime = 'N/A';
+                    
+                    if (rawTimestamp) {
+                      // 🛠️ FIX: Strip out the "+00", "Z", or "GMT" offset strings so JavaScript 
+                      // parses your text purely as a local Manila time string without shifting it.
+                      const localizedString = String(rawTimestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+                      const d = new Date(localizedString);
+                      
+                      formattedTime = d.toLocaleDateString('en-US', { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        year: 'numeric' 
+                      }) + ', ' + 
+                      d.toLocaleTimeString('en-US', { 
+                        hour: '2-digit', 
+                        minute: '2-digit', 
+                        hour12: true 
+                      });
+                    }
+
+                    return (
+                      <tr key={log.history_id || index} className="hover:bg-neutral-50/70 transition-colors">
+                        <td className="p-4 font-mono text-neutral-600">
+                          {formattedTime}
+                        </td>
+                  <td className="p-4">
+                    <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wide border ${
+                      log.action_type === 'Scanned In' ? 'bg-blue-50 text-blue-800 border-blue-100' :
+                      log.action_type === 'Scanned Out' ? 'bg-green-50 text-green-800 border-green-100' :
+                      log.action_type === 'Ad-Hoc Detour Routed' ? 'bg-purple-50 text-purple-800 border-purple-100' : 'bg-amber-50 text-amber-800 border-amber-100'
+                    }`}>
+                      {log.action_type}
+                    </span>
+                  </td>
+                  <td className="p-4 text-neutral-900 font-bold">{log.full_name}</td>
+                  <td className="p-4 text-neutral-700 font-semibold">{log.title}</td>
+                  <td className="p-4 text-center">
+                    {/* FIXED: Triggers the validation popup style profile layout structure */}
+                    <button onClick={() => handleOpenPipelineDetails(log)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
+                      View Details
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {filteredHistoryLogs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📜 No tracking entries match your filter rules.</div>}
+      </div>
+
+      {totalHistoryTabPages > 1 && (
+        <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between text-xs px-6">
+          <span className="text-neutral-500 font-medium">Showing page <b>{historyPage}</b> of {totalHistoryTabPages}</span>
+          <div className="flex gap-1">
+            <button disabled={historyPage === 1} onClick={() => setHistoryPage(prev => prev - 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Previous</button>
+            <button disabled={historyPage === totalHistoryTabPages} onClick={() => setHistoryPage(prev => prev + 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Next</button>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+)}
+          {/* TAB 4: PROFILE HUB */}
           {activeTab === 'profile' && (
             <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200 text-left">
               <div className="lg:col-span-3 bg-white border border-neutral-200 p-6 rounded-2xl flex items-center gap-6 shadow-xs relative">
@@ -804,7 +915,6 @@ export default function ProcessorDashboard() {
             </div>
           )}
 
-          {activeTab === 'history' && <div className="text-center py-12 text-neutral-400">📜 Processing checkout transaction logs history coming next.</div>}
         </div>
       </div>
 
@@ -907,7 +1017,7 @@ export default function ProcessorDashboard() {
                   <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-xs border-t border-b border-neutral-100 py-3">
                     <div>
                       <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Origin</span>
-                      <p className="font-bold text-neutral-800 mt-0.5">{selectedDoc.originating_office || 'University Unit'}</p>
+                      <p className="font-bold text-neutral-800 mt-0.5">{selectedDoc.originating_office || selectedDoc.origin || 'University Unit'}</p>
                     </div>
                     <div>
                       <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Target Delivery</span>
@@ -968,40 +1078,52 @@ export default function ProcessorDashboard() {
                 </div>
                 <p className="text-[10px] text-neutral-400 leading-normal max-w-[180px] font-medium">Scan to verify authenticity on any authorized workstation.</p>
                 
-                {selectedDoc.time_in ? (
-                    <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
-                      <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
-                        Request Ad-hoc Verification Detour
-                      </label>
-                      <div className="flex flex-col gap-2">
-                        <select 
-                          required 
-                          value={selectedAdHocOffice} 
-                          onChange={e => setSelectedAdHocOffice(e.target.value)}
-                          className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
-                        >
-                          <option value="">-- Select Destination Office --</option>
-                          {officesList.map((off, idx) => (
-                            off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
-                          ))}
-                        </select>
-                        
-                        <button 
-                          type="submit" 
-                          disabled={isAdHocProcessing}
-                          className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
-                        >
-                          {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
-                        </button>
+                {selectedDoc.time_out ? (
+                      <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                        <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">
+                          ℹ️ Ad-Hoc Unavailable: Document has been checked out and moved out of this branch.
+                        </p>
                       </div>
-                    </form>
-                  ) : (
-                    <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-                      <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
-                        🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
-                      </p>
+                    ) : selectedDoc.current_step_is_adhoc || selectedDoc.is_adhoc ? (
+                      <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                        <p className="text-[10px] font-black text-purple-700 bg-purple-50/80 border border-purple-100 rounded-xl p-3 uppercase tracking-wide">
+                          ⚖️ Ad-Hoc Active: This file is currently undergoing an active ad-hoc detour route step.
+                        </p>
+                      </div>
+                    ) : selectedDoc.time_in ? (
+                  <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
+                    <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
+                      Request Ad-hoc Verification Detour
+                    </label>
+                    <div className="flex flex-col gap-2">
+                      <select 
+                        required 
+                        value={selectedAdHocOffice} 
+                        onChange={e => setSelectedAdHocOffice(e.target.value)}
+                        className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
+                      >
+                        <option value="">-- Select Destination Office --</option>
+                        {officesList.map((off, idx) => (
+                          off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
+                        ))}
+                      </select>
+                      
+                      <button 
+                        type="submit" 
+                        disabled={isAdHocProcessing}
+                        className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
+                      >
+                        {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
+                      </button>
                     </div>
-                  )}
+                  </form>
+                ) : (
+                  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                    <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
+                      🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
