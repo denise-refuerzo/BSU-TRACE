@@ -1,5 +1,7 @@
+// lib/widgets/modals/processor_document_details_modal.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Required for Clipboard
+import 'signee_ad_hoc_routing_modal.dart'; // Import the Ad-hoc modal
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
   final Map<String, dynamic> document;
@@ -252,7 +254,14 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: onAdHocVerification,
+              // WIRE AD-HOC ROUTING DIRECTLY HERE
+              onPressed: () {
+                Navigator.pop(context); // Close the bottom sheet first
+                showDialog(
+                  context: context,
+                  builder: (context) => SigneeAdHocRoutingModal(document: document),
+                );
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryRed,
                 foregroundColor: Colors.white,
@@ -264,7 +273,7 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
               ),
               icon: const Icon(Icons.fact_check_outlined, size: 20),
               label: const Text(
-                'Ad-hoc Verification',
+                'Ad-hoc Routing', // Updated label
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),

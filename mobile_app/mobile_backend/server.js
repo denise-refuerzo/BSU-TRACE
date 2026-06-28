@@ -614,29 +614,23 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    // 1. Find the absolute latest processing step using pd_id
+    // FIX: Specifically look for the oldest step that hasn't been scanned in yet
     const docResult = await pool.query(`
       SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1
-      ORDER BY pd.pd_id DESC 
+      WHERE i.qr_code = $1 AND pd.time_in IS NULL
+      ORDER BY pd.pd_id ASC 
       LIMIT 1
     `, [qrCode]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found.' });
+      return res.status(404).json({ error: 'No pending document found to scan in.' });
     }
 
-    const { pd_id, time_in } = docResult.rows[0];
+    const { pd_id } = docResult.rows[0];
 
-    // 2. Prevent scanning in if it has already been scanned in
-    if (time_in !== null) {
-      return res.status(400).json({ error: 'Document has already been scanned IN.' });
-    }
-
-    // 3. Update the record: Set time_in to now, and status to 'In Verification'
     await pool.query(
       `UPDATE public.processed_document 
        SET time_in = timezone('Asia/Manila', now()),
@@ -659,40 +653,30 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    // 1. Find the absolute latest processing step using pd_id
+    // FIX: Specifically look for the step that is scanned IN, but not yet scanned OUT
     const docResult = await pool.query(`
       SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1
+      WHERE i.qr_code = $1 
+        AND pd.time_in IS NOT NULL 
+        AND pd.time_out IS NULL
       ORDER BY pd.pd_id DESC 
       LIMIT 1
     `, [qrCode]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found.' });
+      return res.status(404).json({ error: 'No active document found ready for scan-out.' });
     }
 
-    const { pd_id, time_in, time_out, current_status } = docResult.rows[0];
-
-    // 2. Prevent scanning out if already scanned out
-    if (time_out !== null) {
-      return res.status(400).json({ error: 'Document has already been scanned OUT.' });
-    }
-
-    // 3. Prevent scanning out if it hasn't even been scanned in yet
-    if (time_in === null) {
-      return res.status(400).json({ error: 'Document must be scanned IN first.' });
-    }
-
-    // 4. Prevent scanning out if the signee hasn't acted
+    const { pd_id, current_status } = docResult.rows[0];
     const statusLower = current_status.toLowerCase();
+
     if (statusLower === 'in verification' || statusLower === 'pending') {
       return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
     }
 
-    // 5. Update the record: Set time_out to now, and advance status to 'Verified'
     await pool.query(
       `UPDATE public.processed_document 
        SET time_out = timezone('Asia/Manila', now()),
@@ -776,33 +760,22 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
   }
 
   try {
-    // 1. Find the document
     const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
     if (docResult.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // 2. Mark the current active step as processed/departed by setting time_out
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET time_out = timezone('Asia/Manila', now())
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC NULLS LAST LIMIT 1)`,
-      [iniId]
-    );
+    // FIX: Removed the UPDATE query that forced time_out on the current step.
+    // The current step remains active so the Processor is still forced to physically Scan Out.
 
-    // 3. Insert the new ad-hoc step for the target office. 
-    // time_in is NULL so it appears as "Pending/Incoming" on that office's dashboard.
-    // s_id = 1 assumes 'Pending' is ID 1 in your status table.
+    // Insert new pending step at target office
+    // time_in is NULL so it stays "Incoming" on the target office's dashboard
     await pool.query(
       `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
        VALUES ($1, 1, $2, NULL)`,
       [iniId, target_office_id]
     );
-
-    // Note: The 'reason' field isn't stored here as your schema doesn't have a comments table, 
-    // but the routing logic itself is successfully executing.
 
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });
   } catch (error) {
