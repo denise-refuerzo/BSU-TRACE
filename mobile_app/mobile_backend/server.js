@@ -245,7 +245,6 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // 7. FETCH USER-SPECIFIC DOCUMENTS ENDPOINT
 // ==========================================
@@ -254,7 +253,23 @@ app.get('/api/users/:id/documents', async (req, res) => {
 
   try {
     const query = `
-      WITH RankedDocs AS (
+      WITH DocHistory AS (
+        SELECT 
+          pd.ini_id,
+          json_agg(
+            json_build_object(
+              'office', o.office_name,
+              'status', s.current_status,
+              'time_in', TO_CHAR(pd.time_in, 'Mon DD, YYYY HH12:MI AM'),
+              'time_out', TO_CHAR(pd.time_out, 'Mon DD, YYYY HH12:MI AM')
+            ) ORDER BY pd.time_in ASC
+          ) AS history_array
+        FROM public.processed_document pd
+        LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
+        LEFT JOIN public.status s ON pd.s_id = s.s_id
+        GROUP BY pd.ini_id
+      ),
+      RankedDocs AS (
         SELECT 
           i.ini_id,
           i.qr_code,
@@ -273,10 +288,13 @@ app.get('/api/users/:id/documents', async (req, res) => {
         LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
         WHERE i.u_id = $1
       )
-      SELECT ini_id, qr_code, title, form_type, current_location, status, updated_at 
-      FROM RankedDocs 
-      WHERE rn = 1 
-      ORDER BY time_in DESC;
+      SELECT 
+        r.ini_id, r.qr_code, r.title, r.form_type, r.current_location, r.status, r.updated_at,
+        COALESCE(dh.history_array, '[]'::json) AS history
+      FROM RankedDocs r
+      LEFT JOIN DocHistory dh ON r.ini_id = dh.ini_id
+      WHERE r.rn = 1 
+      ORDER BY r.time_in DESC;
     `;
 
     const result = await pool.query(query, [userId]);
@@ -287,7 +305,6 @@ app.get('/api/users/:id/documents', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 8. FETCH SPECIFIC DOCUMENT DETAILS ENDPOINT

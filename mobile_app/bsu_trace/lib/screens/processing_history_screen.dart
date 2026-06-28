@@ -215,35 +215,90 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         statusColor = Colors.grey;
     }
 
+    final List<dynamic> history = doc['history'] ?? [];
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  '$trackingId: $title', 
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Colors.black54),
-            ],
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(8), 
+        border: Border.all(color: Colors.red.shade50)
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.all(20),
+          title: Text(
+            '$trackingId: $title', 
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: Text(category, style: const TextStyle(fontSize: 14, color: Colors.black54))),
-              Text(status.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
-            ],
-          )
-        ],
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 12.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(child: Text(category, style: const TextStyle(fontSize: 14, color: Colors.black54))),
+                Text(status.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+              ],
+            ),
+          ),
+          children: [
+            if (history.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 20),
+                child: Text("No scan history available.", style: TextStyle(color: Colors.grey)),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+                child: Column(
+                  children: List.generate(history.length, (index) {
+                    final h = history[index];
+                    final bool isLast = index == history.length - 1;
+                    
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Column(
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(top: 4),
+                              width: 12, 
+                              height: 12,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.primaryRed, 
+                                shape: BoxShape.circle
+                              ),
+                            ),
+                            if (!isLast)
+                              Container(
+                                width: 2, 
+                                height: 60, 
+                                color: Colors.red.shade100
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(h['office'] ?? 'Unknown Office', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              const SizedBox(height: 4),
+                              Text('Status: ${h['status'] ?? 'N/A'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                              Text('Scan In:  ${h['time_in'] ?? '--'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              Text('Scan Out: ${h['time_out'] ?? '--'}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              if (!isLast) const SizedBox(height: 16),
+                            ],
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ),
+              )
+          ],
+        ),
       ),
     );
   }
