@@ -1,3 +1,4 @@
+// lib/screens/dashboard/processor_dashboard.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -29,6 +30,13 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
+  // Helper to determine status based on processed_document fields
+  String _resolveStatus(dynamic doc) {
+    if (doc['time_out'] != null) return 'Verified';
+    if (doc['time_in'] != null) return 'In Verification';
+    return (doc['status'] ?? 'Pending').toString();
+  }
+
   Future<void> _fetchDashboardData() async {
     try {
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
@@ -38,10 +46,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
         if (mounted) {
           setState(() {
             _documents = data;
-            // Derive stats locally from the full document pool
-            _incomingCount = data.where((d) => d['status'].toString().toLowerCase() == 'pending').length;
-            _pendingCount = data.where((d) => ['processing', 'in review'].contains(d['status'].toString().toLowerCase())).length;
-            _completedCount = data.where((d) => d['status'].toString().toLowerCase() == 'completed').length;
+            // Updated count logic based on processed_document timestamps
+            _incomingCount = data.where((d) => d['time_in'] == null).length;
+            _pendingCount = data.where((d) => d['time_in'] != null && d['time_out'] == null).length;
+            _completedCount = data.where((d) => d['time_out'] != null).length;
             _isLoading = false;
           });
         }
@@ -65,13 +73,13 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
+      case 'verified':
       case 'completed':
       case 'approved':
         return Colors.green;
       case 'pending':
         return Colors.orange;
-      case 'in review':
-      case 'processing':
+      case 'in verification':
         return AppTheme.primaryRed;
       default:
         return Colors.grey;
@@ -82,7 +90,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     if (isoString == null) return 'Unknown Time';
     try {
       final date = DateTime.parse(isoString).toLocal();
-      // Simple format: YYYY-MM-DD
       return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
     } catch (e) {
       return 'Recent';
@@ -102,7 +109,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
 
     // Find the first document that needs attention for the Priority Card
     final priorityDoc = _documents.firstWhere(
-      (doc) => doc['status'].toString().toLowerCase() != 'completed',
+      (doc) => _resolveStatus(doc) != 'Verified',
       orElse: () => null,
     );
 
@@ -131,13 +138,13 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   // Dynamic Stats Row
                   Row(
                     children: [
-                      _buildStatCard(_incomingCount.toString(), 'INCOMING DOCS', Colors.white, Colors.red.shade100),
+                      _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.red.shade100),
                       const SizedBox(width: 12),
-                      _buildStatCard(_pendingCount.toString(), 'PENDING APPROVAL', Colors.white, Colors.orange.shade100),
+                      _buildStatCard(_pendingCount.toString(), 'IN VERIFICATION', Colors.white, Colors.orange.shade100),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildStatCard(_completedCount.toString(), 'COMPLETED', Colors.white, Colors.green.shade100, isFullWidth: true),
+                  _buildStatCard(_completedCount.toString(), 'VERIFIED', Colors.white, Colors.green.shade100, isFullWidth: true),
                   const SizedBox(height: 24),
                   
                   // Priority Card logic
@@ -161,7 +168,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                       final title = doc['title'] ?? 'Untitled Document';
                       final office = doc['origin_office'] ?? 'Unknown Office';
                       final date = _formatDateString(doc['created_at']);
-                      final status = doc['status'] ?? 'Unknown';
+                      final status = _resolveStatus(doc);
 
                       return _buildActivityItem(
                         title, 
@@ -209,12 +216,11 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     final title = doc['title'] ?? 'Untitled Document';
     final office = doc['origin_office'] ?? 'Unknown Office';
     final formType = doc['form_type'] ?? 'Standard Process';
-    final status = (doc['status'] ?? 'PENDING').toString().toUpperCase();
+    final status = _resolveStatus(doc).toUpperCase();
 
-    // Determine tracking steps based on status
-    final isVerified = status != 'PENDING';
-    final isApproved = status == 'APPROVED' || status == 'COMPLETED';
-    final isDispatched = status == 'COMPLETED';
+    // Logic for steps
+    final bool isVerified = status == 'VERIFIED';
+    final bool isInVerification = status == 'IN VERIFICATION';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -249,12 +255,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
           Row(
             children: [
               _buildStepNode(true, 'Submission'),
+              _buildConnector(isInVerification || isVerified),
+              _buildStepNode(isInVerification || isVerified, 'In Verification'),
               _buildConnector(isVerified),
-              _buildStepNode(isVerified, 'Verification'),
-              _buildConnector(isApproved),
-              _buildStepNode(isApproved, 'Approval'),
-              _buildConnector(isDispatched),
-              _buildStepNode(isDispatched, 'Dispatch'),
+              _buildStepNode(isVerified, 'Verified'),
             ],
           )
         ],

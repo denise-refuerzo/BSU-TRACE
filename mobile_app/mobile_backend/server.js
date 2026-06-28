@@ -723,13 +723,14 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch records showing both scan in and scan out times in one row
+    // 2. Fetch records including the current_status
     const query = `
       SELECT 
         pd.pd_id,
         i.qr_code,
         i.title,
         p.process_name AS form_type,
+        s.current_status AS status,
         TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in,
         TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out
       FROM public.processed_document pd
