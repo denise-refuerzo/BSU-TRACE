@@ -683,15 +683,15 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch timeline, EXCLUDING documents that are still "pending"
+    // 2. Fetch records showing both scan in and scan out times in one row
     const query = `
       SELECT 
-        'Scanned In' AS action_type,
-        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS action_timestamp,
+        pd.pd_id,
         i.qr_code,
         i.title,
         p.process_name AS form_type,
-        pd.time_in AS sort_time
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in,
+        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.process_type p ON i.p_id = p.p_id
@@ -699,23 +699,7 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
       WHERE pd.current_office_id = $1 
         AND pd.time_in IS NOT NULL
         AND s.current_status NOT ILIKE 'pending'
-
-      UNION ALL
-
-      SELECT 
-        'Scanned Out' AS action_type,
-        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS action_timestamp,
-        i.qr_code,
-        i.title,
-        p.process_name AS form_type,
-        pd.time_out AS sort_time
-      FROM public.processed_document pd
-      JOIN public.initial_document i ON pd.ini_id = i.ini_id
-      JOIN public.process_type p ON i.p_id = p.p_id
-      WHERE pd.current_office_id = $1 
-        AND pd.time_out IS NOT NULL
-
-      ORDER BY sort_time DESC;
+      ORDER BY pd.time_in DESC;
     `;
 
     const result = await pool.query(query, [o_id]);
