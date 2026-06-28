@@ -191,7 +191,8 @@ app.get('/api/documents', async (req, res) => {
         p.process_name AS form_type, 
         o.office_name AS origin_office, 
         s.current_status AS status, 
-        -- Format directly to string in DB to prevent NodeJS from mutating the timezone
+        pd.time_in,
+        pd.time_out,
         TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at
       FROM public.initial_document i
       JOIN public.process_type p ON i.p_id = p.p_id

@@ -86,9 +86,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   Widget build(BuildContext context) {
     // 1. Pre-filter the documents here before building the UI to handle both search and status
     List<dynamic> filteredDocuments = documents.where((doc) {
+      // Determine effective status for filtering
+      String docStatus;
+      if (doc['time_out'] != null) {
+        docStatus = 'verified';
+      } else if (doc['time_in'] != null) {
+        docStatus = 'in verification';
+      } else {
+        docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
+      }
+
       // Status Filter
       if (_selectedStatus != 'All Status') {
-        String docStatus = (doc['status'] ?? 'pending').toString().toLowerCase();
         if (docStatus != _selectedStatus.toLowerCase()) return false;
       }
       
@@ -232,9 +241,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final String form = document['form_type'] ?? 'N/A';
     final String origin = document['origin_office'] ?? 'N/A';
     
-    // Capitalize status for the UI (so db's "pending" shows as "Pending")
-    final String rawStatus = document['status'] ?? 'Pending';
-    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+    // Status Logic: Check for processed_document fields first
+    String displayStatus;
+    if (document['time_out'] != null) {
+      displayStatus = 'Verified';
+    } else if (document['time_in'] != null) {
+      displayStatus = 'In Verification';
+    } else {
+      final String rawStatus = document['status'] ?? 'Pending';
+      displayStatus = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+    }
+    final String status = displayStatus;
 
     String time = 'N/A';
     String? dbTime = document['created_at'] ?? document['updated_at'];
@@ -273,7 +290,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }
     }
 
-    // Assign appropriate UI colors for the newly integrated DB Statuses
+    // Assign appropriate UI colors
     Color statusColor;
     switch (status.toLowerCase()) {
       case 'pending':
