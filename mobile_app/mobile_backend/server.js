@@ -723,7 +723,8 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch records including the current_status
+    // 2. Fetch records: Removed the restrictive 'NOT ILIKE pending' filter
+    // to ensure 'In Verification' documents are always captured.
     const query = `
       SELECT 
         pd.pd_id,
@@ -739,7 +740,6 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
       JOIN public.status s ON pd.s_id = s.s_id
       WHERE pd.current_office_id = $1 
         AND pd.time_in IS NOT NULL
-        AND s.current_status NOT ILIKE 'pending'
       ORDER BY pd.time_in DESC;
     `;
 
