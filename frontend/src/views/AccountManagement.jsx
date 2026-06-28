@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 export default function AccountManagement() {
@@ -6,26 +6,54 @@ export default function AccountManagement() {
   const adminName = localStorage.getItem('user') || 'Admin User';
   
   const [form, setForm] = useState({
-    username: '', password: '', accountType: '', fullName: '', email: '', departmentId: ''
+    username: '', 
+    password: '', 
+    accountType: '', 
+    fullName: '', 
+    email: '', 
+    departmentId: '',
+    officeId: '' // Added for database o_id correlation
   });
+  
+  const [offices, setOffices] = useState([]); // State array cache for your campus office directory list
   const [message, setMessage] = useState({ type: '', text: '' });
+
+  // Fetch the campus offices directory list when the management dashboard panel mounts
+  useEffect(() => {
+    const fetchOffices = async () => {
+      try {
+        const res = await fetch('http://localhost:5000/api/offices');
+        const data = await res.json();
+        if (res.ok) setOffices(data);
+      } catch (err) {
+        console.error("Failed building management office lookup component drop down:", err);
+      }
+    };
+    fetchOffices();
+  }, []);
 
   const handleCreateAccount = async (e) => {
     e.preventDefault();
     setMessage({ type: '', text: '' });
 
+    // Ensure conditional safety clean up before payloads cross network boundaries
+    const submissionFormPayload = { ...form };
+    if (form.accountType !== 2 && form.accountType !== 3) {
+      submissionFormPayload.officeId = null; // Unassign workspace mapping for global/non-processing roles
+    }
+
     try {
       const response = await fetch('http://localhost:5000/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(submissionFormPayload)
       });
       const data = await response.json();
       
       if (!response.ok) throw new Error(data.error || 'Creation failed');
 
       setMessage({ type: 'success', text: data.message });
-      setForm({ username: '', password: '', accountType: '', fullName: '', email: '', departmentId: '' });
+      setForm({ username: '', password: '', accountType: '', fullName: '', email: '', departmentId: '', officeId: '' });
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
     }
@@ -130,9 +158,13 @@ export default function AccountManagement() {
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Department Scope</label>
-                    <select required value={form.departmentId} onChange={e => setForm({...form, departmentId: parseInt(e.target.value)})}
-                            className="w-full border border-neutral-300 bg-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-700 outline-none">
-                      <option value="">Select campus department...</option>
+                    <select 
+                      required={form.accountType !== 2 && form.accountType !== 3} // 🔓 OPTIONAL for Processor (2) and Signee (3)
+                      value={form.departmentId} 
+                      onChange={e => setForm({...form, departmentId: e.target.value ? parseInt(e.target.value) : ''})}
+                      className="w-full border border-neutral-300 bg-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-700 outline-none"
+                    >
+                      <option value="">Select campus department (Optional for Processors/Signees)...</option>
                       <option value="1">CICS</option>
                       <option value="2">CABEIHM</option>
                       <option value="3">CAS</option>
@@ -141,8 +173,26 @@ export default function AccountManagement() {
                   </div>
                 </div>
 
+                {/* DYNAMIC OFFICE ASSIGNMENT WORKSPACE FIELD ENTRY */}
+                {(form.accountType === 2 || form.accountType === 3) && (
+                  <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                    <label className="block text-[11px] font-black text-red-800 uppercase mb-1 tracking-wider">Assigned Office Workspace (Required for routing)</label>
+                    <select 
+                      required 
+                      value={form.officeId} 
+                      onChange={e => setForm({...form, officeId: parseInt(e.target.value)})}
+                      className="w-full border-2 border-red-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:ring-1 focus:ring-red-700 outline-none font-semibold text-neutral-700 cursor-pointer shadow-xs"
+                    >
+                      <option value="">-- Choose Assigned Campus Branch Office Stop --</option>
+                      {offices.map((off) => (
+                        <option key={off.id} value={off.id}>{off.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-3 pt-4 border-t border-neutral-100">
-                  <button type="button" onClick={() => setForm({ username: '', password: '', accountType: '', fullName: '', email: '', departmentId: '' })}
+                  <button type="button" onClick={() => setForm({ username: '', password: '', accountType: '', fullName: '', email: '', departmentId: '', officeId: '' })}
                           className="px-4 py-2 text-sm border font-medium text-gray-500 rounded-lg hover:bg-neutral-50">RESET</button>
                   <button type="submit" className="px-5 py-2 text-sm font-medium bg-red-800 text-white rounded-lg hover:bg-red-900">CREATE ACCOUNT</button>
                 </div>
@@ -156,8 +206,8 @@ export default function AccountManagement() {
               <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">ℹ️ Role Definitions</h4>
               <div className="space-y-4 text-xs">
                 <div className="p-3 bg-white/5 rounded-lg border-l-2 border-red-600"><p className="font-bold text-white">Originator:</p><p className="text-neutral-400 mt-0.5">Initializes new document workflows and drafts requests.</p></div>
-                <div><p className="font-bold text-neutral-200">Processor:</p><p className="text-neutral-400 mt-0.5">Validates data entry and reviews workflow compliance.</p></div>
-                <div><p className="font-bold text-neutral-200">Signee:</p><p className="text-neutral-400 mt-0.5">Final authority for digital signatures and document execution.</p></div>
+                <div className="p-3 bg-white/5 rounded-lg border-l-2 border-amber-500"><p className="font-bold text-white">Processor:</p><p className="text-neutral-400 mt-0.5">Validates data entry, handles scan arrivals/releases, and routes ad-hoc workflows inside an assigned office destination.</p></div>
+                <div className="p-3 bg-white/5 rounded-lg border-l-2 border-purple-500"><p className="font-bold text-white">Signee:</p><p className="text-neutral-400 mt-0.5">Final authority within an assigned office branch with access privileges to evaluate, sign, or reject active document states.</p></div>
               </div>
             </div>
 

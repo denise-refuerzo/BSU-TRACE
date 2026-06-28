@@ -168,14 +168,36 @@ app.post('/api/documents', async (req, res) => {
 });
 
 app.post('/api/accounts', async (req, res) => {
-  const { username, password, accountType, fullName, email, departmentId } = req.body;
+  const { username, password, accountType, fullName, email, departmentId, officeId } = req.body;
   try {
-    const userCheck = await pool.query('SELECT * FROM public."User" WHERE username = $1 OR uni_email = $2', [username, email]);
-    if (userCheck.rows.length > 0) return res.status(400).json({ error: 'Username or Email registered' });
+    const userCheck = await pool.query(
+      'SELECT * FROM public."User" WHERE username = $1 OR uni_email = $2', 
+      [username, email]
+    );
+    if (userCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'Rejection: Username or email already registered.' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
-    await pool.query(`INSERT INTO public."User" (a_id, d_id, username, password, full_name, uni_email) VALUES ($1, $2, $3, $4, $5, $6)`, [accountType, departmentId, username, hashedPassword, fullName, email]);
-    res.status(201).json({ message: 'Account generated!' });
-  } catch (err) { res.status(500).json({ error: 'Failed account generation' }); }
+    
+    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3) && officeId 
+      ? parseInt(officeId) 
+      : null;
+
+    // 🛠️ FIXED: Fallback to 1 (CICS or a generic baseline row) to satisfy the NOT NULL constraint if blank
+    const assignedDepartmentId = departmentId ? parseInt(departmentId) : 1;
+
+    await pool.query(
+      `INSERT INTO public."User" (a_id, d_id, username, password, full_name, uni_email, o_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`, 
+      [parseInt(accountType), assignedDepartmentId, username, hashedPassword, fullName, email, assignedOfficeId]
+    );
+
+    res.status(201).json({ message: 'Success: Account architecture generated and synchronized successfully!' });
+  } catch (err) {
+    console.error("Account registration script processing breakdown:", err);
+    res.status(500).json({ error: 'Failed account generation sequence structural assignment loop.' });
+  }
 });
 
 // ==========================================
