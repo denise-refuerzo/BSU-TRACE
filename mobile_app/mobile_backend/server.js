@@ -616,28 +616,43 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
+    // 1. Find the absolute latest processing step using pd_id
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1
+      ORDER BY pd.pd_id DESC 
+      LIMIT 1
+    `, [qrCode]);
 
-    // Update the latest processed document status to 'In Verification'
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const { pd_id, time_in } = docResult.rows[0];
+
+    // 2. Prevent scanning in if it has already been scanned in
+    if (time_in !== null) {
+      return res.status(400).json({ error: 'Document has already been scanned IN.' });
+    }
+
+    // 3. Update the record: Set time_in to now, and status to 'In Verification'
     await pool.query(
       `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
+       SET time_in = timezone('Asia/Manila', now()),
+           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
+       WHERE pd_id = $1`,
+      [pd_id]
     );
 
-    res.status(200).json({ message: 'Document scanned IN successfully' });
+    res.status(200).json({ message: 'Document scanned IN successfully.' });
   } catch (error) {
     console.error('Scan In Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 16. SCAN OUT DOCUMENT (Processor)
@@ -646,45 +661,49 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    // 1. Fetch the document's latest processing step and its current status
+    // 1. Find the absolute latest processing step using pd_id
     const docResult = await pool.query(`
-      SELECT pd.pd_id, i.ini_id, s.current_status, pd.time_out
+      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.status s ON pd.s_id = s.s_id
       WHERE i.qr_code = $1
-      ORDER BY pd.time_in DESC 
+      ORDER BY pd.pd_id DESC 
       LIMIT 1
     `, [qrCode]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
+      return res.status(404).json({ error: 'Document not found.' });
     }
 
-    const { ini_id, current_status, time_out } = docResult.rows[0];
+    const { pd_id, time_in, time_out, current_status } = docResult.rows[0];
 
-    // 2. Guard clauses to prevent scanning out invalid documents
+    // 2. Prevent scanning out if already scanned out
     if (time_out !== null) {
-      return res.status(400).json({ error: 'Document has already been scanned out.' });
+      return res.status(400).json({ error: 'Document has already been scanned OUT.' });
     }
-    if (current_status.toLowerCase() === 'pending') {
+
+    // 3. Prevent scanning out if it hasn't even been scanned in yet
+    if (time_in === null) {
       return res.status(400).json({ error: 'Document must be scanned IN first.' });
     }
-    if (current_status.toLowerCase() === 'in verification') {
+
+    // 4. Prevent scanning out if the signee hasn't acted
+    const statusLower = current_status.toLowerCase();
+    if (statusLower === 'in verification' || statusLower === 'pending') {
       return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
     }
 
-    // 3. Update the latest processed document status to 'Verified' and record the exit time
+    // 5. Update the record: Set time_out to now, and advance status to 'Verified'
     await pool.query(
       `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1),
-           time_out = timezone('Asia/Manila', now())
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [ini_id]
+       SET time_out = timezone('Asia/Manila', now()),
+           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
+       WHERE pd_id = $1`,
+      [pd_id]
     );
 
-    res.status(200).json({ message: 'Document scanned OUT successfully' });
+    res.status(200).json({ message: 'Document scanned OUT successfully.' });
   } catch (error) {
     console.error('Scan Out Error:', error);
     res.status(500).json({ error: 'Internal server error' });
