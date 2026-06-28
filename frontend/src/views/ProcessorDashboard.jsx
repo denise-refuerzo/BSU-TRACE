@@ -1079,51 +1079,52 @@ export default function ProcessorDashboard() {
                 <p className="text-[10px] text-neutral-400 leading-normal max-w-[180px] font-medium">Scan to verify authenticity on any authorized workstation.</p>
                 
                 {selectedDoc.time_out ? (
-                      <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-                        <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">
-                          ℹ️ Ad-Hoc Unavailable: Document has been checked out and moved out of this branch.
-                        </p>
-                      </div>
-                    ) : selectedDoc.current_step_is_adhoc || selectedDoc.is_adhoc ? (
-                      <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-                        <p className="text-[10px] font-black text-purple-700 bg-purple-50/80 border border-purple-100 rounded-xl p-3 uppercase tracking-wide">
-                          ⚖️ Ad-Hoc Active: This file is currently undergoing an active ad-hoc detour route step.
-                        </p>
-                      </div>
-                    ) : selectedDoc.time_in ? (
-                  <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
-                    <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
-                      Request Ad-hoc Verification Detour
-                    </label>
-                    <div className="flex flex-col gap-2">
-                      <select 
-                        required 
-                        value={selectedAdHocOffice} 
-                        onChange={e => setSelectedAdHocOffice(e.target.value)}
-                        className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
-                      >
-                        <option value="">-- Select Destination Office --</option>
-                        {officesList.map((off, idx) => (
-                          off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
-                        ))}
-                      </select>
-                      
-                      <button 
-                        type="submit" 
-                        disabled={isAdHocProcessing}
-                        className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
-                      >
-                        {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-                    <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
-                      🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
-                    </p>
-                  </div>
-                )}
+  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+    <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">
+      ℹ️ Ad-Hoc Unavailable: Document has been checked out and moved out of this branch.
+    </p>
+  </div>
+) : selectedDoc.status?.toLowerCase() === 'in verification' || selectedDoc.current_step_is_adhoc || selectedDoc.is_adhoc ? (
+  // 🔒 FIXED: Catching 'In Verification' status from both Pipeline and History views
+  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+    <p className="text-[10px] font-black text-purple-700 bg-purple-50/80 border border-purple-100 rounded-xl p-3 uppercase tracking-wide">
+      ⚖️ Ad-Hoc Active: This file is currently undergoing an active ad-hoc detour route step and is currently out of your hands.
+    </p>
+  </div>
+) : selectedDoc.time_in ? (
+  <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
+    <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
+      Request Ad-hoc Verification Detour
+    </label>
+    <div className="flex flex-col gap-2">
+      <select 
+        required 
+        value={selectedAdHocOffice} 
+        onChange={e => setSelectedAdHocOffice(e.target.value)}
+        className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
+      >
+        <option value="">-- Select Destination Office --</option>
+        {officesList.map((off, idx) => (
+          off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
+        ))}
+      </select>
+      
+      <button 
+        type="submit" 
+        disabled={isAdHocProcessing}
+        className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
+      >
+        {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
+      </button>
+    </div>
+  </form>
+) : (
+  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+    <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
+      🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
+    </p>
+  </div>
+)}
               </div>
             </div>
 
