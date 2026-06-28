@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Required for Clipboard
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
   final Map<String, dynamic> document;
@@ -68,14 +69,35 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      trackingId, // Now dynamically displays the correct tracking ID
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: primaryRed,
-                      ),
+                    // --- UPDATED: Tracking ID Row with Copy Button ---
+                    Row(
+                      children: [
+                        Text(
+                          trackingId,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: primaryRed,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () async {
+                            await Clipboard.setData(ClipboardData(text: trackingId));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Copied: $trackingId'),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          child: const Icon(Icons.copy, size: 16, color: primaryRed),
+                        ),
+                      ],
                     ),
+                    // --------------------------------------------------
                   ],
                 ),
               ),

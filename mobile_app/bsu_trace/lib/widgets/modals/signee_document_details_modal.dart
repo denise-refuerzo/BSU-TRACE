@@ -27,7 +27,6 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
 
       if (response.statusCode == 200) {
         if (!mounted) return;
-        // Pop and return 'true' to signal the parent screen to refresh immediately
         Navigator.pop(context, true); 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -58,6 +57,9 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
     final String originOffice = widget.document['origin_office'] ?? 'N/A';
     final String rawStatus = widget.document['status'] ?? 'Pending';
     final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+
+    // Determines if the document is already past the actionable signing phase
+    final bool isAlreadySigned = ['signed', 'completed', 'approved', 'verified'].contains(status.toLowerCase());
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -116,40 +118,52 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
             const SizedBox(height: 8),
             Divider(color: Colors.red.shade100, thickness: 1),
             const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => showDialog(context: context, builder: (context) => const SigneeAdHocRoutingModal()),
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                    child: const Text('Ad-hoc Routing', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => showDialog(context: context, builder: (context) => const SigneeSendBackModal()),
-                    style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                    child: const Text('Send Back', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
             
-            // Replaced the simple button with our new State-driven loading button
+            // Render action buttons ONLY if the document hasn't been signed yet
+            if (!isAlreadySigned) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => showDialog(context: context, builder: (context) => const SigneeAdHocRoutingModal()),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      child: const Text('Ad-hoc Routing', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => showDialog(context: context, builder: (context) => const SigneeSendBackModal()),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      child: const Text('Send Back', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            
+            // Dynamic Sign Button
             ElevatedButton(
-              onPressed: _isSigning ? null : _signDocument,
+              // Disable the button entirely if it is already signed or currently processing
+              onPressed: (isAlreadySigned || _isSigning) ? null : _signDocument,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryRed,
-                disabledBackgroundColor: Colors.red.shade200,
+                disabledBackgroundColor: isAlreadySigned ? Colors.grey.shade300 : Colors.red.shade200,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
               ),
               child: _isSigning
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('Sign Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  : Text(
+                      isAlreadySigned ? 'SIGNED' : 'Sign Document', 
+                      style: TextStyle(
+                        color: isAlreadySigned ? Colors.grey.shade600 : Colors.white, 
+                        fontWeight: FontWeight.bold, 
+                        fontSize: 16
+                      )
+                    ),
             ),
           ],
         ),

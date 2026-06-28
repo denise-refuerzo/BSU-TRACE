@@ -25,9 +25,8 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
   String _searchQuery = '';
   String _selectedStatus = 'All Statuses';
 
-  // --- Pagination State ---
   int _currentPage = 1;
-  final int _itemsPerPage = 5; // Adjust this to show more/less items per page
+  final int _itemsPerPage = 5;
 
   @override
   void initState() {
@@ -59,7 +58,6 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
 
             dateAStr = dateAStr.replaceAll(' ', 'T');
             if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
-
             dateBStr = dateBStr.replaceAll(' ', 'T');
             if (!dateBStr.endsWith('Z') && !dateBStr.contains('+')) dateBStr += '+08:00';
 
@@ -94,28 +92,26 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
         
         bool matchesStatus = _selectedStatus == 'All Statuses' || docStatus == _selectedStatus.toLowerCase();
         
-        return matchesSearch && matchesStatus;
+        // STAYS in list if In Verification or Signed. 
+        // ONLY disappears if Pending (not scanned in yet) or Verified (scanned out)
+        bool isPendingAction = ['in verification', 'signed', 'action required'].contains(docStatus);
+        
+        return matchesSearch && matchesStatus && isPendingAction;
       }).toList();
 
-      // Reset to page 1 whenever a filter or search changes
       _currentPage = 1; 
     });
   }
 
-String formatDate(String? dateString) {
+  String formatDate(String? dateString) {
     if (dateString == null) return 'N/A';
     try {
-      // 1. Normalize string in case the backend drops the timezone
       String normalizedTime = dateString.replaceAll(' ', 'T');
       if (!normalizedTime.endsWith('Z') && !normalizedTime.contains('+')) {
         normalizedTime += '+08:00';
       }
       
-      // 2. Parse the date
       DateTime parsedDate = DateTime.parse(normalizedTime);
-      
-      // 3. Force the calculation to Philippine Standard Time (UTC+8)
-      // This prevents the emulator/device from shifting it to the previous day
       DateTime dPht = parsedDate.toUtc().add(const Duration(hours: 8));
 
       List<String> months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -127,11 +123,9 @@ String formatDate(String? dateString) {
 
   @override
   Widget build(BuildContext context) {
-    // --- Pagination Calculation Logic ---
     int totalPages = (filteredDocuments.length / _itemsPerPage).ceil();
     if (totalPages == 0) totalPages = 1;
     
-    // Safety check in case deletion/filtering makes current page out of bounds
     if (_currentPage > totalPages) _currentPage = totalPages;
 
     int startIndex = (_currentPage - 1) * _itemsPerPage;
@@ -159,17 +153,9 @@ String formatDate(String? dateString) {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Documents',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
+                  const Text('Documents', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
                   const SizedBox(height: 16),
                   
-                  // Search Bar
                   TextField(
                     onChanged: (value) {
                       _searchQuery = value;
@@ -179,43 +165,27 @@ String formatDate(String? dateString) {
                       hintText: 'Search by title or ID...',
                       hintStyle: const TextStyle(color: Colors.black54),
                       prefixIcon: const Icon(Icons.search, color: Colors.black54),
-                      filled: true,
-                      fillColor: Colors.white,
+                      filled: true, fillColor: Colors.white,
                       contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: Colors.red.shade100),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: AppTheme.primaryRed),
-                      ),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.red.shade100)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primaryRed)),
                     ),
                   ),
                   const SizedBox(height: 16),
                   
-                  // Filter Dropdown
-                  const Text(
-                    'Filter by Status', 
-                    style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)
-                  ),
+                  const Text('Filter by Status', style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red.shade100),
-                    ),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         isExpanded: true,
                         value: _selectedStatus,
                         icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-                        items: [
-                          'All Statuses', 'Pending', 'In Verification', 'Signed', 
-                          'Action Required', 'Completed', 'Verified', 'Approved'
-                        ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+                        // Re-added 'Signed' so they can filter by documents waiting to be picked up
+                        items: ['All Statuses', 'In Verification', 'Signed', 'Action Required']
+                            .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
                         onChanged: (String? newValue) {
                           if (newValue != null) {
                             setState(() {
@@ -229,65 +199,37 @@ String formatDate(String? dateString) {
                   ),
                   const SizedBox(height: 24),
                   
-                  // Document Cards (Only showing the sliced displayDocs)
                   if (displayDocs.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 40),
-                      child: Center(
-                        child: Text("No documents match your filters.", style: TextStyle(color: Colors.grey)),
-                      ),
+                      child: Center(child: Text("No incoming documents in the pipeline.", style: TextStyle(color: Colors.grey))),
                     )
                   else ...[
                     ...displayDocs.map((doc) => _buildDocCard(context: context, document: doc)),
                     
-                    // Pagination Controls UI
                     if (totalPages > 1)
                       Padding(
                         padding: const EdgeInsets.only(top: 16.0, bottom: 24.0),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Previous Button
                             IconButton(
                               icon: Icon(Icons.chevron_left, color: _currentPage > 1 ? AppTheme.primaryRed : Colors.grey),
-                              onPressed: _currentPage > 1 ? () {
-                                setState(() {
-                                  _currentPage--;
-                                });
-                              } : null,
+                              onPressed: _currentPage > 1 ? () { setState(() { _currentPage--; }); } : null,
                             ),
-                            
-                            // Page Indicator
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                'Page $_currentPage of $totalPages',
-                                style: const TextStyle(
-                                  color: AppTheme.primaryRed,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
+                              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                              child: Text('Page $_currentPage of $totalPages', style: const TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 14)),
                             ),
-
-                            // Next Button
                             IconButton(
                               icon: Icon(Icons.chevron_right, color: _currentPage < totalPages ? AppTheme.primaryRed : Colors.grey),
-                              onPressed: _currentPage < totalPages ? () {
-                                setState(() {
-                                  _currentPage++;
-                                });
-                              } : null,
+                              onPressed: _currentPage < totalPages ? () { setState(() { _currentPage++; }); } : null,
                             ),
                           ],
                         ),
                       ),
                   ],
-                  
                   const SizedBox(height: 60),
                 ],
               ),
@@ -310,15 +252,14 @@ String formatDate(String? dateString) {
 
     Color statusColor;
     switch (status.toLowerCase()) {
-      case 'pending':
       case 'action required':
         statusColor = Colors.orange;
         break;
       case 'in verification':
-      case 'verified':
         statusColor = Colors.blue;
         break;
       case 'signed':
+      case 'verified':
       case 'approved':
       case 'completed':
         statusColor = Colors.green;
@@ -342,62 +283,31 @@ String formatDate(String? dateString) {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'ID: $id',
-                style: const TextStyle(
-                  color: AppTheme.primaryRed,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text('ID: $id', style: const TextStyle(color: AppTheme.primaryRed, fontSize: 12, fontWeight: FontWeight.bold)),
               GestureDetector(
-                onTap: () {
-                  showDialog(
+                onTap: () async {
+                  final bool? signed = await showDialog<bool>(
                     context: context,
                     builder: (context) => SigneeDocumentDetailsModal(document: document),
                   );
+                  // Refresh the list if an action was taken
+                  if (signed == true) fetchDocuments();
                 },
                 child: Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(
-                    Icons.remove_red_eye_outlined,
-                    color: AppTheme.primaryRed,
-                    size: 20,
-                  ),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed, size: 20),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-              height: 1.3,
-            ),
-          ),
+          Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87, height: 1.3)),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              'FORM: $formType',
-              style: const TextStyle(
-                color: AppTheme.primaryRed,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
+            decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)),
+            child: Text('FORM: $formType', style: const TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
           ),
           const SizedBox(height: 24),
           Row(
@@ -405,32 +315,12 @@ String formatDate(String? dateString) {
             children: [
               Row(
                 children: [
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
                   const SizedBox(width: 8),
-                  Text(
-                    status,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
+                  Text(status, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87)),
                 ],
               ),
-              Text(
-                date,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Colors.black54,
-                ),
-              ),
+              Text(date, style: const TextStyle(fontSize: 12, color: Colors.black54)),
             ],
           ),
         ],

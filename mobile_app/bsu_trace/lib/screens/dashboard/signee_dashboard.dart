@@ -36,7 +36,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
     super.initState();
     fetchDashboardData();
     
-    // Auto-refresh data every 10 seconds silently
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (mounted) fetchDashboardData();
     });
@@ -61,18 +60,25 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
         int sbCount = 0;
         List<dynamic> recentPending = [];
 
-        for (var doc in docs) {
+      for (var doc in docs) {
           String status = (doc['status'] ?? '').toString().toLowerCase();
           
-          if (status == 'pending' || status == 'action required') {
+          // STRICT RULE: If it hasn't been scanned in by the processor, completely hide it
+          if (status == 'pending') continue;
+          
+          // Count logic
+          if (status == 'action required' || status == 'in verification') {
             pCount++;
-            recentPending.add(doc);
-          } else if (status == 'signed' || status == 'approved' || status == 'completed') {
+          } else if (status == 'signed' || status == 'approved' || status == 'completed' || status == 'verified') {
             sCount++;
-          } else if (status == 'in verification' || status == 'verified') {
-            vCount++;
           } else if (status == 'sent back' || status == 'rejected') {
             sbCount++;
+          }
+
+          // VISIBILITY logic for the "Documents Pending" visual list
+          // Stays in the list UNTIL scanned out (verified)
+          if (['in verification', 'action required', 'signed'].contains(status)) {
+            recentPending.add(doc);
           }
         }
 
@@ -95,7 +101,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // GATEKEEPER
     final role = SessionManager().currentRole;
     if (role != UserRole.signee) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -108,7 +113,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
         title: const Text('Signee Dashboard'),
-        actions: buildAppBarActions(context), // Refresh button removed here
+        actions: buildAppBarActions(context), 
       ),
       drawer: const AppDrawer(),
       body: isLoading 
@@ -170,12 +175,12 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                     if (pendingDocuments.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
-                        child: Center(child: Text("No pending documents requiring your signature.", style: TextStyle(color: Colors.grey))),
+                        child: Center(child: Text("No incoming documents in the pipeline.", style: TextStyle(color: Colors.grey))),
                       )
                     else
                       ...pendingDocuments.map((doc) => _buildDocCard(
                         context: context,
-                        document: doc, // Pass the full document map here!
+                        document: doc, 
                         icon: Icons.description_outlined,
                       )),
                       
@@ -197,11 +202,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
   Widget _buildStatCard(String title, String value, IconData icon, Color iconBg, Color iconColor, {Color valueColor = Colors.black87}) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade100),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -211,15 +212,8 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                value,
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: valueColor, height: 1),
-              ),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(4)),
-                child: Icon(icon, color: iconColor, size: 20),
-              ),
+              Text(value, style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: valueColor, height: 1)),
+              Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(4)), child: Icon(icon, color: iconColor, size: 20)),
             ],
           ),
         ],
@@ -230,11 +224,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
   Widget _buildEfficiencyChart() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade100),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -254,13 +244,8 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                _buildChartBar('M', 40, false),
-                _buildChartBar('T', 60, false),
-                _buildChartBar('W', 100, true),
-                _buildChartBar('T', 50, false),
-                _buildChartBar('F', 0, false),
-                _buildChartBar('S', 20, false),
-                _buildChartBar('S', 15, false),
+                _buildChartBar('M', 40, false), _buildChartBar('T', 60, false), _buildChartBar('W', 100, true),
+                _buildChartBar('T', 50, false), _buildChartBar('F', 0, false), _buildChartBar('S', 20, false), _buildChartBar('S', 15, false),
               ],
             ),
           ),
@@ -274,33 +259,14 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         if (heightPct > 0)
-          Container(
-            width: 32,
-            height: (heightPct / 100) * 70,
-            decoration: BoxDecoration(
-              color: isActive ? AppTheme.primaryRed : Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
+          Container(width: 32, height: (heightPct / 100) * 70, decoration: BoxDecoration(color: isActive ? AppTheme.primaryRed : Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
         const SizedBox(height: 8),
-        Text(
-          day,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            color: isActive ? AppTheme.primaryRed : Colors.grey,
-          ),
-        ),
+        Text(day, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isActive ? AppTheme.primaryRed : Colors.grey)),
       ],
     );
   }
 
-  Widget _buildDocCard({
-    required BuildContext context, 
-    required Map<String, dynamic> document, // Update to accept the full map
-    required IconData icon
-  }) {
-    // Extract variables directly from the passed map
+  Widget _buildDocCard({required BuildContext context, required Map<String, dynamic> document, required IconData icon}) {
     final String title = document['title'] ?? 'No Title';
     final String id = document['qr_code'] ?? 'N/A';
     final String formType = document['form_type'] ?? 'Document';
@@ -309,21 +275,13 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade100),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Icon(icon, color: AppTheme.primaryRed),
-              ),
+              Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)), child: Icon(icon, color: AppTheme.primaryRed)),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -336,18 +294,14 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                 ),
               ),
               GestureDetector(
-                onTap: () {
-                  showDialog(
+                onTap: () async {
+                  final bool? signed = await showDialog<bool>(
                     context: context,
-                    builder: (context) => SigneeDocumentDetailsModal(
-                      document: document // Pass it down to the modal here
-                    ),
+                    builder: (context) => SigneeDocumentDetailsModal(document: document),
                   );
+                  if (signed == true) fetchDashboardData(); 
                 },
-                child: const Padding(
-                  padding: EdgeInsets.all(4.0),
-                  child: Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed),
-                ),
+                child: const Padding(padding: EdgeInsets.all(4.0), child: Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed)),
               ),
             ],
           ),
@@ -357,21 +311,13 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('FORM TYPE', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(formType, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                  ],
+                  children: [const Text('FORM TYPE', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text(formType, style: const TextStyle(fontSize: 12, color: Colors.black87))],
                 ),
               ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('OFFICE', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    Text(office, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                  ],
+                  children: [const Text('OFFICE', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text(office, style: const TextStyle(fontSize: 12, color: Colors.black87))],
                 ),
               ),
             ],
@@ -383,17 +329,11 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
 
   Widget _buildSystemStatus() {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.red.shade50.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade100),
-      ),
+      decoration: BoxDecoration(color: Colors.red.shade50.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         children: [
-          _buildStatusRow(Icons.lock_outline, 'Digital Seal', 'Active', isGreen: true),
-          Divider(height: 1, color: Colors.red.shade100),
-          _buildStatusRow(Icons.cloud_queue, 'Cloud Storage', 'Connected', isGreen: true),
-          Divider(height: 1, color: Colors.red.shade100),
+          _buildStatusRow(Icons.lock_outline, 'Digital Seal', 'Active', isGreen: true), Divider(height: 1, color: Colors.red.shade100),
+          _buildStatusRow(Icons.cloud_queue, 'Cloud Storage', 'Connected', isGreen: true), Divider(height: 1, color: Colors.red.shade100),
           _buildStatusRow(Icons.sync_alt, 'Audit Sync', 'Last: 2m ago', isGreen: false),
         ],
       ),
@@ -405,24 +345,9 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
       padding: const EdgeInsets.all(16.0),
       child: Row(
         children: [
-          Icon(icon, color: Colors.black54, size: 20),
-          const SizedBox(width: 16),
-          Expanded(child: Text(title, style: const TextStyle(color: Colors.black87, fontSize: 14))),
-          if (isGreen)
-            Container(
-              margin: const EdgeInsets.only(right: 6),
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(color: Colors.teal, shape: BoxShape.circle),
-            ),
-          Text(
-            status,
-            style: TextStyle(
-              color: isGreen ? Colors.teal : Colors.black54,
-              fontSize: 12,
-              fontWeight: isGreen ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
+          Icon(icon, color: Colors.black54, size: 20), const SizedBox(width: 16), Expanded(child: Text(title, style: const TextStyle(color: Colors.black87, fontSize: 14))),
+          if (isGreen) Container(margin: const EdgeInsets.only(right: 6), width: 8, height: 8, decoration: const BoxDecoration(color: Colors.teal, shape: BoxShape.circle)),
+          Text(status, style: TextStyle(color: isGreen ? Colors.teal : Colors.black54, fontSize: 12, fontWeight: isGreen ? FontWeight.bold : FontWeight.normal)),
         ],
       ),
     );
