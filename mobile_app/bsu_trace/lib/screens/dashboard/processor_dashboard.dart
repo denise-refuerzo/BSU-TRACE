@@ -30,20 +30,22 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
-  // ==========================================
-  // FIXED PRIORITY LOGIC
-  // ==========================================
+  // EXACT STATUS LOGIC IMPLEMENTATION
   String _resolveStatus(dynamic doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
     // 1. Immutable
     if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed') return dbStatus;
+    
     // 2. Scanned Out
     if (doc['time_out'] != null) return 'verified';
+    
     // 3. Ad-hoc exception OVERRIDES Incoming
     if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
+    
     // 4. Standard process not yet scanned
     if (doc['time_in'] == null) return 'incoming';
+    
     // 5. Standard process scanned in
     return 'pending';
   }

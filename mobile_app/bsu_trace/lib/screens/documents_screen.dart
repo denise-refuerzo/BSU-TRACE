@@ -27,9 +27,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
 
-  // ==========================================
-  // FIXED PRIORITY LOGIC
-  // ==========================================
+  // EXACT STATUS LOGIC IMPLEMENTATION
   String _resolveStatus(Map<String, dynamic> doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
@@ -39,7 +37,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     // 2. Scanned Out -> Verified
     if (doc['time_out'] != null) return 'verified';
     
-    // 3. Ad-hoc routing overrides the "Incoming" null check
+    // 3. Check for Ad-Hoc FIRST (overrides Incoming because it's actively in the verification queue)
     if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
 
     // 4. Standard process not yet scanned -> Incoming

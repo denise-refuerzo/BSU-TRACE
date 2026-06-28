@@ -184,24 +184,26 @@ app.put('/api/users/:id/password', async (req, res) => {
 // ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
-    // FIX: Using ROW_NUMBER() guarantees only the latest tile is returned per document
+    // FIX: Uses ROW_NUMBER() to guarantee only 1 tile per document.
+    // FIX: Pulls the origin from the true start of the route (r.stop_1), not the current location.
     const query = `
       WITH RankedDocs AS (
         SELECT 
           i.qr_code,
           i.title, 
           p.process_name AS form_type, 
-          o.office_name AS origin_office, 
+          origin_o.office_name AS origin_office, 
           s.current_status AS status, 
           pd.time_in,
           pd.time_out,
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
-        JOIN public.process_type p ON i.p_id = p.p_id
-        JOIN public.processed_document pd ON i.ini_id = pd.ini_id
-        JOIN public.status s ON pd.s_id = s.s_id
-        JOIN public.offices o ON pd.current_office_id = o.o_id
+        LEFT JOIN public.process_type p ON i.p_id = p.p_id
+        LEFT JOIN public.route r ON p.r_id = r.r_id
+        LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
+        LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+        LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
       SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at
       FROM RankedDocs
@@ -777,20 +779,13 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
     }
     const iniId = docResult.rows[0].ini_id;
 
-    // ADDED: is_adhoc = true 
+    // FIX: We revert to INSERT so history is saved.
+    // The ROW_NUMBER() logic in Section 5 prevents this from showing as a duplicate tile.
+    // By hardcoding the s_id to 'In Verification', the app will instantly override the 'Incoming' status.
     await pool.query(
-      `UPDATE public.processed_document 
-       SET current_office_id = $1,
-           is_adhoc = true,
-           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1)
-       WHERE pd_id = (
-         SELECT pd_id 
-         FROM public.processed_document 
-         WHERE ini_id = $2 
-         ORDER BY pd_id DESC 
-         LIMIT 1
-       )`,
-      [target_office_id, iniId]
+      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
+       VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
+      [iniId, target_office_id]
     );
 
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });
