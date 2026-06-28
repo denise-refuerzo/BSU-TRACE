@@ -670,6 +670,60 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
 });
 
 // ==========================================
+// 17. FETCH PROCESSOR SCANNING TIMELINE
+// ==========================================
+app.get('/api/users/:id/processing-timeline', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // 1. Find the office assigned to this processor
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const o_id = userRes.rows[0].o_id;
+
+    // 2. Fetch the timeline of Scanned In and Scanned Out events for their office
+    const query = `
+      SELECT 
+        'Scanned In' AS action_type,
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS action_timestamp,
+        i.qr_code,
+        i.title,
+        p.process_name AS form_type,
+        pd.time_in AS sort_time
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      WHERE pd.current_office_id = $1 AND pd.time_in IS NOT NULL
+
+      UNION ALL
+
+      SELECT 
+        'Scanned Out' AS action_type,
+        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS action_timestamp,
+        i.qr_code,
+        i.title,
+        p.process_name AS form_type,
+        pd.time_out AS sort_time
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      WHERE pd.current_office_id = $1 AND pd.time_out IS NOT NULL
+
+      ORDER BY sort_time DESC;
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Timeline Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 const PORT = process.env.PORT || 3000;

@@ -18,21 +18,21 @@ class ProcessingHistoryScreen extends StatefulWidget {
 }
 
 class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
-  List<dynamic> documents = [];
-  List<dynamic> filteredDocuments = [];
+  List<dynamic> timelineEvents = [];
+  List<dynamic> filteredEvents = [];
   bool isLoading = true;
   Timer? _timer;
   
   String _searchQuery = '';
-  String _selectedStatus = 'All Statuses';
+  String _selectedAction = 'All Actions';
 
   @override
   void initState() {
     super.initState();
-    fetchDocuments();
+    fetchTimeline();
     // 10-second background auto-refresh
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (mounted) fetchDocuments();
+      if (mounted) fetchTimeline();
     });
   }
 
@@ -42,23 +42,24 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
     super.dispose();
   }
 
-  Future<void> fetchDocuments() async {
+  Future<void> fetchTimeline() async {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
-    final String url = '${AppConfig.baseUrl}/users/$userId/documents';
+    // Use the new timeline endpoint specific to the processor's actions
+    final String url = '${AppConfig.baseUrl}/users/$userId/processing-timeline';
 
     try {
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
         if (mounted) {
-          List<dynamic> fetchedDocs = json.decode(response.body);
+          List<dynamic> fetchedEvents = json.decode(response.body);
 
-          // Sort by newest based on updated_at
-          fetchedDocs.sort((a, b) {
-            String dateAStr = a['updated_at'] ?? '1970-01-01T00:00:00+08:00';
-            String dateBStr = b['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+          // Ensure sorting by newest action timestamp
+          fetchedEvents.sort((a, b) {
+            String dateAStr = a['action_timestamp'] ?? '1970-01-01T00:00:00+08:00';
+            String dateBStr = b['action_timestamp'] ?? '1970-01-01T00:00:00+08:00';
 
             dateAStr = dateAStr.replaceAll(' ', 'T');
             if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
@@ -73,33 +74,45 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
           });
 
           setState(() {
-            documents = fetchedDocs;
+            timelineEvents = fetchedEvents;
             _applyFilters();
             isLoading = false;
           });
         }
       }
     } catch (e) {
-      debugPrint("Error fetching user documents: $e");
+      debugPrint("Error fetching processing timeline: $e");
       if (mounted) setState(() => isLoading = false);
     }
   }
 
   void _applyFilters() {
     setState(() {
-      filteredDocuments = documents.where((doc) {
-        final title = (doc['title'] ?? '').toString().toLowerCase();
-        final trackingId = (doc['qr_code'] ?? '').toString().toLowerCase();
+      filteredEvents = timelineEvents.where((event) {
+        final title = (event['title'] ?? '').toString().toLowerCase();
+        final trackingId = (event['qr_code'] ?? '').toString().toLowerCase();
         final matchesSearch = title.contains(_searchQuery.toLowerCase()) || trackingId.contains(_searchQuery.toLowerCase());
 
-        String rawStatus = doc['status'] ?? 'pending';
-        String docStatus = rawStatus.toLowerCase();
-        
-        bool matchesStatus = _selectedStatus == 'All Statuses' || docStatus == _selectedStatus.toLowerCase();
+        String actionType = event['action_type'] ?? '';
+        bool matchesStatus = _selectedAction == 'All Actions' || actionType.toLowerCase() == _selectedAction.toLowerCase();
 
         return matchesSearch && matchesStatus;
       }).toList();
     });
+  }
+
+  String _formatDate(String isoString) {
+    try {
+      final DateTime dt = DateTime.parse(isoString).toLocal();
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      final month = months[dt.month - 1];
+      final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+      final ampm = dt.hour >= 12 ? 'PM' : 'AM';
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return '$month ${dt.day}, ${dt.year} - $hour:$minute $ampm';
+    } catch (e) {
+      return isoString;
+    }
   }
 
   @override
@@ -107,14 +120,14 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
-        title: const Text('Processing History'),
+        title: const Text('Scanning Timeline'),
         actions: buildAppBarActions(context),
       ),
       drawer: const AppDrawer(),
       body: isLoading 
         ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
         : RefreshIndicator(
-            onRefresh: fetchDocuments, // Pull-to-refresh
+            onRefresh: fetchTimeline,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(20.0),
@@ -125,13 +138,14 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                   _buildFilterDropdown(),
                   const SizedBox(height: 24),
                   
-                  if (filteredDocuments.isEmpty)
+                  if (filteredEvents.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 40),
-                      child: Text("No documents found.", style: TextStyle(color: Colors.grey)),
+                      child: Text("No scanning records found.", style: TextStyle(color: Colors.grey)),
                     )
                   else
-                    ...filteredDocuments.map((doc) => _buildHistoryCard(doc)),
+                    // Build timeline list
+                    ...filteredEvents.map((event) => _buildTimelineCard(event)),
                     
                   const SizedBox(height: 80),
                 ],
@@ -171,15 +185,13 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             isExpanded: true,
-            value: _selectedStatus,
-            items: [
-              'All Statuses', 'Pending', 'In Verification', 'Signed', 
-              'Action Required', 'Completed', 'Verified', 'Approved'
-            ].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+            value: _selectedAction,
+            items: ['All Actions', 'Scanned In', 'Scanned Out']
+                .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
             onChanged: (String? newValue) {
               if (newValue != null) {
                 setState(() {
-                  _selectedStatus = newValue;
+                  _selectedAction = newValue;
                   _applyFilters();
                 });
               }
@@ -188,40 +200,55 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
         ),
       );
 
-  Widget _buildHistoryCard(Map<String, dynamic> doc) {
-    final String trackingId = doc['qr_code'] ?? 'N/A';
-    final String title = doc['title'] ?? 'No Title';
-    final String category = doc['form_type'] ?? 'Document';
-    
-    final String rawStatus = doc['status'] ?? 'Pending';
-    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+  Widget _buildTimelineCard(Map<String, dynamic> event) {
+    final String trackingId = event['qr_code'] ?? 'N/A';
+    final String title = event['title'] ?? 'No Title';
+    final String category = event['form_type'] ?? 'Document';
+    final String actionType = event['action_type'] ?? 'Unknown';
+    final String timestampStr = event['action_timestamp'] ?? '';
 
-    Color statusColor;
-    switch (status.toLowerCase()) {
-      case 'pending':
-      case 'action required':
-        statusColor = Colors.orange;
-        break;
-      case 'in verification':
-      case 'verified':
-        statusColor = Colors.blue;
-        break;
-      case 'signed':
-      case 'approved':
-      case 'completed':
-        statusColor = Colors.green;
-        break;
-      default:
-        statusColor = Colors.grey;
-    }
+    // Color logic depending on action
+    Color actionColor = actionType.toLowerCase() == 'scanned in' 
+        ? Colors.blue 
+        : Colors.green;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(8), 
+        border: Border(left: BorderSide(color: actionColor, width: 4)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          )
+        ]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                actionType.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 12, 
+                  fontWeight: FontWeight.bold, 
+                  color: actionColor,
+                  letterSpacing: 0.5,
+                )
+              ),
+              Text(
+                _formatDate(timestampStr), 
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -231,18 +258,10 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
                 ),
               ),
-              const SizedBox(width: 8),
-              const Icon(Icons.chevron_right, color: Colors.black54),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: Text(category, style: const TextStyle(fontSize: 14, color: Colors.black54))),
-              Text(status.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
-            ],
-          )
+          const SizedBox(height: 4),
+          Text(category, style: const TextStyle(fontSize: 14, color: Colors.black54))
         ],
       ),
     );
