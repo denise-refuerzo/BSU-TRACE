@@ -9,6 +9,7 @@ import '../widgets/app_drawer.dart';
 import '../widgets/modals/document_scanner_modal.dart';
 import '../widgets/modals/processor_document_details_modal.dart';
 import '../services/session_manager.dart';
+import '../models/user_role.dart';
 import '../config.dart';
 
 class DocumentsScreen extends StatefulWidget {
@@ -28,23 +29,31 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
 
-  // EXACT STATUS LOGIC IMPLEMENTATION
+  // EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(Map<String, dynamic> doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    
-    // 1. Immutable DB Statuses (Signed/Approved/Completed)
-    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed' || dbStatus == 'action required') return dbStatus;
-    
-    // 2. Scanned Out -> Verified
-    if (doc['time_out'] != null) return 'verified';
-    
-    // 3. Check for Ad-Hoc FIRST
-    if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
+    if (dbStatus == 'completed' || dbStatus == 'signed' || dbStatus == 'approved') return 'completed';
 
-    // 4. Standard process not yet scanned -> Incoming
-    if (doc['time_in'] == null) return 'incoming';
+    bool isAdHoc = dbStatus == 'in verification' || dbStatus.contains('ad hoc');
+
+    // Role isolated fallback -> Uses exact rules if the endpoint provided "is_at_current_office"
+    if (doc.containsKey('is_at_current_office')) {
+      bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
+      if (isAtCurrentOffice) {
+        if (isAdHoc) return 'pending';
+        if (doc['time_in'] == null) return 'awaiting scan in';
+        if (doc['time_out'] == null) return 'pending';
+        return 'verified';
+      } else {
+        if (isAdHoc) return 'in verification';
+        return 'incoming';
+      }
+    } 
     
-    // 5. Standard process scanned in -> Pending
+    // Global fallback for Admins who see all system documents
+    if (doc['time_out'] != null) return 'verified';
+    if (isAdHoc) return 'in verification';
+    if (doc['time_in'] == null) return 'incoming';
     return 'pending';
   }
 
@@ -52,7 +61,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   void initState() {
     super.initState();
     fetchDocuments();
-
     _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
       if (mounted) fetchDocuments();
     });
@@ -66,10 +74,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
   Future<void> fetchDocuments() async {
     final userId = SessionManager().userId;
+    final role = SessionManager().currentRole;
     if (userId == null) return;
     
-    // NEW: Pointed to the exact same isolated endpoint as the dashboard
-    final String url = '${AppConfig.baseUrl}/processors/$userId/documents';
+    // If the user is a Processor, fetch isolated routing queue. Otherwise, fallback to global queue.
+    String url = '${AppConfig.baseUrl}/documents';
+    if (role == UserRole.processor) {
+      url = '${AppConfig.baseUrl}/processors/$userId/documents';
+    }
 
     try {
       final response = await http.get(Uri.parse(url));
@@ -81,16 +93,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           fetchedDocs.sort((a, b) {
             String dateAStr = a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00+08:00';
             String dateBStr = b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00+08:00';
-
             dateAStr = dateAStr.replaceAll(' ', 'T');
             if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
-
             dateBStr = dateBStr.replaceAll(' ', 'T');
             if (!dateBStr.endsWith('Z') && !dateBStr.contains('+')) dateBStr += '+08:00';
 
             DateTime dateA = DateTime.tryParse(dateAStr) ?? DateTime.utc(1970);
             DateTime dateB = DateTime.tryParse(dateBStr) ?? DateTime.utc(1970);
-            
             return _isAscending ? dateA.compareTo(dateB) : dateB.compareTo(dateA);
           });
 
@@ -131,10 +140,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
-      appBar: AppBar(
-        title: const Text('Documents'),
-        actions: buildAppBarActions(context),
-      ),
+      appBar: AppBar(title: const Text('Documents'), actions: buildAppBarActions(context)),
       drawer: const AppDrawer(),
       body: isLoading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
@@ -149,15 +155,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     const SizedBox(height: 16),
                     _buildFilterRow(),
                     const SizedBox(height: 24),
-                    
                     if (filteredDocuments.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 40),
-                        child: Text("No documents found.", style: TextStyle(color: Colors.grey)),
-                      )
+                      const Padding(padding: EdgeInsets.only(top: 40), child: Text("No documents found.", style: TextStyle(color: Colors.grey)))
                     else
                       ...filteredDocuments.map((doc) => _buildDocumentCard(context, doc)),
-                    
                     const SizedBox(height: 80),
                   ],
                 ),
@@ -172,11 +173,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Widget _buildSearchBar() => TextField(
-        onChanged: (value) {
-          setState(() {
-            _searchQuery = value;
-          });
-        },
+        onChanged: (value) { setState(() { _searchQuery = value; }); },
         decoration: InputDecoration(
           hintText: 'Search Documents...',
           prefixIcon: const Icon(Icons.search, color: Colors.grey),
@@ -197,8 +194,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   isExpanded: true,
                   value: _selectedStatus,
                   items: [
-                    'All Status', 'Incoming', 'Pending', 'In Verification', 'Signed', 
-                    'Action Required', 'Completed', 'Verified', 'Approved'
+                    'All Status', 'Incoming', 'Awaiting Scan In', 'Pending', 'In Verification', 'Verified', 'Completed'
                   ].map((String value) {
                     return DropdownMenuItem<String>(
                       value: value, 
@@ -207,9 +203,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   }).toList(),
                   onChanged: (String? newValue) {
                     if (newValue != null) {
-                      setState(() {
-                        _selectedStatus = newValue; 
-                      });
+                      setState(() { _selectedStatus = newValue; });
                     }
                   },
                 ),
@@ -224,10 +218,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               child: DropdownButton<String>(
                 value: _isAscending ? 'Oldest' : 'Newest', 
                 items: ['Newest', 'Oldest'].map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value, 
-                    child: Text(value, style: const TextStyle(fontSize: 14)),
-                  );
+                  return DropdownMenuItem<String>(value: value, child: Text(value, style: const TextStyle(fontSize: 14)));
                 }).toList(),
                 onChanged: (String? newValue) {
                   setState(() {
@@ -255,14 +246,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     if (dbTime != null) {
       String normalizedTime = dbTime.replaceAll(' ', 'T');
-      if (!normalizedTime.endsWith('Z') && !normalizedTime.contains('+')) {
-        normalizedTime += '+08:00';
-      }
-
+      if (!normalizedTime.endsWith('Z') && !normalizedTime.contains('+')) normalizedTime += '+08:00';
       DateTime? parsedDate = DateTime.tryParse(normalizedTime);
       if (parsedDate != null) {
-        DateTime now = DateTime.now(); 
-        Duration diff = now.difference(parsedDate);
+        Duration diff = DateTime.now().difference(parsedDate);
         if (diff.isNegative) time = 'Just now'; 
         else if (diff.inDays >= 365) time = '${(diff.inDays/365).floor()} years ago';
         else if (diff.inDays >= 30) time = '${(diff.inDays/30).floor()} months ago';
@@ -275,26 +262,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
     Color statusColor;
     switch (rawStatus.toLowerCase()) {
-      case 'incoming':
-        statusColor = Colors.purple.shade100;
-        break;
-      case 'pending':
-        statusColor = Colors.orange.shade100;
-        break;
-      case 'action required': 
-        statusColor = Colors.red.shade200;
-        break;
-      case 'in verification':
-        statusColor = Colors.blue.shade100;
-        break;
-      case 'signed':
-      case 'approved':
-      case 'verified':
-      case 'completed':
-        statusColor = Colors.green.shade100;
-        break;
-      default:
-        statusColor = Colors.grey.shade100;
+      case 'awaiting scan in': statusColor = Colors.purple.shade100; break;
+      case 'pending': statusColor = Colors.orange.shade100; break;
+      case 'in verification': statusColor = Colors.blue.shade100; break;
+      case 'verified': 
+      case 'completed': statusColor = Colors.green.shade100; break;
+      default: statusColor = Colors.grey.shade100;
     }
 
     return Container(

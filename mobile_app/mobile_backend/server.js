@@ -15,49 +15,38 @@ app.use(express.json());
 // Neon PostgreSQL Connection Pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false 
-  }
+  ssl: { rejectUnauthorized: false }
 });
 
 pool.connect((err, client, release) => {
-  if (err) {
-    return console.error('Error acquiring client', err.stack);
-  }
+  if (err) return console.error('Error acquiring client', err.stack);
   console.log('Successfully connected to the Neon PostgreSQL database');
   release();
 });
 
 // ==========================================
-// 1. LOGIN ENDPOINT (Updated to return two_fa_enabled)
+// 1. LOGIN ENDPOINT (Updated for 2FA)
 // ==========================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
-
   try {
-    // Added two_fa_enabled to the SELECT query
     const result = await pool.query(
-      'SELECT u_id, password, a_id, two_fa_enabled FROM public."User" WHERE username = $1',
+      'SELECT u_id, password, a_id, two_fa_enabled FROM public."User" WHERE username = $1', 
       [username]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
+    
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid credentials' });
 
     const user = result.rows[0];
-
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    res.status(200).json({
-      u_id: user.u_id,
+    
+    if (!isMatch) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    res.status(200).json({ 
+      u_id: user.u_id, 
       a_id: user.a_id,
-      two_fa_enabled: user.two_fa_enabled // Tell the app if we need to ask for a PIN
+      two_fa_enabled: user.two_fa_enabled 
     });
-
   } catch (error) {
     console.error('Login Error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -65,48 +54,13 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ==========================================
-// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated to save PIN)
-// ==========================================
-app.put('/api/users/:id', async (req, res) => {
-  const userId = req.params.id;
-  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
-
-  try {
-    // COALESCE ensures we don't overwrite an existing code with NULL if it isn't passed
-    const query = `
-      UPDATE public."User"
-      SET full_name = $1, 
-          uni_email = $2, 
-          two_fa_enabled = $3,
-          two_fa_code = COALESCE($4, two_fa_code) 
-      WHERE u_id = $5
-      RETURNING u_id
-    `;
-    
-    const values = [full_name, uni_email, two_fa_enabled, two_fa_code, userId];
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.status(200).json({ message: 'Profile updated successfully' });
-
-  } catch (error) {
-    console.error('Update Profile Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ==========================================
-// 1.5 NEW: VERIFY 2FA ENDPOINT
+// 1.5 VERIFY 2FA ENDPOINT (NEW)
 // ==========================================
 app.post('/api/verify-2fa', async (req, res) => {
   const { u_id, code } = req.body;
 
   try {
     const result = await pool.query('SELECT two_fa_code FROM public."User" WHERE u_id = $1', [u_id]);
-    
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
     if (result.rows[0].two_fa_code === code) {
@@ -124,134 +78,82 @@ app.post('/api/verify-2fa', async (req, res) => {
 // 2. FETCH USER PROFILE ENDPOINT
 // ==========================================
 app.get('/api/users/:id', async (req, res) => {
-  const userId = req.params.id;
-
   try {
     const query = `
-      SELECT 
-        u.u_id, 
-        u.full_name, 
-        u.uni_email, 
-        u.faculty_id, 
-        u.two_fa_enabled,
-        a.account_type, 
-        d.department_name
+      SELECT u.u_id, u.full_name, u.uni_email, u.faculty_id, u.two_fa_enabled, a.account_type, d.department_name
       FROM public."User" u
       JOIN public.account a ON u.a_id = a.a_id
       JOIN public.department d ON u.d_id = d.d_id
-      WHERE u.u_id = $1
-    `;
-
-    const result = await pool.query(query, [userId]);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
+      WHERE u.u_id = $1`;
+    const result = await pool.query(query, [req.params.id]);
+    
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.status(200).json(result.rows[0]);
-
   } catch (error) {
     console.error('Profile Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
-// 3. UPDATE USER PROFILE DETAILS ENDPOINT
+// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated for 2FA PIN)
 // ==========================================
 app.put('/api/users/:id', async (req, res) => {
-  const userId = req.params.id;
-  const { full_name, uni_email, two_fa_enabled } = req.body;
-
+  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
   try {
     const query = `
-      UPDATE public."User"
+      UPDATE public."User" 
       SET full_name = $1, 
           uni_email = $2, 
-          two_fa_enabled = $3
-      WHERE u_id = $4
-      RETURNING u_id
-    `;
+          two_fa_enabled = $3,
+          two_fa_code = COALESCE($4, two_fa_code)
+      WHERE u_id = $5 
+      RETURNING u_id`;
+      
+    const result = await pool.query(query, [full_name, uni_email, two_fa_enabled, two_fa_code, req.params.id]);
     
-    const values = [full_name, uni_email, two_fa_enabled, userId];
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.status(200).json({ message: 'Profile updated successfully' });
-
   } catch (error) {
     console.error('Update Profile Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
 // 4. CHANGE PASSWORD ENDPOINT
 // ==========================================
 app.put('/api/users/:id/password', async (req, res) => {
-  const userId = req.params.id;
   const { currentPassword, newPassword } = req.body;
-
-  if (!currentPassword || !newPassword) {
-    return res.status(400).json({ error: 'Both current and new passwords are required.' });
-  }
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required.' });
 
   try {
-    const userResult = await pool.query(
-      'SELECT password FROM public."User" WHERE u_id = $1',
-      [userId]
-    );
+    const userResult = await pool.query('SELECT password FROM public."User" WHERE u_id = $1', [req.params.id]);
+    if (userResult.rows.length === 0) return res.status(404).json({ error: 'User not found.' });
 
-    if (userResult.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found.' });
-    }
+    const isMatch = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+    if (!isMatch) return res.status(401).json({ error: 'Incorrect current password.' });
 
-    const currentHashedPassword = userResult.rows[0].password;
-
-    const isMatch = await bcrypt.compare(currentPassword, currentHashedPassword);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Incorrect current password.' });
-    }
-
-    const saltRounds = 10;
-    const newHashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    await pool.query(
-      'UPDATE public."User" SET password = $1 WHERE u_id = $2',
-      [newHashedPassword, userId]
-    );
-
+    const newHashedPassword = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE public."User" SET password = $1 WHERE u_id = $2', [newHashedPassword, req.params.id]);
+    
     res.status(200).json({ message: 'Password updated successfully.' });
-
   } catch (error) {
     console.error('Password Update Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
-// 5. FETCH DOCUMENTS LIST ENDPOINT
+// 5. FETCH GLOBAL DOCUMENTS LIST ENDPOINT
 // ==========================================
 app.get('/api/documents', async (req, res) => {
   try {
-    // FIX: Uses ROW_NUMBER() to guarantee only 1 tile per document.
-    // FIX: Pulls the origin from the true start of the route (r.stop_1), not the current location.
     const query = `
       WITH RankedDocs AS (
         SELECT 
-          i.qr_code,
-          i.title, 
-          p.process_name AS form_type, 
-          origin_o.office_name AS origin_office, 
-          s.current_status AS status, 
-          pd.time_in,
-          pd.time_out,
+          i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
+          s.current_status AS status, pd.time_in, pd.time_out,
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
@@ -262,47 +164,36 @@ app.get('/api/documents', async (req, res) => {
         LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
       SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at
-      FROM RankedDocs
-      WHERE rn = 1
-      ORDER BY time_in DESC NULLS LAST
+      FROM RankedDocs WHERE rn = 1 ORDER BY time_in DESC NULLS LAST
     `;
-
     const result = await pool.query(query);
     res.status(200).json(result.rows);
-
   } catch (error) {
-    console.error('Document Fetch Error:', error);
+    console.error('Global Document Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 5.5 FETCH PROCESSOR-SPECIFIC DOCUMENTS 
+// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS 
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
   const userId = req.params.id;
 
   try {
-    // 1. Get the processor's assigned office
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
       return res.status(404).json({ error: 'Processor office not found' });
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch only documents currently routed to this office (rn = 1)
     const query = `
       WITH RankedDocs AS (
         SELECT 
-          i.qr_code,
-          i.title, 
-          p.process_name AS form_type, 
-          origin_o.office_name AS origin_office, 
-          s.current_status AS status, 
-          pd.time_in,
-          pd.time_out,
+          i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
+          s.current_status AS status, pd.time_in, pd.time_out,
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-          pd.current_office_id,
+          pd.current_office_id, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
@@ -311,9 +202,15 @@ app.get('/api/processors/:id/documents', async (req, res) => {
         LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
         LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
-      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at
+      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at, current_office_id,
+        CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office
       FROM RankedDocs
-      WHERE rn = 1 AND current_office_id = $1
+      WHERE rn = 1 
+        AND (
+          current_office_id = $1 
+          OR stop_1 = $1 OR stop_2 = $1 OR stop_3 = $1 OR stop_4 = $1 OR stop_5 = $1 OR stop_6 = $1 OR stop_7 = $1
+        )
+        AND status NOT ILIKE 'Completed'
       ORDER BY time_in DESC NULLS LAST
     `;
 
@@ -327,61 +224,46 @@ app.get('/api/processors/:id/documents', async (req, res) => {
 });
 
 // ==========================================
-// 6. FETCH USER DASHBOARD STATS ENDPOINT
+// 6. FETCH USER DASHBOARD STATS ENDPOINT 
 // ==========================================
 app.get('/api/users/:id/dashboard-stats', async (req, res) => {
-  const userId = req.params.id;
-
   try {
     const query = `
       SELECT 
         COUNT(i.ini_id) AS total_docs,
         SUM(CASE WHEN s.current_status = 'pending' THEN 1 ELSE 0 END) AS pending_docs,
         SUM(CASE WHEN s.current_status = 'Completed' THEN 1 ELSE 0 END) AS completed_docs,
-        -- Changed 'Sent Back' to 'Action Required' here
         SUM(CASE WHEN s.current_status ILIKE 'Action Required' THEN 1 ELSE 0 END) AS sent_back_docs
       FROM public.initial_document i
       LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
       LEFT JOIN public.status s ON pd.s_id = s.s_id
       WHERE i.u_id = $1
     `;
-
-    const result = await pool.query(query, [userId]);
+    const result = await pool.query(query, [req.params.id]);
     const stats = result.rows[0];
+    
     res.status(200).json({
       total_docs: stats.total_docs || 0,
       pending_docs: stats.pending_docs || 0,
       completed_docs: stats.completed_docs || 0,
       sent_back_docs: stats.sent_back_docs || 0
     });
-
   } catch (error) {
     console.error('Dashboard Stats Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
 // 7. FETCH USER-SPECIFIC DOCUMENTS ENDPOINT
 // ==========================================
 app.get('/api/users/:id/documents', async (req, res) => {
-  const userId = req.params.id;
-
   try {
     const query = `
       WITH RankedDocs AS (
-        SELECT 
-          i.ini_id,
-          i.qr_code,
-          i.title,
-          p.process_name AS form_type,
-          o.office_name AS current_location,
-          s.current_status AS status,
-          -- Format directly to string in DB
-          TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS updated_at,
-          pd.time_in,
-          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
+        SELECT i.ini_id, i.qr_code, i.title, p.process_name AS form_type, o.office_name AS current_location,
+          s.current_status AS status, TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS updated_at,
+          pd.time_in, ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
         LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
@@ -390,77 +272,52 @@ app.get('/api/users/:id/documents', async (req, res) => {
         WHERE i.u_id = $1
       )
       SELECT ini_id, qr_code, title, form_type, current_location, status, updated_at 
-      FROM RankedDocs 
-      WHERE rn = 1 
-      ORDER BY time_in DESC;
+      FROM RankedDocs WHERE rn = 1 ORDER BY time_in DESC;
     `;
-
-    const result = await pool.query(query, [userId]);
+    const result = await pool.query(query, [req.params.id]);
     res.status(200).json(result.rows);
-
   } catch (error) {
     console.error('User Documents Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
-// 8. FETCH SPECIFIC DOCUMENT DETAILS ENDPOINT
+// 8. FETCH SPECIFIC DOCUMENT DETAILS
 // ==========================================
 app.get('/api/documents/:id/details', async (req, res) => {
-  const docId = req.params.id;
-
   try {
     const detailsQuery = `
-      SELECT 
-        i.ini_id, i.title, i.edc, i.qr_code,
-        u.full_name AS requestor,
-        p.process_name AS form_type,
-        s.current_status AS status
+      SELECT i.ini_id, i.title, i.edc, i.qr_code, u.full_name AS requestor, p.process_name AS form_type, s.current_status AS status
       FROM public.initial_document i
       JOIN public."User" u ON i.u_id = u.u_id
       JOIN public.process_type p ON i.p_id = p.p_id
       LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
       LEFT JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.ini_id = $1
-      ORDER BY pd.time_in DESC
-      LIMIT 1;
+      WHERE i.ini_id = $1 ORDER BY pd.time_in DESC LIMIT 1;
     `;
-    const detailsResult = await pool.query(detailsQuery, [docId]);
-    
-    if (detailsResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
+    const detailsResult = await pool.query(detailsQuery, [req.params.id]);
+    if (detailsResult.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
 
     const historyQuery = `
-      SELECT 
-        o.office_name, 
-        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in, 
-        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out, 
-        s.current_status
+      SELECT o.office_name, TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in, 
+        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out, s.current_status
       FROM public.processed_document pd
       JOIN public.offices o ON pd.current_office_id = o.o_id
       JOIN public.status s ON pd.s_id = s.s_id
-      WHERE pd.ini_id = $1
-      ORDER BY pd.time_in ASC;
+      WHERE pd.ini_id = $1 ORDER BY pd.time_in ASC;
     `;
-    const historyResult = await pool.query(historyQuery, [docId]);
+    const historyResult = await pool.query(historyQuery, [req.params.id]);
 
-    res.status(200).json({
-      ...detailsResult.rows[0],
-      history: historyResult.rows
-    });
-
+    res.status(200).json({ ...detailsResult.rows[0], history: historyResult.rows });
   } catch (error) {
     console.error('Document Details Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-
 // ==========================================
-// 9. FETCH PROCESS TYPES ENDPOINT
+// 9. FETCH PROCESS TYPES AND ROUTES
 // ==========================================
 app.get('/api/process-types', async (req, res) => {
   try {
@@ -472,23 +329,11 @@ app.get('/api/process-types', async (req, res) => {
   }
 });
 
-
-// ==========================================
-// 9.5 FETCH ROUTE FOR SPECIFIC PROCESS TYPE
-// ==========================================
 app.get('/api/process-types/:id/route', async (req, res) => {
-  const processId = req.params.id;
-
   try {
     const query = `
-      SELECT 
-        o1.office_name AS stop_1,
-        o2.office_name AS stop_2,
-        o3.office_name AS stop_3,
-        o4.office_name AS stop_4,
-        o5.office_name AS stop_5,
-        o6.office_name AS stop_6,
-        o7.office_name AS stop_7
+      SELECT o1.office_name AS stop_1, o2.office_name AS stop_2, o3.office_name AS stop_3, o4.office_name AS stop_4,
+             o5.office_name AS stop_5, o6.office_name AS stop_6, o7.office_name AS stop_7
       FROM public.process_type p
       JOIN public.route r ON p.r_id = r.r_id
       LEFT JOIN public.offices o1 ON r.stop_1 = o1.o_id
@@ -500,69 +345,46 @@ app.get('/api/process-types/:id/route', async (req, res) => {
       LEFT JOIN public.offices o7 ON r.stop_7 = o7.o_id
       WHERE p.p_id = $1;
     `;
-    
-    const result = await pool.query(query, [processId]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Route not found for this process type' });
-    }
+    const result = await pool.query(query, [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Route not found' });
 
     const row = result.rows[0];
-    const stops = [
-      row.stop_1, row.stop_2, row.stop_3, row.stop_4,
-      row.stop_5, row.stop_6, row.stop_7
-    ].filter(stop => stop !== null);
-
+    const stops = [row.stop_1, row.stop_2, row.stop_3, row.stop_4, row.stop_5, row.stop_6, row.stop_7].filter(stop => stop !== null);
+    
     res.status(200).json({ stops });
   } catch (error) {
-    console.error('Fetch Process Route Error:', error);
+    console.error('Process Route Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 10. CREATE NEW DOCUMENT ENDPOINT
+// 10. CREATE NEW DOCUMENT
 // ==========================================
 app.post('/api/documents', async (req, res) => {
   const { u_id, title, p_id } = req.body;
-
-  if (!u_id || !title || !p_id) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+  if (!u_id || !title || !p_id) return res.status(400).json({ error: 'Missing required fields' });
 
   try {
-    const processResult = await pool.query(
-      'SELECT r.stop_1 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
-      [p_id]
-    );
-
-    if (processResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Process type not found' });
-    }
-
+    const processResult = await pool.query('SELECT r.stop_1 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1', [p_id]);
+    if (processResult.rows.length === 0) return res.status(404).json({ error: 'Process type not found' });
+    
     const firstOfficeId = processResult.rows[0].stop_1;
-
     const qrCode = `TRK-${Date.now()}-${Math.floor(Math.random() * 100)}`;
-    const edcDate = new Date();
+    const edcDate = new Date(); 
     edcDate.setDate(edcDate.getDate() + 7);
 
-    const insertDocQuery = `
-      INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING ini_id
-    `;
-    const docResult = await pool.query(insertDocQuery, [p_id, u_id, title, edcDate, qrCode]);
-    const newIniId = docResult.rows[0].ini_id;
-
-    // FIX: Set time_in to NULL so it isn't automatically marked "In Verification" upon creation
-    const insertTrackQuery = `
-      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-      VALUES ($1, 1, $2, NULL)
-    `;
-    await pool.query(insertTrackQuery, [newIniId, firstOfficeId]);
+    const docResult = await pool.query(
+      `INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code) VALUES ($1, $2, $3, $4, $5) RETURNING ini_id`,
+      [p_id, u_id, title, edcDate, qrCode]
+    );
+    
+    await pool.query(
+      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in) VALUES ($1, 1, $2, NULL)`,
+      [docResult.rows[0].ini_id, firstOfficeId]
+    );
 
     res.status(201).json({ message: 'Document created successfully', qr_code: qrCode });
-
   } catch (error) {
     console.error('Create Document Error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -570,17 +392,13 @@ app.post('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// 11. FETCH ALL BOOKINGS FOR SCHEDULER
+// 11. FETCH LOGISTICS BOOKINGS
 // ==========================================
 app.get('/api/scheduler/bookings', async (req, res) => {
   try {
     const query = `
-      SELECT 
-          b.booking_id, b.booking_type, b.department, b.reservation_date, b.purpose, b.status,
-          u.full_name AS requestor,
-          COALESCE(g.start_time, v.pick_up_time) AS start_time,
-          COALESCE(g.end_time, v.drop_off_time) AS end_time,
-          v.destination
+      SELECT b.booking_id, b.booking_type, b.department, b.reservation_date, b.purpose, b.status, u.full_name AS requestor,
+          COALESCE(g.start_time, v.pick_up_time) AS start_time, COALESCE(g.end_time, v.drop_off_time) AS end_time, v.destination
       FROM public.bookings b
       JOIN public."User" u ON b.u_id = u.u_id
       LEFT JOIN public.gm_requirements g ON b.booking_id = g.booking_id
@@ -595,45 +413,20 @@ app.get('/api/scheduler/bookings', async (req, res) => {
   }
 });
 
-
 // ==========================================
 // 12. FETCH LOGISTICS INVENTORY
 // ==========================================
 app.get('/api/scheduler/inventory', async (req, res) => {
   try {
-    const totalQuery = `
-      SELECT asset_name, quantity 
-      FROM public.asset_details 
-      WHERE asset_name IN ('Stackable Chairs', 'Folding Table')
-    `;
-    const totalResult = await pool.query(totalQuery);
-
-    const usageQuery = `
-      SELECT SUM(g.expected_attendees) as total_attendees
-      FROM public.bookings b
-      JOIN public.gm_requirements g ON b.booking_id = g.booking_id
-      WHERE b.reservation_date = CURRENT_DATE 
-      AND b.status IN ('Reserved', 'Confirmed')
-    `;
-    const usageResult = await pool.query(usageQuery);
+    const totalResult = await pool.query(`SELECT asset_name, quantity FROM public.asset_details WHERE asset_name IN ('Stackable Chairs', 'Folding Table')`);
+    const usageResult = await pool.query(`SELECT SUM(g.expected_attendees) as total_attendees FROM public.bookings b JOIN public.gm_requirements g ON b.booking_id = g.booking_id WHERE b.reservation_date = CURRENT_DATE AND b.status IN ('Reserved', 'Confirmed')`);
+    
     const activeAttendees = parseInt(usageResult.rows[0].total_attendees) || 0;
-
     const inventoryData = totalResult.rows.map(item => {
-      let inUse = 0;
-      
-      if (item.asset_name === 'Stackable Chairs') {
-        inUse = activeAttendees;
-      } else if (item.asset_name === 'Folding Table') {
-        inUse = Math.ceil(activeAttendees / 4);
-      }
-      
-      return {
-        asset_name: item.asset_name,
-        total: item.quantity,
-        in_use: inUse > item.quantity ? item.quantity : inUse 
-      };
+      let inUse = item.asset_name === 'Stackable Chairs' ? activeAttendees : Math.ceil(activeAttendees / 4);
+      return { asset_name: item.asset_name, total: item.quantity, in_use: inUse > item.quantity ? item.quantity : inUse };
     });
-
+    
     res.status(200).json(inventoryData);
   } catch (error) {
     console.error('Inventory Fetch Error:', error);
@@ -641,51 +434,30 @@ app.get('/api/scheduler/inventory', async (req, res) => {
   }
 });
 
-
 // ==========================================
-// 13. CREATE NEW BOOKING (SCHEDULER)
+// 13. CREATE BOOKING
 // ==========================================
 app.post('/api/scheduler/bookings', async (req, res) => {
   const { u_id, booking_type, reservation_date, purpose, destination, start_time, end_time, asset_name } = req.body;
-
   try {
     await pool.query('BEGIN'); 
-
-    const deptResult = await pool.query(
-      'SELECT d.department_name FROM public."User" u JOIN public.department d ON u.d_id = d.d_id WHERE u.u_id = $1',
-      [u_id]
-    );
+    const deptResult = await pool.query('SELECT d.department_name FROM public."User" u JOIN public.department d ON u.d_id = d.d_id WHERE u.u_id = $1', [u_id]);
     const department = deptResult.rows.length > 0 ? deptResult.rows[0].department_name : 'General';
 
-    const bookingQuery = `
-      INSERT INTO public.bookings (u_id, booking_type, department, reservation_date, purpose, status)
-      VALUES ($1, $2, $3, $4, $5, 'Reserved')
-      RETURNING booking_id;
-    `;
-    const bookingResult = await pool.query(bookingQuery, [u_id, booking_type, department, reservation_date, purpose]);
+    const bookingResult = await pool.query(`INSERT INTO public.bookings (u_id, booking_type, department, reservation_date, purpose, status) VALUES ($1, $2, $3, $4, $5, 'Reserved') RETURNING booking_id;`, [u_id, booking_type, department, reservation_date, purpose]);
     const bookingId = bookingResult.rows[0].booking_id;
 
-    const assetQuery = `SELECT asd_id FROM public.asset_details WHERE asset_name = $1 LIMIT 1;`;
-    const assetResult = await pool.query(assetQuery, [asset_name]);
+    const assetResult = await pool.query(`SELECT asd_id FROM public.asset_details WHERE asset_name = $1 LIMIT 1;`, [asset_name]);
     const asd_id = assetResult.rows.length > 0 ? assetResult.rows[0].asd_id : 1; 
 
     if (booking_type === 'Vehicle') {
-      const vQuery = `
-        INSERT INTO public.vehicle_requirements (asd_id, sv_id, booking_id, destination, passenger_count, pick_up_time, drop_off_time)
-        VALUES ($1, 3, $2, $3, 1, $4, $5);
-      `;
-      await pool.query(vQuery, [asd_id, bookingId, destination || purpose, start_time, end_time]);
+      await pool.query(`INSERT INTO public.vehicle_requirements (asd_id, sv_id, booking_id, destination, passenger_count, pick_up_time, drop_off_time) VALUES ($1, 3, $2, $3, 1, $4, $5);`, [asd_id, bookingId, destination || purpose, start_time, end_time]);
     } else {
-      const gmQuery = `
-        INSERT INTO public.gm_requirements (asd_id, booking_id, start_time, end_time, expected_attendees)
-        VALUES ($1, $2, $3, $4, 10);
-      `;
-      await pool.query(gmQuery, [asd_id, bookingId, start_time, end_time]);
+      await pool.query(`INSERT INTO public.gm_requirements (asd_id, booking_id, start_time, end_time, expected_attendees) VALUES ($1, $2, $3, $4, 10);`, [asd_id, bookingId, start_time, end_time]);
     }
-
+    
     await pool.query('COMMIT'); 
     res.status(201).json({ message: 'Booking created successfully' });
-
   } catch (error) {
     await pool.query('ROLLBACK'); 
     console.error('Create Booking Error:', error);
@@ -697,24 +469,14 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 // 14. SIGN DOCUMENT ENDPOINT
 // ==========================================
 app.put('/api/documents/:qrCode/sign', async (req, res) => {
-  const { qrCode } = req.params;
-
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [req.params.qrCode]);
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
 
-    // Target the latest routing step and mark as Signed WITHOUT setting time_out
     await pool.query(
-      `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
+      `UPDATE public.processed_document SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1) WHERE ini_id = $1 AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
+      [docResult.rows[0].ini_id]
     );
-
     res.status(200).json({ message: 'Document signed successfully' });
   } catch (error) {
     console.error('Sign Document Error:', error);
@@ -723,41 +485,25 @@ app.put('/api/documents/:qrCode/sign', async (req, res) => {
 });
 
 // ==========================================
-// 15. SCAN IN DOCUMENT (Processor)
+// 15. SCAN IN DOCUMENT
 // ==========================================
 app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
-  const { qrCode } = req.params;
-
   try {
     const docResult = await pool.query(`
       SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
-      FROM public.processed_document pd
-      JOIN public.initial_document i ON pd.ini_id = i.ini_id
-      JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1 AND pd.time_in IS NULL
-      ORDER BY pd.pd_id ASC 
-      LIMIT 1
-    `, [qrCode]);
+      FROM public.processed_document pd JOIN public.initial_document i ON pd.ini_id = i.ini_id JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1 AND pd.time_in IS NULL ORDER BY pd.pd_id ASC LIMIT 1
+    `, [req.params.qrCode]);
 
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No pending document found to scan in.' });
-    }
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'No pending document found.' });
 
-    const { pd_id } = docResult.rows[0];
-
-    // FIX: If it was routed ad-hoc, keep it 'In Verification'. 
-    // Otherwise, standard scans become 'Pending'.
     await pool.query(
       `UPDATE public.processed_document 
        SET time_in = timezone('Asia/Manila', now()),
-           s_id = CASE 
-                    WHEN s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1) THEN s_id
-                    ELSE (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1)
-                  END
+           s_id = CASE WHEN s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1) THEN s_id ELSE (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1) END
        WHERE pd_id = $1`,
-      [pd_id]
+      [docResult.rows[0].pd_id]
     );
-
     res.status(200).json({ message: 'Document scanned IN successfully.' });
   } catch (error) {
     console.error('Scan In Error:', error);
@@ -766,44 +512,28 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
 });
 
 // ==========================================
-// 16. SCAN OUT DOCUMENT (Processor)
+// 16. SCAN OUT DOCUMENT
 // ==========================================
 app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
-  const { qrCode } = req.params;
-
   try {
-    // FIX: Specifically look for the step that is scanned IN, but not yet scanned OUT
     const docResult = await pool.query(`
       SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
-      FROM public.processed_document pd
-      JOIN public.initial_document i ON pd.ini_id = i.ini_id
-      JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1 
-        AND pd.time_in IS NOT NULL 
-        AND pd.time_out IS NULL
-      ORDER BY pd.pd_id DESC 
-      LIMIT 1
-    `, [qrCode]);
+      FROM public.processed_document pd JOIN public.initial_document i ON pd.ini_id = i.ini_id JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1 AND pd.time_in IS NOT NULL AND pd.time_out IS NULL ORDER BY pd.pd_id DESC LIMIT 1
+    `, [req.params.qrCode]);
 
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No active document found ready for scan-out.' });
-    }
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'No active document found.' });
 
-    const { pd_id, current_status } = docResult.rows[0];
-    const statusLower = current_status.toLowerCase();
-
+    const statusLower = docResult.rows[0].current_status.toLowerCase();
+    
     if (statusLower === 'in verification' || statusLower === 'pending') {
       return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
     }
 
     await pool.query(
-      `UPDATE public.processed_document 
-       SET time_out = timezone('Asia/Manila', now()),
-           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
-       WHERE pd_id = $1`,
-      [pd_id]
+      `UPDATE public.processed_document SET time_out = timezone('Asia/Manila', now()), s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1) WHERE pd_id = $1`,
+      [docResult.rows[0].pd_id]
     );
-
     res.status(200).json({ message: 'Document scanned OUT successfully.' });
   } catch (error) {
     console.error('Scan Out Error:', error);
@@ -812,50 +542,33 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
 });
 
 // ==========================================
-// 17. FETCH PROCESSOR SCANNING TIMELINE
+// 17. FETCH PROCESSOR TIMELINE
 // ==========================================
 app.get('/api/users/:id/processing-timeline', async (req, res) => {
-  const userId = req.params.id;
-
   try {
-    // 1. Find the office assigned to this processor
-    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
-    if (userRes.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    const o_id = userRes.rows[0].o_id;
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [req.params.id]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
-    // 2. Fetch records: Removed the restrictive 'NOT ILIKE pending' filter
-    // to ensure 'In Verification' documents are always captured.
     const query = `
-      SELECT 
-        pd.pd_id,
-        i.qr_code,
-        i.title,
-        p.process_name AS form_type,
-        s.current_status AS status,
-        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in,
-        TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out
+      SELECT pd.pd_id, i.qr_code, i.title, p.process_name AS form_type, s.current_status AS status,
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in, TO_CHAR(pd.time_out, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_out
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.process_type p ON i.p_id = p.p_id
       JOIN public.status s ON pd.s_id = s.s_id
-      WHERE pd.current_office_id = $1 
-        AND pd.time_in IS NOT NULL
-      ORDER BY pd.time_in DESC;
+      WHERE pd.current_office_id = $1 AND pd.time_in IS NOT NULL ORDER BY pd.time_in DESC;
     `;
-
-    const result = await pool.query(query, [o_id]);
+    const result = await pool.query(query, [userRes.rows[0].o_id]);
+    
     res.status(200).json(result.rows);
-
   } catch (error) {
-    console.error('Timeline Fetch Error:', error);
+    console.error('Processor Timeline Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 18. FETCH ALL OFFICES (For Dropdowns)
+// 18. FETCH ALL OFFICES
 // ==========================================
 app.get('/api/offices', async (req, res) => {
   try {
@@ -871,29 +584,18 @@ app.get('/api/offices', async (req, res) => {
 // 19. AD-HOC ROUTING ENDPOINT
 // ==========================================
 app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
-  const { qrCode } = req.params;
   const { target_office_id, reason } = req.body;
-
-  if (!target_office_id) {
-    return res.status(400).json({ error: 'Target office is required' });
-  }
+  if (!target_office_id) return res.status(400).json({ error: 'Target office is required' });
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [req.params.qrCode]);
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
 
-    // FIX: We revert to INSERT so history is saved.
-    // The ROW_NUMBER() logic in Section 5 prevents this from showing as a duplicate tile.
-    // By hardcoding the s_id to 'In Verification', the app will instantly override the 'Incoming' status.
     await pool.query(
-      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-       VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
-      [iniId, target_office_id]
+      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in) VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
+      [docResult.rows[0].ini_id, target_office_id]
     );
-
+    
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });
   } catch (error) {
     console.error('Ad-Hoc Routing Error:', error);
@@ -909,12 +611,10 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 
   try {
     const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
+
     const iniId = docResult.rows[0].ini_id;
 
-    // Target the latest routing step and mark as 'Action Required'
     await pool.query(
       `UPDATE public.processed_document 
        SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
@@ -933,7 +633,6 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`API Server running on port ${PORT}`);
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => { console.log(`API Server running on port ${PORT}`); 
 });

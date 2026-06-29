@@ -20,9 +20,11 @@ class ProcessorDashboardScreen extends StatefulWidget {
 class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   bool _isLoading = true;
   List<dynamic> _documents = [];
-  int _incomingCount = 0;
+  
+  int _awaitingScanInCount = 0;
   int _pendingCount = 0;
-  int _verifiedCount = 0;
+  int _inVerificationCount = 0;
+  int _totalIncomingCount = 0;
 
   @override
   void initState() {
@@ -30,24 +32,27 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
-  // EXACT STATUS LOGIC IMPLEMENTATION
+  // EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(dynamic doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
-    // 1. Immutable
-    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed') return dbStatus;
+    // Safety check for boolean parsing
+    bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
     
-    // 2. Scanned Out
-    if (doc['time_out'] != null) return 'verified';
-    
-    // 3. Ad-hoc exception OVERRIDES Incoming
-    if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
-    
-    // 4. Standard process not yet scanned
-    if (doc['time_in'] == null) return 'incoming';
-    
-    // 5. Standard process scanned in
-    return 'pending';
+    // If backend didn't filter it out, catch it here
+    if (dbStatus == 'completed' || dbStatus == 'signed' || dbStatus == 'approved') return 'completed';
+
+    bool isAdHoc = dbStatus == 'in verification' || dbStatus.contains('ad hoc');
+
+    if (isAtCurrentOffice) {
+      if (isAdHoc) return 'pending'; 
+      if (doc['time_in'] == null) return 'awaiting scan in'; 
+      if (doc['time_out'] == null) return 'pending'; // Normal document waiting for action
+      return 'verified'; 
+    } else {
+      if (isAdHoc) return 'in verification'; 
+      return 'incoming'; // In the route, but currently at another office
+    }
   }
 
   Future<void> _fetchDashboardData() async {
@@ -55,7 +60,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     if (userId == null) return;
 
     try {
-      // NEW: Fetch exclusively from the processor's isolated queue
+      // NEW: Fetches isolated list of only documents passing through this specific processor's office
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
       
       if (response.statusCode == 200) {
@@ -64,9 +69,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
           setState(() {
             _documents = data;
             
-            _incomingCount = data.where((d) => _resolveStatus(d) == 'incoming').length;
-            _pendingCount = data.where((d) => ['pending', 'in verification'].contains(_resolveStatus(d))).length;
-            _verifiedCount = data.where((d) => _resolveStatus(d) == 'verified').length;
+            _awaitingScanInCount = data.where((d) => _resolveStatus(d) == 'awaiting scan in').length;
+            _pendingCount = data.where((d) => _resolveStatus(d) == 'pending').length;
+            _inVerificationCount = data.where((d) => _resolveStatus(d) == 'in verification').length;
+            _totalIncomingCount = data.length; // Total queue representing all incoming documents
             
             _isLoading = false;
           });
@@ -74,34 +80,25 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       } else {
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to load dashboard data.')),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load dashboard data.')));
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Connection error while fetching data.')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error while fetching data.')));
       }
     }
   }
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
-      case 'incoming':
-        return Colors.purple;
-      case 'verified':
-      case 'signed':
-        return Colors.green;
-      case 'pending':
-        return Colors.orange;
-      case 'in verification':
-        return AppTheme.primaryRed;
-      default:
-        return Colors.grey;
+      case 'awaiting scan in': return Colors.purple;
+      case 'pending': return Colors.orange;
+      case 'in verification': return Colors.blue;
+      case 'incoming': return Colors.grey;
+      case 'verified': return Colors.green;
+      default: return Colors.grey;
     }
   }
 
@@ -125,8 +122,9 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    // Prioritize documents actually sitting AT the office
     final priorityDoc = _documents.firstWhere(
-      (doc) => _resolveStatus(doc) != 'verified',
+      (doc) => _resolveStatus(doc) == 'awaiting scan in' || _resolveStatus(doc) == 'pending',
       orElse: () => null,
     );
 
@@ -152,15 +150,20 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 20),
                   
-                  Row(
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.8,
                     children: [
-                      _buildStatCard(_incomingCount.toString(), 'INCOMING', Colors.white, Colors.purple.shade100),
-                      const SizedBox(width: 12),
+                      _buildStatCard(_awaitingScanInCount.toString(), 'AWAITING SCAN IN', Colors.white, Colors.purple.shade100),
                       _buildStatCard(_pendingCount.toString(), 'PENDING', Colors.white, Colors.orange.shade100),
+                      _buildStatCard(_inVerificationCount.toString(), 'IN VERIFICATION', Colors.white, Colors.blue.shade100),
+                      _buildStatCard(_totalIncomingCount.toString(), 'TOTAL INCOMING', Colors.white, Colors.grey.shade300),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  _buildStatCard(_verifiedCount.toString(), 'VERIFIED', Colors.white, Colors.green.shade100, isFullWidth: true),
                   const SizedBox(height: 24),
                   
                   if (priorityDoc != null) ...[
@@ -170,12 +173,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                     const SizedBox(height: 24),
                   ],
 
-                  const Text('Recent Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text('Recent Queue Activity', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   if (_documents.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 20.0),
-                      child: Text('No recent activity found.', style: TextStyle(color: Colors.grey)),
+                      child: Text('No documents currently routed to your office.', style: TextStyle(color: Colors.grey)),
                     )
                   else
                     ..._documents.take(5).map((doc) {
@@ -205,20 +208,17 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     );
   }
 
-  Widget _buildStatCard(String count, String label, Color bgColor, Color borderColor, {bool isFullWidth = false}) {
-    return Expanded(
-      flex: isFullWidth ? 0 : 1,
-      child: Container(
-        width: isFullWidth ? double.infinity : null,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(count, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-          ],
-        ),
+  Widget _buildStatCard(String count, String label, Color bgColor, Color borderColor) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(count, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+        ],
       ),
     );
   }
