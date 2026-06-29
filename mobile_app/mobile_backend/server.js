@@ -540,8 +540,9 @@ app.post('/api/documents', async (req, res) => {
   }
 
   try {
+    // FIX: Pull both stop_1 (current) and stop_2 (next) to initialize the routing sequence
     const processResult = await pool.query(
-      'SELECT r.stop_1 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
+      'SELECT r.stop_1, r.stop_2 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
       [p_id]
     );
 
@@ -550,6 +551,7 @@ app.post('/api/documents', async (req, res) => {
     }
 
     const firstOfficeId = processResult.rows[0].stop_1;
+    const secondOfficeId = processResult.rows[0].stop_2; // Resolves the next destination
 
     const qrCode = `TRK-${Date.now()}-${Math.floor(Math.random() * 100)}`;
     const edcDate = new Date();
@@ -563,12 +565,12 @@ app.post('/api/documents', async (req, res) => {
     const docResult = await pool.query(insertDocQuery, [p_id, u_id, title, edcDate, qrCode]);
     const newIniId = docResult.rows[0].ini_id;
 
-    // FIX: Set time_in to NULL so it isn't automatically marked "In Verification" upon creation
+    // FIX: Include next_office_id ($3) in the processed_document INSERT statement
     const insertTrackQuery = `
-      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-      VALUES ($1, 1, $2, NULL)
+      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
+      VALUES ($1, 1, $2, $3, NULL)
     `;
-    await pool.query(insertTrackQuery, [newIniId, firstOfficeId]);
+    await pool.query(insertTrackQuery, [newIniId, firstOfficeId, secondOfficeId]);
 
     res.status(201).json({ message: 'Document created successfully', qr_code: qrCode });
 
