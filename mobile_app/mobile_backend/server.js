@@ -28,16 +28,16 @@ pool.connect((err, client, release) => {
   release();
 });
 
-
 // ==========================================
-// 1. LOGIN ENDPOINT
+// 1. LOGIN ENDPOINT (Updated to return two_fa_enabled)
 // ==========================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
+    // Added two_fa_enabled to the SELECT query
     const result = await pool.query(
-      'SELECT u_id, password, a_id FROM public."User" WHERE username = $1',
+      'SELECT u_id, password, a_id, two_fa_enabled FROM public."User" WHERE username = $1',
       [username]
     );
 
@@ -54,7 +54,8 @@ app.post('/api/login', async (req, res) => {
 
     res.status(200).json({
       u_id: user.u_id,
-      a_id: user.a_id
+      a_id: user.a_id,
+      two_fa_enabled: user.two_fa_enabled // Tell the app if we need to ask for a PIN
     });
 
   } catch (error) {
@@ -63,6 +64,61 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
+// ==========================================
+// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated to save PIN)
+// ==========================================
+app.put('/api/users/:id', async (req, res) => {
+  const userId = req.params.id;
+  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
+
+  try {
+    // COALESCE ensures we don't overwrite an existing code with NULL if it isn't passed
+    const query = `
+      UPDATE public."User"
+      SET full_name = $1, 
+          uni_email = $2, 
+          two_fa_enabled = $3,
+          two_fa_code = COALESCE($4, two_fa_code) 
+      WHERE u_id = $5
+      RETURNING u_id
+    `;
+    
+    const values = [full_name, uni_email, two_fa_enabled, two_fa_code, userId];
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json({ message: 'Profile updated successfully' });
+
+  } catch (error) {
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 1.5 NEW: VERIFY 2FA ENDPOINT
+// ==========================================
+app.post('/api/verify-2fa', async (req, res) => {
+  const { u_id, code } = req.body;
+
+  try {
+    const result = await pool.query('SELECT two_fa_code FROM public."User" WHERE u_id = $1', [u_id]);
+    
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    if (result.rows[0].two_fa_code === code) {
+      res.status(200).json({ success: true });
+    } else {
+      res.status(401).json({ error: 'Invalid PIN' });
+    }
+  } catch (error) {
+    console.error('2FA Verification Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ==========================================
 // 2. FETCH USER PROFILE ENDPOINT
@@ -233,7 +289,8 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
         COUNT(i.ini_id) AS total_docs,
         SUM(CASE WHEN s.current_status = 'pending' THEN 1 ELSE 0 END) AS pending_docs,
         SUM(CASE WHEN s.current_status = 'Completed' THEN 1 ELSE 0 END) AS completed_docs,
-        SUM(CASE WHEN s.current_status = 'Archived' THEN 1 ELSE 0 END) AS archived_docs
+        -- Changed 'Sent Back' to 'Action Required' here
+        SUM(CASE WHEN s.current_status ILIKE 'Action Required' THEN 1 ELSE 0 END) AS sent_back_docs
       FROM public.initial_document i
       LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
       LEFT JOIN public.status s ON pd.s_id = s.s_id
@@ -246,7 +303,7 @@ app.get('/api/users/:id/dashboard-stats', async (req, res) => {
       total_docs: stats.total_docs || 0,
       pending_docs: stats.pending_docs || 0,
       completed_docs: stats.completed_docs || 0,
-      archived_docs: stats.archived_docs || 0
+      sent_back_docs: stats.sent_back_docs || 0
     });
 
   } catch (error) {
@@ -791,6 +848,35 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });
   } catch (error) {
     console.error('Ad-Hoc Routing Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 20. SEND BACK DOCUMENT ENDPOINT
+// ==========================================
+app.put('/api/documents/:qrCode/send-back', async (req, res) => {
+  const { qrCode } = req.params;
+
+  try {
+    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const iniId = docResult.rows[0].ini_id;
+
+    // Target the latest routing step and mark as 'Action Required'
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
+       WHERE ini_id = $1 
+       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
+      [iniId]
+    );
+
+    res.status(200).json({ message: 'Document sent back (Action Required) successfully' });
+  } catch (error) {
+    console.error('Send Back Document Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -25,7 +25,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   
   int _totalDocs = 0;
   int _pendingDocs = 0;
-  int _archivedDocs = 0;
+  int _sentBackDocs = 0; 
   int _completedDocs = 0;
 
   Map<String, dynamic>? _latestDocument; 
@@ -72,10 +72,11 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       if (statsResponse.statusCode == 200 && mounted) {
         final statsData = json.decode(statsResponse.body);
         setState(() {
-          _totalDocs = int.tryParse(statsData['total_docs'].toString()) ?? 0;
-          _pendingDocs = int.tryParse(statsData['pending_docs'].toString()) ?? 0;
-          _archivedDocs = int.tryParse(statsData['archived_docs'].toString()) ?? 0;
-          _completedDocs = int.tryParse(statsData['completed_docs'].toString()) ?? 0;
+          // Extremely safe parsing to prevent null errors
+          _totalDocs = int.tryParse(statsData['total_docs']?.toString() ?? '') ?? 0;
+          _pendingDocs = int.tryParse(statsData['pending_docs']?.toString() ?? '') ?? 0;
+          _sentBackDocs = int.tryParse(statsData['sent_back_docs']?.toString() ?? '') ?? 0;
+          _completedDocs = int.tryParse(statsData['completed_docs']?.toString() ?? '') ?? 0;
         });
       }
 
@@ -121,7 +122,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               await _fetchDashboardData(isBackground: true);
             },
             child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(), // Important for short pages
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -166,7 +167,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                     children: [
                       _buildStatCard('TOTAL DOCS', _totalDocs.toString(), Icons.folder_open, const Color(0xFFB01A22)),
                       _buildStatCard('PENDING', _pendingDocs.toString(), Icons.pending_actions, const Color(0xFFB01A22)),
-                      _buildStatCard('ARCHIVED', _archivedDocs.toString(), Icons.archive_outlined, Colors.blueGrey),
+                      _buildStatCard('ACTION REQ', _sentBackDocs.toString(), Icons.assignment_return, Colors.orange),
                       _buildStatCard('COMPLETED', _completedDocs.toString(), Icons.check_circle_outline, Colors.green),
                     ],
                   ),

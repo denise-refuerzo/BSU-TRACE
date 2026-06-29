@@ -4,36 +4,43 @@ import '../models/user_role.dart';
 import '../services/session_manager.dart';
 
 class AppDrawer extends StatelessWidget {
-  const AppDrawer({super.key});
+  // NEW: An optional callback to check for unsaved changes before navigating away
+  final Future<bool> Function()? onBeforeNavigate;
 
-  void _navigateSafe(BuildContext context, String routeName) {
-    Navigator.pop(context);
-    if (routeName.isNotEmpty && ModalRoute.of(context)?.settings.name != routeName) {
-      if (routeName.contains('dashboard')) {
-        Navigator.pushReplacementNamed(context, routeName);
-      } else {
-        Navigator.pushNamed(context, routeName);
-      }
-    }
-  }
+  const AppDrawer({super.key, this.onBeforeNavigate});
 
   @override
   Widget build(BuildContext context) {
-    // Access current role via SessionManager
     final currentRole = SessionManager().currentRole;
     final String currentRoute = ModalRoute.of(context)?.settings.name ?? '';
 
-    // Helper for navigation items
     Widget buildNavItem({required String title, required IconData icon, required String route, bool isPlaceholder = false}) {
       bool isSelected = currentRoute == route;
       if (isPlaceholder && route.isEmpty) isSelected = false;
 
       return InkWell(
-        onTap: () {
+        onTap: () async {
+          // Close the drawer immediately so the dialog shows on the main screen
+          Navigator.pop(context);
+
           if (!isPlaceholder) {
-            _navigateSafe(context, route);
+            if (route.isNotEmpty && currentRoute != route) {
+              
+              bool shouldProceed = true;
+              // NEW: Trigger the interceptor if one was provided
+              if (onBeforeNavigate != null) {
+                shouldProceed = await onBeforeNavigate!();
+              }
+
+              if (shouldProceed && context.mounted) {
+                if (route.contains('dashboard')) {
+                  Navigator.pushReplacementNamed(context, route);
+                } else {
+                  Navigator.pushNamed(context, route);
+                }
+              }
+            }
           } else {
-            Navigator.pop(context);
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title coming soon...'), duration: const Duration(seconds: 1)));
           }
         },
@@ -63,7 +70,6 @@ class AppDrawer extends StatelessWidget {
       );
     }
 
-    // Helper for bottom items (Settings/Logout)
     Widget buildBottomItem({required String title, required IconData icon, required VoidCallback onTap}) {
       return InkWell(
         onTap: onTap,
@@ -80,7 +86,6 @@ class AppDrawer extends StatelessWidget {
       );
     }
 
-    // Role-based logic
     String roleTitle = 'USER PORTAL';
     String userInitials = 'U';
     String userName = 'John Doe';
@@ -168,11 +173,18 @@ class AppDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            buildBottomItem(title: 'Logout', icon: Icons.logout, onTap: () {
-              // Reset session state
-              SessionManager().logout();
-              // Navigate back to auth
-              Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+            buildBottomItem(title: 'Logout', icon: Icons.logout, onTap: () async {
+              Navigator.pop(context); // Close Drawer
+              
+              bool shouldProceed = true;
+              if (onBeforeNavigate != null) {
+                 shouldProceed = await onBeforeNavigate!();
+              }
+
+              if (shouldProceed && context.mounted) {
+                 SessionManager().logout();
+                 Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+              }
             }),
             const SizedBox(height: 16),
           ],

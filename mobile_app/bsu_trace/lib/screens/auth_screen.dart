@@ -30,6 +30,101 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  // Separated dashboard navigation logic so we can call it after 2FA
+  void _proceedToDashboard(UserRole role, int userId) {
+    SessionManager().login(role, userId);
+
+    switch (role) {
+      case UserRole.admin: 
+        Navigator.pushReplacementNamed(context, '/dashboard_admin'); 
+        break;
+      case UserRole.processor: 
+        Navigator.pushReplacementNamed(context, '/dashboard_processor'); 
+        break;
+      case UserRole.signee: 
+        Navigator.pushReplacementNamed(context, '/dashboard_signee'); 
+        break;
+      default: 
+        Navigator.pushReplacementNamed(context, '/dashboard_user'); 
+        break;
+    }
+  }
+
+  // Displays the 2FA input modal and verifies it with the backend
+  Future<void> _showVerify2FAModal(UserRole role, int userId) async {
+    final TextEditingController pinController = TextEditingController();
+    bool isVerifying = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Text('2-Step Verification', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Enter the 6-digit PIN you configured in your profile.'),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: pinController,
+                  keyboardType: TextInputType.number,
+                  obscureText: true,
+                  maxLength: 6,
+                  decoration: InputDecoration(
+                    hintText: 'Enter PIN',
+                    filled: true,
+                    fillColor: Colors.red.shade50,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context), 
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey))
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+                onPressed: isVerifying ? null : () async {
+                  setModalState(() => isVerifying = true);
+                  
+                  try {
+                    final res = await http.post(
+                      Uri.parse('${AppConfig.baseUrl}/verify-2fa'),
+                      headers: {'Content-Type': 'application/json'},
+                      body: json.encode({'u_id': userId, 'code': pinController.text})
+                    );
+                    
+                    if (!mounted) return;
+
+                    if (res.statusCode == 200) {
+                      Navigator.pop(context); // Close modal
+                      _proceedToDashboard(role, userId); // Proceed to dashboard
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid PIN. Access Denied.'), backgroundColor: Colors.red));
+                      setModalState(() => isVerifying = false);
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error.'), backgroundColor: Colors.red));
+                    setModalState(() => isVerifying = false);
+                  }
+                },
+                child: isVerifying 
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
+                  : const Text('Verify', style: TextStyle(color: Colors.white))
+              )
+            ]
+          );
+        }
+      )
+    );
+  }
+
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     
@@ -61,14 +156,13 @@ class _AuthScreenState extends State<AuthScreen> {
         final data = json.decode(response.body);
         final int accountId = data['a_id'];
         final int userId = data['u_id'];
+        final bool is2faEnabled = data['two_fa_enabled'] ?? false; // Grab the 2FA flag from backend
         
         final UserRole actualRole = accountId.toRole();
 
         if (actualRole != _selectedRole) {
           if (!mounted) return;
-          setState(() {
-            _isLoading = false;
-          });
+          setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).hideCurrentSnackBar();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Role mismatch. Please select your correct designated role.')),
@@ -76,24 +170,16 @@ class _AuthScreenState extends State<AuthScreen> {
           return;
         }
 
-        SessionManager().login(actualRole, userId);
-
         if (!mounted) return;
+        setState(() => _isLoading = false); // Stop loading spinner before handling next steps
 
-        switch (actualRole) {
-          case UserRole.admin: 
-            Navigator.pushReplacementNamed(context, '/dashboard_admin'); 
-            break;
-          case UserRole.processor: 
-            Navigator.pushReplacementNamed(context, '/dashboard_processor'); 
-            break;
-          case UserRole.signee: 
-            Navigator.pushReplacementNamed(context, '/dashboard_signee'); 
-            break;
-          default: 
-            Navigator.pushReplacementNamed(context, '/dashboard_user'); 
-            break;
+        // INTERCEPT NAVIGATION FOR 2FA
+        if (is2faEnabled) {
+          _showVerify2FAModal(actualRole, userId);
+        } else {
+          _proceedToDashboard(actualRole, userId);
         }
+
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -175,11 +261,8 @@ class _AuthScreenState extends State<AuthScreen> {
                               ),
                               icon: const Icon(Icons.arrow_drop_down, color: AppTheme.primaryRed),
                               items: UserRole.values.map((UserRole role) {
-                                // Intercept "USER" and display it as "ORIGINATOR"
                                 String displayRole = role.name.toUpperCase();
-                                if (displayRole == 'USER') {
-                                  displayRole = 'ORIGINATOR';
-                                }
+                                if (displayRole == 'USER') displayRole = 'ORIGINATOR';
 
                                 return DropdownMenuItem<UserRole>(
                                   value: role,

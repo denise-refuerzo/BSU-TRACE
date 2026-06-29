@@ -26,6 +26,9 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   bool _isSubmitting = false;
   bool _isLoadingProcesses = true; 
   bool _isLoadingRoute = false; 
+  
+  // NEW: State variable to handle inline error messages
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -67,7 +70,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     }
   }
 
-  // NEW METHOD: Fetches the routing stops based on process type
+  // Fetches the routing stops based on process type
   Future<void> _fetchProcessRoute(int processId) async {
     setState(() => _isLoadingRoute = true);
 
@@ -101,10 +104,14 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   }
 
   Future<void> _submitDocument() async {
+    // Clear any previous errors when attempting to submit
+    setState(() => _errorMessage = null);
+
     if (_titleController.text.trim().isEmpty || _selectedProcessId == null || !_isVerified) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields and verify the document.', style: TextStyle(color: Colors.white)), backgroundColor: Colors.red),
-      );
+      // Set inline error instead of SnackBar
+      setState(() {
+        _errorMessage = 'Please fill all fields and verify the document.';
+      });
       return;
     }
 
@@ -129,6 +136,8 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       if (response.statusCode == 201) {
         if (mounted) {
           Navigator.pop(context, true); 
+          // Keep this SnackBar because the modal has successfully closed, 
+          // meaning this will correctly show on the dashboard.
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Document successfully routed!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green),
           );
@@ -139,9 +148,10 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.red),
-        );
+        // Set inline server error instead of SnackBar
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -172,6 +182,30 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // NEW: Inline Error Display
+                  if (_errorMessage != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        border: Border.all(color: Colors.red.shade200),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _errorMessage!,
+                              style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   _buildLabel('DOCUMENT TITLE'),
                   const SizedBox(height: 8),
                   _buildTextField('e.g. Curriculum Revision Request'),
@@ -280,7 +314,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
               child: Text(process['process_name'].toString(), overflow: TextOverflow.ellipsis),
             );
           }).toList(),
-          // Connect Dropdown change to Route fetching mechanism
           onChanged: (int? val) {
             if (val != null && val != _selectedProcessId) {
               setState(() => _selectedProcessId = val);
