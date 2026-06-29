@@ -276,7 +276,7 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-// ==========================================
+/// ==========================================
 // 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS 
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
@@ -291,15 +291,21 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     const o_id = userRes.rows[0].o_id;
 
     // 2. Fetch ONLY documents that have this office in their route or currently at their office.
-    // Removes documents marked 'Completed' from the list completely per business rules.
     const query = `
       WITH RankedDocs AS (
         SELECT 
           i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
           s.current_status AS status, pd.time_in, pd.time_out,
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-          pd.current_office_id, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
-          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
+          pd.current_office_id, pd.is_adhoc, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
+          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn,
+          -- NEW: Check if this specific office has already completely processed this document
+          EXISTS (
+            SELECT 1 FROM public.processed_document past_pd 
+            WHERE past_pd.ini_id = i.ini_id 
+              AND past_pd.current_office_id = $1 
+              AND past_pd.time_out IS NOT NULL
+          ) as is_completed_by_me
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
         LEFT JOIN public.route r ON p.r_id = r.r_id
@@ -308,7 +314,8 @@ app.get('/api/processors/:id/documents', async (req, res) => {
         LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
       SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at, current_office_id,
-        CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office
+        CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office,
+        is_adhoc, is_completed_by_me
       FROM RankedDocs
       WHERE rn = 1 
         AND (

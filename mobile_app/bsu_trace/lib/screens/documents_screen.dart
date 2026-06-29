@@ -29,28 +29,43 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
 
-  // EXACT BUSINESS RULE STATUS LOGIC
+// EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(Map<String, dynamic> doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    if (dbStatus == 'completed' || dbStatus == 'signed' || dbStatus == 'approved') return 'completed';
+    
+    bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+    
+    // Safely check for ad-hoc either via the explicit boolean or text fallback
+    bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true' || 
+                   dbStatus == 'in verification' || dbStatus.contains('ad hoc');
 
-    bool isAdHoc = dbStatus == 'in verification' || dbStatus.contains('ad hoc');
+    // 1. If it's globally completed or this processor has already scanned it out
+    if (dbStatus == 'completed' || isCompletedByMe) {
+      return 'completed';
+    }
 
     // Role isolated fallback -> Uses exact rules if the endpoint provided "is_at_current_office"
     if (doc.containsKey('is_at_current_office')) {
       bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
       if (isAtCurrentOffice) {
-        if (isAdHoc) return 'pending';
-        if (doc['time_in'] == null) return 'awaiting scan in';
-        if (doc['time_out'] == null) return 'pending';
-        return 'verified';
+        // Awaiting scan-in at this office
+        if (doc['time_in'] == null) return 'awaiting scan in'; 
+        
+        // Scanned in but waiting for processing or scan-out
+        if (dbStatus == 'signed') return 'pending'; 
+        if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
+        if (doc['time_out'] == null) return 'pending'; 
+        
+        return 'verified'; 
       } else {
-        if (isAdHoc) return 'in verification';
-        return 'incoming';
+        // Currently at another office
+        if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
+        return 'incoming'; 
       }
     } 
     
-    // Global fallback for Admins who see all system documents
+    // Global fallback for Admins/Originators who see all system documents
+    if (dbStatus == 'signed') return 'pending';
     if (doc['time_out'] != null) return 'verified';
     if (isAdHoc) return 'in verification';
     if (doc['time_in'] == null) return 'incoming';

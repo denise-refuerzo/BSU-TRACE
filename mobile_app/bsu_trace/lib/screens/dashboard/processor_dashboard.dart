@@ -33,25 +33,33 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   }
 
   // EXACT BUSINESS RULE STATUS LOGIC
+// EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(dynamic doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
-    // Safety check for boolean parsing
     bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
-    
-    // If backend didn't filter it out, catch it here
-    if (dbStatus == 'completed' || dbStatus == 'signed' || dbStatus == 'approved') return 'completed';
+    bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+    bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
 
-    bool isAdHoc = dbStatus == 'in verification' || dbStatus.contains('ad hoc');
+    // 1. If it's globally completed or this processor has already scanned it out (Fixes AA3)
+    if (dbStatus == 'completed' || isCompletedByMe) {
+      return 'completed';
+    }
 
     if (isAtCurrentOffice) {
-      if (isAdHoc) return 'pending'; 
+      // 2. Awaiting scan-in at this office
       if (doc['time_in'] == null) return 'awaiting scan in'; 
-      if (doc['time_out'] == null) return 'pending'; // Normal document waiting for action
+      
+      // 3. Scanned in but waiting for processing or scan-out
+      if (dbStatus == 'signed') return 'pending'; // Fixes AA2
+      if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
+      if (doc['time_out'] == null) return 'pending'; 
+      
       return 'verified'; 
     } else {
-      if (isAdHoc) return 'in verification'; 
-      return 'incoming'; // In the route, but currently at another office
+      // 4. Currently at another office
+      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; // Fixes AA1
+      return 'incoming'; // In the route, but not here yet
     }
   }
 
@@ -60,7 +68,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     if (userId == null) return;
 
     try {
-      // NEW: Fetches isolated list of only documents passing through this specific processor's office
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
       
       if (response.statusCode == 200) {
@@ -72,7 +79,9 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
             _awaitingScanInCount = data.where((d) => _resolveStatus(d) == 'awaiting scan in').length;
             _pendingCount = data.where((d) => _resolveStatus(d) == 'pending').length;
             _inVerificationCount = data.where((d) => _resolveStatus(d) == 'in verification').length;
-            _totalIncomingCount = data.length; // Total queue representing all incoming documents
+            
+            // Total queue excluding documents this office has already completed
+            _totalIncomingCount = data.where((d) => _resolveStatus(d) != 'completed').length; 
             
             _isLoading = false;
           });
@@ -98,6 +107,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       case 'in verification': return Colors.blue;
       case 'incoming': return Colors.grey;
       case 'verified': return Colors.green;
+      case 'completed': return Colors.teal; // Added styling for Completed
       default: return Colors.grey;
     }
   }
