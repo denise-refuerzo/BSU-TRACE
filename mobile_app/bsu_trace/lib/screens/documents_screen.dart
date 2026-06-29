@@ -8,6 +8,7 @@ import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/modals/document_scanner_modal.dart';
 import '../widgets/modals/processor_document_details_modal.dart';
+import '../services/session_manager.dart';
 import '../config.dart';
 
 class DocumentsScreen extends StatefulWidget {
@@ -32,12 +33,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
     // 1. Immutable DB Statuses (Signed/Approved/Completed)
-    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed') return dbStatus;
+    if (dbStatus == 'signed' || dbStatus == 'approved' || dbStatus == 'completed' || dbStatus == 'action required') return dbStatus;
     
     // 2. Scanned Out -> Verified
     if (doc['time_out'] != null) return 'verified';
     
-    // 3. Check for Ad-Hoc FIRST (overrides Incoming because it's actively in the verification queue)
+    // 3. Check for Ad-Hoc FIRST
     if (dbStatus == 'in verification' || dbStatus.contains('ad hoc')) return 'in verification';
 
     // 4. Standard process not yet scanned -> Incoming
@@ -64,7 +65,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<void> fetchDocuments() async {
-    final String url = '${AppConfig.baseUrl}/documents';
+    final userId = SessionManager().userId;
+    if (userId == null) return;
+    
+    // NEW: Pointed to the exact same isolated endpoint as the dashboard
+    final String url = '${AppConfig.baseUrl}/processors/$userId/documents';
 
     try {
       final response = await http.get(Uri.parse(url));
@@ -274,8 +279,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         statusColor = Colors.purple.shade100;
         break;
       case 'pending':
-      case 'action required':
         statusColor = Colors.orange.shade100;
+        break;
+      case 'action required': 
+        statusColor = Colors.red.shade200;
         break;
       case 'in verification':
         statusColor = Colors.blue.shade100;

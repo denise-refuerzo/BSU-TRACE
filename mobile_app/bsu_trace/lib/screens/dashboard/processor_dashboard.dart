@@ -51,8 +51,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   }
 
   Future<void> _fetchDashboardData() async {
+    final userId = SessionManager().userId;
+    if (userId == null) return;
+
     try {
-      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
+      // NEW: Fetch exclusively from the processor's isolated queue
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
       
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
@@ -61,7 +65,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
             _documents = data;
             
             _incomingCount = data.where((d) => _resolveStatus(d) == 'incoming').length;
-            // Group both 'pending' and 'in verification' under the central active card
             _pendingCount = data.where((d) => ['pending', 'in verification'].contains(_resolveStatus(d))).length;
             _verifiedCount = data.where((d) => _resolveStatus(d) == 'verified').length;
             

@@ -276,6 +276,55 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+// ==========================================
+// 5.5 FETCH PROCESSOR-SPECIFIC DOCUMENTS 
+// ==========================================
+app.get('/api/processors/:id/documents', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // 1. Get the processor's assigned office
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
+      return res.status(404).json({ error: 'Processor office not found' });
+    }
+    const o_id = userRes.rows[0].o_id;
+
+    // 2. Fetch only documents currently routed to this office (rn = 1)
+    const query = `
+      WITH RankedDocs AS (
+        SELECT 
+          i.qr_code,
+          i.title, 
+          p.process_name AS form_type, 
+          origin_o.office_name AS origin_office, 
+          s.current_status AS status, 
+          pd.time_in,
+          pd.time_out,
+          TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
+          pd.current_office_id,
+          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
+        FROM public.initial_document i
+        LEFT JOIN public.process_type p ON i.p_id = p.p_id
+        LEFT JOIN public.route r ON p.r_id = r.r_id
+        LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
+        LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+        LEFT JOIN public.status s ON pd.s_id = s.s_id
+      )
+      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at
+      FROM RankedDocs
+      WHERE rn = 1 AND current_office_id = $1
+      ORDER BY time_in DESC NULLS LAST
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Processor Document Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ==========================================
 // 6. FETCH USER DASHBOARD STATS ENDPOINT
