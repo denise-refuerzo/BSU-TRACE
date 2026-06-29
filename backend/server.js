@@ -3,6 +3,7 @@ const cors = require('cors');
 const jwt = require('jwt-simple');
 const bcrypt = require('bcrypt');
 const pool = require('./db');
+const { sendResetCodeEmail } = require('./mailer');
 require('dotenv').config();
 
 const app = express();
@@ -703,6 +704,138 @@ app.post('/api/signee/return', async (req, res) => {
   } catch (err) {
     console.error("Return routing tracking mismatch error:", err);
     res.status(500).json({ error: "Internal processing structural breakdown." });
+  }
+});
+
+// ====================================================================
+// FORGOT PASSWORD STEP 1: IDENTIFY ACCOUNT & MASK EMAIL
+// ====================================================================
+app.post('/api/auth/forgot-password/identify', async (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username is required.' });
+
+  try {
+    const result = await pool.query(
+      'SELECT uni_email, full_name FROM public."User" WHERE username = $1',
+      [username.trim()]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Username not found in the university database.' });
+    }
+
+    const { uni_email, full_name } = result.rows[0];
+
+    // Helper to mask/obscure email (e.g., alex@gmail.com -> a***x@gmail.com)
+    const maskEmail = (email) => {
+      const [localPart, domain] = email.split('@');
+      if (localPart.length <= 2) return `${localPart[0]}***@${domain}`;
+      return `${localPart[0]}${'*'.repeat(localPart.length - 2)}${localPart[localPart.length - 1]}@${domain}`;
+    };
+
+    res.json({ 
+      maskedEmail: maskEmail(uni_email),
+      username: username.trim()
+    });
+  } catch (err) {
+    console.error("Identify user error:", err);
+    res.status(500).json({ error: 'Database tracking configuration lookup error.' });
+  }
+});
+
+// ====================================================================
+// FORGOT PASSWORD STEP 2 & 3: VERIFY EMAIL & DISPATCH 6-DIGIT CODE
+// ====================================================================
+app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
+  const { username, fullEmail } = req.body;
+  if (!username || !fullEmail) return res.status(400).json({ error: 'All fields are required.' });
+
+  try {
+    const result = await pool.query(
+      'SELECT uni_email, full_name FROM public."User" WHERE username = $1',
+      [username.trim()]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User link context missing.' });
+
+    const user = result.rows[0];
+
+    // Check if user input matches the true email in database cleanly
+    if (user.uni_email.toLowerCase().trim() !== fullEmail.toLowerCase().trim()) {
+      return res.status(400).json({ error: 'The email address provided does not match our records.' });
+    }
+
+    // Generate a secure, highly randomized 6-digit number string
+    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Set expiry timestamp to exactly 10 minutes in the future
+    const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
+
+    // Save recovery variables straight into the altered database columns
+    await pool.query(
+      `UPDATE public."User" 
+       SET reset_token = $1, reset_token_expires = $2 
+       WHERE username = $3`,
+      [verificationCode, expiryTime, username.trim()]
+    );
+
+    // Dispatch notification utilizing our Nodemailer pipeline engine
+    const emailDelivery = await sendResetCodeEmail(user.uni_email, user.full_name, verificationCode);
+
+    if (!emailDelivery.success) {
+      return res.status(500).json({ error: 'Failed to send verification code email. Try again later.' });
+    }
+
+    res.json({ message: 'Verification code dispatched successfully!' });
+  } catch (err) {
+    console.error("Email verification dispatch loop failure:", err);
+    res.status(500).json({ error: 'Internal pipeline verification structural error.' });
+  }
+});
+
+// ====================================================================
+// FORGOT PASSWORD STEP 4: VALIDATE CODE AND COMMIT NEW HASHED PASSWORD
+// ====================================================================
+app.post('/api/auth/forgot-password/reset', async (req, res) => {
+  const { username, code, newPassword } = req.body;
+  if (!username || !code || !newPassword) return res.status(400).json({ error: 'All fields are required.' });
+
+  try {
+    const result = await pool.query(
+      'SELECT reset_token, reset_token_expires FROM public."User" WHERE username = $1',
+      [username.trim()]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User mapping context context missing.' });
+
+    const user = result.rows[0];
+
+    // Verify token matching sequence validation
+    if (!user.reset_token || user.reset_token !== code.trim()) {
+      return res.status(400).json({ error: 'Invalid verification token mismatch.' });
+    }
+
+    // Evaluate code timestamp limits against systemic check limits
+    const now = new Date();
+    if (new Date(user.reset_token_expires) < now) {
+      return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
+    }
+
+    // Safe hash generation matching standard structural password profiling
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+
+    // Save final changes and completely clear recovery tokens for ultimate data integrity
+    await pool.query(
+      `UPDATE public."User" 
+       SET password = $1, reset_token = NULL, reset_token_expires = NULL 
+       WHERE username = $2`,
+      [hashedNewPassword, username.trim()]
+    );
+
+    res.json({ message: 'Your password has been successfully reset! You can now log in.' });
+  } catch (err) {
+    console.error("Finalization password allocation loop breakdown:", err);
+    res.status(500).json({ error: 'Structural commitment change sequence transaction breakdown.' });
   }
 });
 
