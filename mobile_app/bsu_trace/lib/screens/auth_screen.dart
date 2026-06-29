@@ -239,7 +239,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         const SizedBox(height: 24),
                                                  
-                        _buildAuthTextField('University Email', 'name@university.edu', Icons.badge_outlined, _emailController),
+                        _buildAuthTextField('Username', ' ', Icons.badge_outlined, _emailController),
                         const SizedBox(height: 16),
                         _buildAuthTextField('Password', ' ', Icons.lock_outline, _passwordController, isPassword: true),
                         const SizedBox(height: 16),
