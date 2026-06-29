@@ -4,6 +4,7 @@ import Login from './views/Login';
 import AccountManagement from './views/AccountManagement';
 import OriginatorDashboard from './views/OriginatorDashboard';
 import ProcessorDashboard from './views/ProcessorDashboard';
+import SigneeDashboard from './views/SigneeDashboard';
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Route path="/admin/accounts" element={<AccountManagement />} />
         <Route path="/dashboard" element={<OriginatorDashboard />} />
         <Route path="/processor/dashboard" element={<ProcessorDashboard />} />
+        <Route path="/signee/dashboard" element={<SigneeDashboard />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

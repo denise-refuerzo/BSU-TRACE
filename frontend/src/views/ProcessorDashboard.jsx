@@ -1029,7 +1029,7 @@ export default function ProcessorDashboard() {
                       <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Time-In Arrival</span>
                       <p className="font-mono text-[11px] font-bold mt-0.5 text-neutral-700">
                         {selectedDoc.time_in ? (
-                          new Date(selectedDoc.time_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                          new Date(selectedDoc.time_in).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
                         ) : (
                           <span className="text-red-600 bg-red-50 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide uppercase">Awaiting Scan</span>
                         )}
@@ -1039,7 +1039,7 @@ export default function ProcessorDashboard() {
                       <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Time-Out Release</span>
                       <p className="font-mono text-[11px] font-bold mt-0.5 text-neutral-700">
                         {selectedDoc.time_out ? (
-                          new Date(selectedDoc.time_out).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                          new Date(selectedDoc.time_out).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
                         ) : (
                           <span className="text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide uppercase">In Progress</span>
                         )}

@@ -491,10 +491,12 @@ app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
         pdoc_office.time_in,
         pdoc_office.time_out,
         pdoc_active.current_office_id,
-        pdoc_active.is_adhoc AS current_step_is_adhoc
+        pdoc_active.is_adhoc AS current_step_is_adhoc,
+        creator.full_name AS requestor_name
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       JOIN public.route r ON pt.r_id = r.r_id
+      JOIN public."User" creator ON idoc.u_id = creator.u_id
       LEFT JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id AND pdoc_office.current_office_id = $1
       LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
       LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
@@ -597,12 +599,13 @@ app.get('/api/processor/history/:officeId', async (req, res) => {
         next_o.office_name as next_office,
         pdoc.time_in,
         pdoc.time_out,
-        pdoc.is_adhoc
+        pdoc.is_adhoc,
+        creator.full_name AS requestor_name
       FROM public.office_action_history h
       JOIN public."User" u ON h.u_id = u.u_id
       JOIN public.initial_document idoc ON h.ini_id = idoc.ini_id
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
-      -- FIXED: Correlate the specific history action snapshot row via an isolated subquery matrix step
+      JOIN public."User" creator ON idoc.u_id = creator.u_id
       LEFT JOIN LATERAL (
         SELECT pd.time_in, pd.time_out, pd.is_adhoc, pd.s_id, pd.current_office_id, pd.next_office_id
         FROM public.processed_document pd
@@ -634,6 +637,72 @@ app.get('/api/offices', async (req, res) => {
   } catch (err) {
     console.error("Error fetching offices directory:", err);
     res.status(500).json({ error: "Failed to pull campus offices directory." });
+  }
+});
+
+// ====================================================================
+// SIGNEE ACTION: OFFICIAL ROUTING SIGNATURE RECORD
+// ====================================================================
+app.post('/api/signee/sign', async (req, res) => {
+  const { iniId, currentOfficeId, signeeUserId } = req.body;
+  
+  try {
+    // 1. Mutate the active workflow tracking block status to 'Signed' (s_id = 3)
+    const updateResult = await pool.query(`
+      UPDATE public.processed_document
+      SET s_id = 3 
+      WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
+      RETURNING pd_id
+    `, [parseInt(iniId), parseInt(currentOfficeId)]);
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: "No active processing track found for signature in this branch." });
+    }
+
+    // 2. Commit a validation snapshot to the historical ledger trail
+    await pool.query(`
+      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+      VALUES ($1, $2, $3, 'Approved & Signed', TIMEZONE('Asia/Manila', NOW()))
+    `, [parseInt(iniId), parseInt(signeeUserId), parseInt(currentOfficeId)]);
+
+    res.json({ message: "Document authorization seal applied successfully!" });
+  } catch (err) {
+    console.error("Signature processing error:", err);
+    res.status(500).json({ error: "Failed sequence allocation structural logic loop." });
+  }
+});
+
+// ====================================================================
+// SIGNEE ACTION: SEND BACK FOR REVISION (HALTS ALL WORKFLOW STEPS)
+// ====================================================================
+app.post('/api/signee/return', async (req, res) => {
+  const { iniId, currentOfficeId, signeeUserId, reason } = req.body;
+
+  try {
+    // 1. Mutate tracking status to 'Action Required' (s_id = 4). 
+    // This stops it completely since scan-out guards block s_id = 4.
+    const updateResult = await pool.query(`
+      UPDATE public.processed_document
+      SET s_id = 4
+      WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
+      RETURNING pd_id
+    `, [parseInt(iniId), parseInt(currentOfficeId)]);
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: "Document active link context is missing." });
+    }
+
+    // 2. Write down the audit reason in history
+    const actionMessage = `Sent Back for Revision: ${reason.substring(0, 100)}`;
+    await pool.query(`
+      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+      VALUES ($1, $2, $3, $4, TIMEZONE('Asia/Manila', NOW()))
+    `, [parseInt(iniId), parseInt(signeeUserId), parseInt(currentOfficeId), actionMessage]);
+
+    res.json({ message: "Document flagged for corrections and halted cleanly." });
+  } catch (err) {
+    console.error("Return routing tracking mismatch error:", err);
+    res.status(500).json({ error: "Internal processing structural breakdown." });
   }
 });
 

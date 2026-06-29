@@ -37,7 +37,9 @@ export default function Login() {
       if (data.role === 5) {
         navigate('/admin/accounts'); // ICT Admin Console
       } else if (data.role === 2) {
-        navigate('/processor/dashboard'); // 🚀 Redirects to Processor Hub view
+        navigate('/processor/dashboard'); 
+      } else if (data.role === 3) {
+        navigate('/signee/dashboard'); 
       } else {
         navigate('/dashboard'); // Originator / Faculty Hub view
       }
