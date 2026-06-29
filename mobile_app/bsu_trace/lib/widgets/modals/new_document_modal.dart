@@ -16,8 +16,26 @@ class NewDocumentModal extends StatefulWidget {
 class _NewDocumentModalState extends State<NewDocumentModal> {
   final TextEditingController _titleController = TextEditingController();
   
-  // Start with an empty list instead of hardcoded data
-  final List<TextEditingController> _stopControllers = [];
+  // EXACT OFFICES FROM bsu_trace.sql
+  final List<Map<String, dynamic>> _offices = [
+    {'id': 1, 'name': 'Office of the Chancellor'},
+    {'id': 2, 'name': 'HRMO'},
+    {'id': 3, 'name': 'GSO'},
+    {'id': 4, 'name': 'Registrar'},
+    {'id': 5, 'name': 'Health Services'},
+    {'id': 6, 'name': 'Guidance and Counseling'},
+    {'id': 7, 'name': 'OSAS'},
+    {'id': 8, 'name': 'Campus Library'},
+    {'id': 9, 'name': 'Cashiering'},
+    {'id': 10, 'name': 'Accounting'},
+    {'id': 11, 'name': 'CICS'},
+    {'id': 12, 'name': 'CABEIHM'},
+    {'id': 13, 'name': 'CAS'},
+    {'id': 14, 'name': 'CE / CIT'},
+  ];
+
+  // Replaced TextEditingControllers with a list of integer IDs
+  List<int?> _selectedStops = [];
   
   List<dynamic> _processTypes = [];
   int? _selectedProcessId;
@@ -27,7 +45,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   bool _isLoadingProcesses = true; 
   bool _isLoadingRoute = false; 
   
-  // NEW: State variable to handle inline error messages
   String? _errorMessage;
 
   @override
@@ -39,9 +56,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   @override
   void dispose() {
     _titleController.dispose();
-    for (var controller in _stopControllers) {
-      controller.dispose();
-    }
     super.dispose();
   }
 
@@ -60,7 +74,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       debugPrint('Error fetching process types: $e');
       setState(() {
         _isLoadingProcesses = false;
-        // Fallback for connectivity issues
         _processTypes = [
           {'p_id': 1, 'process_name': 'Reimbursement of Expenses'},
           {'p_id': 2, 'process_name': 'Purchase Request (PR)'},
@@ -70,7 +83,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     }
   }
 
-  // Fetches the routing stops based on process type
   Future<void> _fetchProcessRoute(int processId) async {
     setState(() => _isLoadingRoute = true);
 
@@ -79,18 +91,18 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final List<dynamic> fetchedStops = data['stops'];
+        final List<dynamic> fetchedStops = data['stops']; // Expected to be an array of integers (o_id)
 
         setState(() {
-          // Dispose of old controllers to avoid memory leaks
-          for (var c in _stopControllers) {
-            c.dispose();
-          }
-          _stopControllers.clear();
-
-          // Populate with actual stops from database
+          _selectedStops.clear();
           for (var stop in fetchedStops) {
-            _stopControllers.add(TextEditingController(text: stop.toString()));
+            if (stop != null) {
+              int? parsedId = int.tryParse(stop.toString());
+              // Only add if it's a valid ID matching our database list
+              if (_offices.any((o) => o['id'] == parsedId)) {
+                _selectedStops.add(parsedId);
+              }
+            }
           }
         });
       } else {
@@ -104,13 +116,21 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   }
 
   Future<void> _submitDocument() async {
-    // Clear any previous errors when attempting to submit
     setState(() => _errorMessage = null);
 
     if (_titleController.text.trim().isEmpty || _selectedProcessId == null || !_isVerified) {
-      // Set inline error instead of SnackBar
       setState(() {
         _errorMessage = 'Please fill all fields and verify the document.';
+      });
+      return;
+    }
+
+    // Filter out any nulls from the dropdowns to create a clean integer array
+    List<int> customRoute = _selectedStops.where((stop) => stop != null).cast<int>().toList();
+
+    if (customRoute.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please define at least one stop for the route.';
       });
       return;
     }
@@ -128,16 +148,14 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           'u_id': userId,
           'title': _titleController.text.trim(),
           'p_id': _selectedProcessId,
-          // Extract customized routes here if sending them to DB in the future:
-          // 'custom_routes': _stopControllers.map((c) => c.text.trim()).toList(),
+          // Transmit strictly as an array of integers (e.g. [10, 11])
+          'route': customRoute, 
         }),
       );
 
       if (response.statusCode == 201) {
         if (mounted) {
           Navigator.pop(context, true); 
-          // Keep this SnackBar because the modal has successfully closed, 
-          // meaning this will correctly show on the dashboard.
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Document successfully routed!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green),
           );
@@ -148,7 +166,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       }
     } catch (e) {
       if (mounted) {
-        // Set inline server error instead of SnackBar
         setState(() {
           _errorMessage = e.toString().replaceAll('Exception: ', '');
         });
@@ -182,7 +199,6 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // NEW: Inline Error Display
                   if (_errorMessage != null)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -233,21 +249,24 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                         ),
                         const SizedBox(height: 12),
                         
-                        if (_stopControllers.isEmpty && !_isLoadingRoute && _selectedProcessId == null)
+                        if (_selectedStops.isEmpty && !_isLoadingRoute && _selectedProcessId == null)
                           const Text('Select a process to view route', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12)),
                         
-                        // Dynamically map routing stops via the controllers list
-                        ...List.generate(_stopControllers.length, (index) => _buildRoutingStop(index)),
+                        // Dynamically map routing stops via the integers list
+                        ...List.generate(_selectedStops.length, (index) => _buildRoutingStop(index)),
                         
                         const SizedBox(height: 16),
-                        GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _stopControllers.add(TextEditingController());
-                            });
-                          },
-                          child: Row(children: const [Icon(Icons.add_circle_outline, color: AppTheme.primaryRed, size: 16), SizedBox(width: 8), Text('Add Custom Stop', style: TextStyle(color: AppTheme.primaryRed, fontSize: 13, fontWeight: FontWeight.bold))])
-                        )
+                        
+                        // Enforce max 7 stops (route table constraint)
+                        if (_selectedStops.length < 7)
+                          GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedStops.add(null);
+                              });
+                            },
+                            child: Row(children: const [Icon(Icons.add_circle_outline, color: AppTheme.primaryRed, size: 16), SizedBox(width: 8), Text('Add Custom Stop', style: TextStyle(color: AppTheme.primaryRed, fontSize: 13, fontWeight: FontWeight.bold))])
+                          )
                       ]
                     )
                   ),
@@ -337,14 +356,22 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           const SizedBox(width: 16), 
           
           Expanded(
-            child: TextField(
-              controller: _stopControllers[index],
-              style: const TextStyle(color: Colors.black87, fontSize: 13),
-              decoration: const InputDecoration(
-                hintText: 'Enter office name...',
-                hintStyle: TextStyle(color: Colors.grey),
-                border: InputBorder.none,
-                isDense: true,
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                isExpanded: true,
+                hint: const Text('Select Office', style: TextStyle(color: Colors.grey, fontSize: 13)),
+                value: _selectedStops[index],
+                items: _offices.map((office) {
+                  return DropdownMenuItem<int>(
+                    value: office['id'],
+                    child: Text(office['name'], style: const TextStyle(fontSize: 13, color: Colors.black87), overflow: TextOverflow.ellipsis),
+                  );
+                }).toList(),
+                onChanged: (int? newValue) {
+                  setState(() {
+                    _selectedStops[index] = newValue;
+                  });
+                },
               ),
             ),
           ), 
@@ -352,8 +379,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           GestureDetector(
             onTap: () {
               setState(() {
-                _stopControllers[index].dispose();
-                _stopControllers.removeAt(index);
+                _selectedStops.removeAt(index);
               });
             },
             child: const Icon(Icons.delete_outline, color: Colors.red, size: 18)
