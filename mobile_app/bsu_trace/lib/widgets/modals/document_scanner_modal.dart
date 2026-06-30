@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
 import '../../config.dart';
-import '../../services/session_manager.dart';
 
 class DocumentScannerModal extends StatefulWidget {
   const DocumentScannerModal({super.key});
@@ -17,7 +16,7 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
   final TextEditingController _trackingIdController = TextEditingController();
   bool _isLoading = false;
 
-Future<void> _processScan(String action) async {
+  Future<void> _processScan(String action) async {
     final trackingId = _trackingIdController.text.trim();
     
     if (trackingId.isEmpty) {
@@ -31,19 +30,14 @@ Future<void> _processScan(String action) async {
 
     try {
       final endpoint = action == 'in' ? 'scan-in' : 'scan-out';
-      // ADDED '/api/' TO THE PATH BELOW
-      final response = await http.put(
-        Uri.parse('${AppConfig.baseUrl}/api/documents/$trackingId/$endpoint'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'u_id': SessionManager().userId,
-          'o_id': 0 // Backend auto-detects
-        })
-      );
+      final response = await http.put(Uri.parse('${AppConfig.baseUrl}/documents/$trackingId/$endpoint'));
 
       if (response.statusCode == 200) {
         if (!mounted) return;
+        
+        // Pass 'true' back to the parent screen to trigger a refresh
         Navigator.pop(context, true); 
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Document $trackingId successfully scanned ${action.toUpperCase()}!'),
@@ -51,6 +45,7 @@ Future<void> _processScan(String action) async {
           ),
         );
       } else {
+        // Parse custom error message from the backend
         String errorMessage = 'Error: Could not process document.';
         try {
           final errorData = json.decode(response.body);
@@ -58,16 +53,20 @@ Future<void> _processScan(String action) async {
             errorMessage = errorData['error'];
           }
         } catch (_) {}
+        
         throw Exception(errorMessage);
       }
     } catch (e) {
       if (!mounted) return;
+      
+      // Clean up the error message for the user interface
       String displayError = e.toString().replaceAll('Exception: ', '');
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(displayError),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 4), // Give them time to read the reason
         ),
       );
     } finally {
