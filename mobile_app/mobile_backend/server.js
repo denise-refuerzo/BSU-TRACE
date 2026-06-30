@@ -277,9 +277,10 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS 
+// 5.5 FETCH PROCESSOR UPCOMING/INCOMING DOCUMENTS 
+// (Documents en route to this office, awaiting Scan-In)
 // ==========================================
-app.get('/api/processors/:id/documents', async (req, res) => {
+app.get('/api/processors/:id/upcoming', async (req, res) => {
   const userId = req.params.id;
 
   try {
@@ -289,76 +290,89 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // FIX: 
-    // 1. Sorts by pd_id to ensure "Awaiting Scan In" (NULL timestamps) appear at the very top.
-    // 2. Strictly tracks physical custody to prevent false-positive "Incoming" floods from custom routes.
+    // Incoming means it's assigned to this office, but time_in is NULL (not yet scanned in)
     const query = `
-      WITH RankedDocs AS (
-        SELECT 
-          i.ini_id, i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
-          s.current_status AS status, pd.time_in, pd.time_out,
-          pd.current_office_id, pd.is_adhoc, pd.pd_id,
-          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
-        FROM public.initial_document i
-        LEFT JOIN public.process_type p ON i.p_id = p.p_id
-        LEFT JOIN public.route r ON p.r_id = r.r_id
-        LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
-        LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
-        LEFT JOIN public.status s ON pd.s_id = s.s_id
-      )
-      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, current_office_id,
-        TO_CHAR(COALESCE(time_in, CURRENT_TIMESTAMP), 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-        CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office,
-        is_adhoc,
-        EXISTS (
-          SELECT 1 FROM public.processed_document past_pd 
-          WHERE past_pd.ini_id = RankedDocs.ini_id 
-            AND past_pd.current_office_id = $1 
-            AND past_pd.time_out IS NOT NULL
-        ) as is_completed_by_me
-      FROM RankedDocs
-      WHERE rn = 1 
-        AND (
-          current_office_id = $1 
-          OR EXISTS (
-            SELECT 1 FROM public.processed_document all_pd 
-            WHERE all_pd.ini_id = RankedDocs.ini_id 
-              AND all_pd.current_office_id = $1
-          )
-        )
-      ORDER BY pd_id DESC;
+      SELECT 
+        pd.pd_id, i.qr_code, i.title, p.process_name AS form_type, u.full_name AS requestor,
+        s.current_status AS status
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public."User" u ON i.u_id = u.u_id
+      WHERE pd.current_office_id = $1 
+        AND pd.time_in IS NULL 
+        AND pd.s_id = 1
+      ORDER BY pd.pd_id ASC;
     `;
 
     const result = await pool.query(query, [o_id]);
     res.status(200).json(result.rows);
 
   } catch (error) {
-    console.error('Processor Document Fetch Error:', error);
+    console.error('Processor Upcoming Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 5.6 FETCH SIGNEE PENDING APPROVALS
+// 5.6 FETCH PROCESSOR ACTIONABLE DOCUMENTS (Awaiting Scan-Out)
+// (Documents signed by signee, ready to go to next office)
+// ==========================================
+app.get('/api/processors/:id/actionable', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
+      return res.status(404).json({ error: 'Processor office not found' });
+    }
+    const o_id = userRes.rows[0].o_id;
+
+    // Awaiting scan-out means s_id = 3 (Signed) and time_out is NULL
+    const query = `
+      SELECT 
+        pd.pd_id, i.qr_code, i.title, p.process_name AS form_type, u.full_name AS requestor,
+        s.current_status AS status,
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public."User" u ON i.u_id = u.u_id
+      WHERE pd.current_office_id = $1 
+        AND pd.time_in IS NOT NULL 
+        AND pd.time_out IS NULL
+        AND pd.s_id = 3
+      ORDER BY pd.time_in DESC;
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Processor Actionable Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 5.7 FETCH SIGNEE PENDING APPROVALS
 // ==========================================
 app.get('/api/signees/:id/pending-documents', async (req, res) => {
   const userId = req.params.id;
 
   try {
-    // 1. Get the Signee's Office ID
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
       return res.status(404).json({ error: 'Signee office not found' });
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch documents currently at the Signee's office waiting to be signed
+    // Signee should ONLY see documents that are 'In Verification' (s_id = 2)
     const query = `
       SELECT 
-        i.qr_code, 
-        i.title, 
-        p.process_name AS form_type, 
-        u.full_name AS requestor,
+        i.qr_code, i.title, p.process_name AS form_type, u.full_name AS requestor,
         s.current_status AS status, 
         TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in
       FROM public.processed_document pd
@@ -369,7 +383,7 @@ app.get('/api/signees/:id/pending-documents', async (req, res) => {
       WHERE pd.current_office_id = $1
         AND pd.time_in IS NOT NULL 
         AND pd.time_out IS NULL
-        AND s.current_status IN ('pending', 'In Verification')
+        AND pd.s_id = 2
       ORDER BY pd.time_in ASC;
     `;
 
@@ -378,6 +392,37 @@ app.get('/api/signees/:id/pending-documents', async (req, res) => {
 
   } catch (error) {
     console.error('Signee Pending Documents Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 5.8 FETCH ORIGINATOR RETURNED DOCUMENTS (Action Required)
+// ==========================================
+app.get('/api/users/:id/returned-documents', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // Fetches documents marked as 'Action Required' (s_id = 4) for this user
+    const query = `
+      SELECT 
+        pd.pd_id, i.qr_code, i.title, p.process_name AS form_type,
+        s.current_status AS status, o.office_name AS returned_from,
+        (SELECT action_type FROM public.office_action_history oah WHERE oah.ini_id = pd.ini_id ORDER BY action_timestamp DESC LIMIT 1) as return_comment
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public.offices o ON pd.current_office_id = o.o_id
+      WHERE i.u_id = $1 AND pd.s_id = 4 AND pd.time_out IS NULL
+      ORDER BY pd.time_in DESC;
+    `;
+
+    const result = await pool.query(query, [userId]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Returned Documents Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -431,10 +476,10 @@ app.get('/api/users/:id/documents', async (req, res) => {
           i.ini_id,
           i.qr_code,
           i.title,
+          i.p_id,    -- FIX: Explicitly return the specific Process ID for this document
           p.process_name AS form_type,
           o.office_name AS current_location,
           s.current_status AS status,
-          -- Format directly to string in DB
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS updated_at,
           pd.time_in,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.time_in DESC) as rn
@@ -445,7 +490,7 @@ app.get('/api/users/:id/documents', async (req, res) => {
         LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
         WHERE i.u_id = $1
       )
-      SELECT ini_id, qr_code, title, form_type, current_location, status, updated_at 
+      SELECT ini_id, qr_code, title, p_id, form_type, current_location, status, updated_at 
       FROM RankedDocs 
       WHERE rn = 1 
       ORDER BY time_in DESC;
@@ -787,119 +832,138 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 });
 
 // ==========================================
-// 14. SIGN DOCUMENT ENDPOINT
-// ==========================================
-app.put('/api/documents/:qrCode/sign', async (req, res) => {
-  const { qrCode } = req.params;
-
-  try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
-
-    // Target the latest routing step and mark as Signed WITHOUT setting time_out
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
-    );
-
-    res.status(200).json({ message: 'Document signed successfully' });
-  } catch (error) {
-    console.error('Sign Document Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ==========================================
-// 15. SCAN IN DOCUMENT (Processor)
+// 14. SCAN IN DOCUMENT (Processor Action)
+// Moves status from 1 (Pending) -> 2 (In Verification)
 // ==========================================
 app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
+  const { u_id, o_id } = req.body; // Pass User ID and Office ID from the mobile app
 
   try {
+    await pool.query('BEGIN');
+
+    // 1. Get the document ID and active process row
     const docResult = await pool.query(`
-      SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
+      SELECT pd.pd_id, i.ini_id
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
-      JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1 AND pd.time_in IS NULL
-      ORDER BY pd.pd_id ASC 
-      LIMIT 1
-    `, [qrCode]);
+      WHERE i.qr_code = $1 AND pd.current_office_id = $2 AND pd.time_in IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode, o_id]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No pending document found to scan in.' });
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ error: 'No pending document found to scan in at this office.' });
     }
 
-    const { pd_id } = docResult.rows[0];
+    const { pd_id, ini_id } = docResult.rows[0];
 
-    // FIX: If it was routed ad-hoc, keep it 'In Verification'. 
-    // Otherwise, standard scans become 'Pending'.
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET time_in = timezone('Asia/Manila', now()),
-           s_id = CASE 
-                    WHEN s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1) THEN s_id
-                    ELSE (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1)
-                  END
-       WHERE pd_id = $1`,
-      [pd_id]
-    );
+    // 2. Update processed_document to 'In Verification' (s_id = 2) and set time_in
+    await pool.query(`
+       UPDATE public.processed_document 
+       SET time_in = timezone('Asia/Manila', now()), s_id = 2
+       WHERE pd_id = $1
+    `, [pd_id]);
 
-    res.status(200).json({ message: 'Document scanned IN successfully.' });
+    // 3. Log into Action History
+    await pool.query(`
+       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type) 
+       VALUES ($1, $2, $3, 'Scanned In')
+    `, [ini_id, u_id, o_id]);
+
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document scanned IN successfully. Signee can now view it.' });
   } catch (error) {
+    await pool.query('ROLLBACK');
     console.error('Scan In Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 16. SCAN OUT DOCUMENT (Processor)
+// 15. SIGN DOCUMENT (Signee Action)
+// Moves status from 2 (In Verification) -> 3 (Signed)
 // ==========================================
-app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
+app.put('/api/documents/:qrCode/sign', async (req, res) => {
   const { qrCode } = req.params;
+  const { u_id, o_id } = req.body; 
 
   try {
-    // FIX: Specifically look for the step that is scanned IN, but not yet scanned OUT
+    await pool.query('BEGIN');
+
     const docResult = await pool.query(`
-      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
+      SELECT pd.pd_id, i.ini_id 
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
-      JOIN public.status s ON pd.s_id = s.s_id
-      WHERE i.qr_code = $1 
-        AND pd.time_in IS NOT NULL 
-        AND pd.time_out IS NULL
-      ORDER BY pd.pd_id DESC 
-      LIMIT 1
-    `, [qrCode]);
+      WHERE i.qr_code = $1 AND pd.current_office_id = $2 AND pd.time_out IS NULL AND pd.s_id = 2
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode, o_id]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No active document found ready for scan-out.' });
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ error: 'Document not found or not ready for signing.' });
     }
 
-    const { pd_id, current_status } = docResult.rows[0];
-    const statusLower = current_status.toLowerCase();
+    const { pd_id, ini_id } = docResult.rows[0];
 
-    if (statusLower === 'in verification' || statusLower === 'pending') {
-      return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
-    }
+    // 1. Update processed_document to 'Signed' (s_id = 3)
+    await pool.query(`UPDATE public.processed_document SET s_id = 3 WHERE pd_id = $1`, [pd_id]);
 
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET time_out = timezone('Asia/Manila', now()),
-           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
-       WHERE pd_id = $1`,
-      [pd_id]
-    );
+    // 2. Log into Action History
+    await pool.query(`
+       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type) 
+       VALUES ($1, $2, $3, 'Approved & Signed')
+    `, [ini_id, u_id, o_id]);
 
-    res.status(200).json({ message: 'Document scanned OUT successfully.' });
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document signed successfully. Processor can now scan it out.' });
   } catch (error) {
-    console.error('Scan Out Error:', error);
+    await pool.query('ROLLBACK');
+    console.error('Sign Document Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 16. SEND BACK DOCUMENT (Signee Action)
+// Moves status to 4 (Action Required)
+// ==========================================
+app.put('/api/documents/:qrCode/send-back', async (req, res) => {
+  const { qrCode } = req.params;
+  const { u_id, o_id, comment } = req.body;
+
+  try {
+    await pool.query('BEGIN');
+
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, i.ini_id 
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      WHERE i.qr_code = $1 AND pd.current_office_id = $2 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode, o_id]);
+
+    if (docResult.rows.length === 0) {
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const { pd_id, ini_id } = docResult.rows[0];
+
+    // 1. Update to 'Action Required' (s_id = 4)
+    await pool.query(`UPDATE public.processed_document SET s_id = 4 WHERE pd_id = $1`, [pd_id]);
+
+    // 2. Log the rejection comment into history
+    await pool.query(`
+       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type) 
+       VALUES ($1, $2, $3, $4)
+    `, [ini_id, u_id, o_id, `Returned: ${comment || 'No reason provided'}`]);
+
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document sent back (Action Required) successfully' });
+  } catch (error) {
+    await pool.query('ROLLBACK');
+    console.error('Send Back Document Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -995,30 +1059,82 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
 });
 
 // ==========================================
-// 20. SEND BACK DOCUMENT ENDPOINT
+// 20. SCAN OUT DOCUMENT (Processor Action)
+// Routes to next office or completes document
 // ==========================================
-app.put('/api/documents/:qrCode/send-back', async (req, res) => {
+app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
+  const { u_id, o_id } = req.body;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    await pool.query('BEGIN');
+
+    // 1. Get the current active record
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, i.ini_id 
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      WHERE i.qr_code = $1 AND pd.current_office_id = $2 AND pd.time_out IS NULL AND pd.s_id = 3
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode, o_id]);
+
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
+      await pool.query('ROLLBACK');
+      return res.status(400).json({ error: 'Cannot scan out: Document must be signed first.' });
     }
-    const iniId = docResult.rows[0].ini_id;
 
-    // Target the latest routing step and mark as 'Action Required'
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
-    );
+    const { pd_id, ini_id } = docResult.rows[0];
 
-    res.status(200).json({ message: 'Document sent back (Action Required) successfully' });
+    // 2. Fetch the assigned route for this document
+    const routeResult = await pool.query(`
+      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
+      FROM public.route r
+      JOIN public.process_type pt ON r.r_id = pt.r_id
+      JOIN public.initial_document id ON pt.p_id = id.p_id
+      WHERE id.ini_id = $1
+    `, [ini_id]);
+
+    const row = routeResult.rows[0];
+    const stops = [row.stop_1, row.stop_2, row.stop_3, row.stop_4, row.stop_5, row.stop_6, row.stop_7].filter(s => s !== null);
+    
+    // Convert o_id to number for comparison
+    const currentOfficeNum = parseInt(o_id, 10);
+    const currentIndex = stops.indexOf(currentOfficeNum);
+
+    // 3. Close the current stop (time_out)
+    await pool.query(`
+      UPDATE public.processed_document 
+      SET time_out = timezone('Asia/Manila', now()), s_id = 6 
+      WHERE pd_id = $1
+    `, [pd_id]); // s_id = 6 is 'Verified' (or completed for this office)
+
+    // 4. Log Action History
+    await pool.query(`
+      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type) 
+      VALUES ($1, $2, $3, 'Scanned Out')
+    `, [ini_id, u_id, o_id]);
+
+    // 5. Determine next destination
+    if (currentIndex !== -1 && currentIndex < stops.length - 1) {
+      // There is a next stop! Create a NEW pending row for the next office.
+      const nextOffice = stops[currentIndex + 1];
+      const nextNextOffice = (currentIndex + 2 < stops.length) ? stops[currentIndex + 2] : null;
+
+      await pool.query(`
+        INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
+        VALUES ($1, 1, $2, $3, NULL)
+      `, [ini_id, nextOffice, nextNextOffice]); // s_id = 1 (Pending)
+
+    } else {
+      // Reached the end of the line! Update status to Completed (s_id = 5)
+      await pool.query(`UPDATE public.processed_document SET s_id = 5 WHERE pd_id = $1`, [pd_id]);
+    }
+
+    await pool.query('COMMIT');
+    res.status(200).json({ message: 'Document scanned OUT successfully.' });
   } catch (error) {
-    console.error('Send Back Document Error:', error);
+    await pool.query('ROLLBACK');
+    console.error('Scan Out Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

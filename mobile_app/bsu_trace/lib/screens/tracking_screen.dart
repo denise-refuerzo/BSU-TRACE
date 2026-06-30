@@ -25,8 +25,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
   
   List<dynamic> _recentDocuments = [];
   List<dynamic> _processTypes = [];
-  Map<String, dynamic>? _liveDocument;
+  List<dynamic> _offices = []; // Added to map integer IDs to Office Names
   
+  Map<String, dynamic>? _liveDocument;
   List<String> _plannedRoute = [];
   List<dynamic> _docHistory = [];
   
@@ -55,12 +56,19 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
   Future<void> _fetchInitialData() async {
     try {
+      // 1. Fetch Process Types
       final res = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types'));
       if (res.statusCode == 200) {
         _processTypes = json.decode(res.body);
       }
+      
+      // 2. Fetch Offices to map the integer IDs returned by the route endpoint
+      final officeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/offices'));
+      if (officeRes.statusCode == 200) {
+        _offices = json.decode(officeRes.body);
+      }
     } catch (e) {
-      debugPrint('Error fetching process types: $e');
+      debugPrint('Error fetching initial data: $e');
     }
     await _fetchTrackingData();
   }
@@ -140,7 +148,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
         final routeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types/$pId/route'));
         if (routeRes.statusCode == 200) {
           final routeData = json.decode(routeRes.body);
-          _plannedRoute = List<String>.from(routeData['stops'] ?? []);
+          List<dynamic> rawStops = routeData['stops'] ?? [];
+          
+          // Map integer IDs to Office Names using the fetched _offices list
+          _plannedRoute = rawStops.map((stopId) {
+            final office = _offices.firstWhere(
+              (o) => o['o_id'].toString() == stopId.toString(), 
+              orElse: () => null
+            );
+            return office != null ? office['office_name'] as String : 'Unknown Office';
+          }).toList();
         }
       } else {
         _plannedRoute = [];
@@ -266,6 +283,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
     String title = _liveDocument!['title'] ?? 'Unknown Document';
     String status = _liveDocument!['status'] ?? 'pending';
+    String location = _liveDocument!['current_location'] ?? 'Pending Route';
     bool isCompleted = status == 'Completed';
 
     return Container(
@@ -276,9 +294,9 @@ class _TrackingScreenState extends State<TrackingScreen> {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start, // Fixed layout overflow
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Expanded( // Flex space safely avoids overflowing badge
+              const Expanded(
                 child: Text(
                   'Live Document Tracking', 
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
@@ -294,6 +312,24 @@ class _TrackingScreenState extends State<TrackingScreen> {
           ),
           const SizedBox(height: 4),
           Text(title, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 12),
+          
+          // Explicit Location and Status indicators
+          Row(
+            children: [
+              const Icon(Icons.location_on, size: 16, color: AppTheme.primaryRed),
+              const SizedBox(width: 6),
+              Expanded(child: Text('Current Location: $location', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87))),
+            ]
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.info_outline, size: 16, color: AppTheme.primaryRed),
+              const SizedBox(width: 6),
+              Expanded(child: Text('Status: ${status.toUpperCase()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87))),
+            ]
+          ),
           const SizedBox(height: 24),
           
           if (_isLoadingLiveDoc)
@@ -315,8 +351,11 @@ class _TrackingScreenState extends State<TrackingScreen> {
 
       bool isLastInHistory = (i == _docHistory.length - 1);
       bool isDocCompleted = _liveDocument?['status'] == 'Completed';
+      
+      // Check if it has a time_out to confirm it has explicitly left the office
+      bool hasTimeOut = histNode['time_out'] != null;
 
-      bool isCompletedNode = !isLastInHistory || isDocCompleted || ['Completed', 'Verified', 'Approved', 'Signed'].contains(status);
+      bool isCompletedNode = hasTimeOut || isDocCompleted || ['Completed', 'Verified', 'Approved', 'Signed'].contains(status);
       bool isActiveNode = isLastInHistory && !isCompletedNode;
 
       nodeData.add({
@@ -332,6 +371,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
     int startIndex = _docHistory.length;
     if (_docHistory.isNotEmpty) {
       String lastVisited = _docHistory.last['office_name'] ?? '';
+      
+      // This index map works properly now because _plannedRoute was mapped from IDs back to Strings
       int foundIdx = _plannedRoute.indexOf(lastVisited);
       if (foundIdx != -1) startIndex = foundIdx + 1;
     }
