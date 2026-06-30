@@ -469,40 +469,33 @@ app.get('/api/users/:id/returned-documents', async (req, res) => {
 });
 
 // ==========================================
-// 6. FETCH USER DASHBOARD STATS ENDPOINT
+// 6. FETCH ORIGINATOR DOCUMENTS
+// Used for the User Dashboard to track all their created documents
 // ==========================================
-app.get('/api/users/:id/dashboard-stats', async (req, res) => {
+app.get('/api/originators/:id/documents', async (req, res) => {
   const userId = req.params.id;
-
   try {
     const query = `
       SELECT 
-        COUNT(i.ini_id) AS total_docs,
-        SUM(CASE WHEN s.current_status = 'pending' THEN 1 ELSE 0 END) AS pending_docs,
-        SUM(CASE WHEN s.current_status = 'Completed' THEN 1 ELSE 0 END) AS completed_docs,
-        -- Changed 'Sent Back' to 'Action Required' here
-        SUM(CASE WHEN s.current_status ILIKE 'Action Required' THEN 1 ELSE 0 END) AS sent_back_docs
+        i.ini_id, i.qr_code, i.title, p.process_name AS form_type,
+        s.current_status AS status, pd.time_in, pd.time_out,
+        o.office_name as current_location
       FROM public.initial_document i
-      LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
-      LEFT JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      LEFT JOIN public.offices o ON pd.current_office_id = o.o_id
       WHERE i.u_id = $1
+      AND pd.pd_id = (SELECT MAX(pd2.pd_id) FROM public.processed_document pd2 WHERE pd2.ini_id = i.ini_id)
+      ORDER BY i.created_at DESC;
     `;
-
     const result = await pool.query(query, [userId]);
-    const stats = result.rows[0];
-    res.status(200).json({
-      total_docs: stats.total_docs || 0,
-      pending_docs: stats.pending_docs || 0,
-      completed_docs: stats.completed_docs || 0,
-      sent_back_docs: stats.sent_back_docs || 0
-    });
-
+    res.status(200).json(result.rows);
   } catch (error) {
-    console.error('Dashboard Stats Fetch Error:', error);
+    console.error('Originator Fetch Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 7. FETCH USER-SPECIFIC DOCUMENTS ENDPOINT

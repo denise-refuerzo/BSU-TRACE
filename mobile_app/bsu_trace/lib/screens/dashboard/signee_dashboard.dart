@@ -18,15 +18,23 @@ class SigneeDashboardScreen extends StatefulWidget {
 
 class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
   bool _isLoading = true;
-  List<dynamic> _pendingDocs = [];
+  
+  // Lists and KPI counters
+  List<dynamic> _allOfficeDocs = [];
+  List<dynamic> _actionableDocs = [];
+  
+  int _awaitingSignatureCount = 0;
+  int _signedCount = 0;
+  int _returnedCount = 0;
+  int _totalOfficeCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _fetchPendingDocuments();
+    _fetchDashboardData();
   }
 
-  Future<void> _fetchPendingDocuments() async {
+  Future<void> _fetchDashboardData() async {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
@@ -35,19 +43,32 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
     }
 
     try {
+      // Reusing the comprehensive endpoint to get ALL documents at this office
       final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/signees/$userId/pending-documents'),
+        Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'),
       );
 
       if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        
         if (mounted) {
           setState(() {
-            _pendingDocs = json.decode(response.body);
+            _allOfficeDocs = data;
+            
+            // Calculate KPIs based on the status of documents currently at this office
+            _awaitingSignatureCount = data.where((d) => d['status'].toString().toLowerCase() == 'in verification').length;
+            _signedCount = data.where((d) => d['status'].toString().toLowerCase() == 'signed').length;
+            _returnedCount = data.where((d) => d['status'].toString().toLowerCase() == 'action required').length;
+            _totalOfficeCount = data.length;
+
+            // Filter the actionable list specifically for the Signee (Only 'In Verification')
+            _actionableDocs = data.where((d) => d['status'].toString().toLowerCase() == 'in verification').toList();
+            
             _isLoading = false;
           });
         }
       } else {
-        _showError('Failed to load pending documents.');
+        _showError('Failed to load dashboard data.');
       }
     } catch (e) {
       _showError('Connection error while fetching data.');
@@ -84,7 +105,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'u_id': userId,
-          'o_id': 0, // Backend will auto-detect exact office ID based on u_id
+          'o_id': 0, // Backend auto-detects exact office ID based on u_id
         }),
       );
 
@@ -94,7 +115,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
             const SnackBar(content: Text('Document signed successfully.'), backgroundColor: Colors.green)
           );
         }
-        _fetchPendingDocuments(); // Refresh the list
+        _fetchDashboardData(); // Refresh the KPIs and lists
       } else {
         final error = json.decode(response.body)['error'] ?? 'Failed to sign document.';
         _showError(error);
@@ -116,7 +137,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'u_id': userId,
-          'o_id': 0, // Backend will auto-detect exact office ID based on u_id
+          'o_id': 0, // Backend auto-detects exact office ID based on u_id
           'comment': comment,
         }),
       );
@@ -127,7 +148,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
             const SnackBar(content: Text('Document returned to originator.'), backgroundColor: Colors.orange)
           );
         }
-        _fetchPendingDocuments(); // Refresh the list
+        _fetchDashboardData(); // Refresh the KPIs and lists
       } else {
         final error = json.decode(response.body)['error'] ?? 'Failed to return document.';
         _showError(error);
@@ -234,7 +255,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
           : RefreshIndicator(
-              onRefresh: _fetchPendingDocuments,
+              onRefresh: _fetchDashboardData,
               color: AppTheme.primaryRed,
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -243,14 +264,27 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('Hello, Signee', style: TextStyle(color: Colors.black54)),
-                    const Text('Action Required', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 20),
 
-                    // Main KPI Card
-                    _buildStatCard(_pendingDocs.length.toString(), 'AWAITING YOUR SIGNATURE', Colors.blue.shade50, Colors.blue.shade700),
+                    // RESTORED KPI GRID
+                    GridView.count(
+                      crossAxisCount: 2,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 1.8,
+                      children: [
+                        _buildStatCard(_awaitingSignatureCount.toString(), 'AWAITING SIGNATURE', Colors.white, Colors.blue.shade200),
+                        _buildStatCard(_signedCount.toString(), 'SIGNED (PENDING OUT)', Colors.white, Colors.green.shade200),
+                        _buildStatCard(_returnedCount.toString(), 'RETURNED', Colors.white, Colors.orange.shade200),
+                        _buildStatCard(_totalOfficeCount.toString(), 'TOTAL AT OFFICE', Colors.white, Colors.grey.shade300),
+                      ],
+                    ),
                     const SizedBox(height: 24),
 
-                    if (_pendingDocs.isEmpty)
+                    if (_actionableDocs.isEmpty)
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40.0),
@@ -262,9 +296,9 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                         ),
                       )
                     else ...[
-                      const Text('Documents to Review', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Text('Action Required', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 12),
-                      ..._pendingDocs.map((doc) => _buildDocumentCard(doc)),
+                      ..._actionableDocs.map((doc) => _buildDocumentCard(doc)),
                     ]
                   ],
                 ),
@@ -273,20 +307,20 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
     );
   }
 
-  Widget _buildStatCard(String count, String label, Color bgColor, Color textColor) {
+  Widget _buildStatCard(String count, String label, Color bgColor, Color borderColor) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: textColor.withValues(alpha: 0.3), width: 1.5)
+        color: bgColor, 
+        borderRadius: BorderRadius.circular(12), 
+        border: Border.all(color: borderColor, width: 2)
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(count, style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: textColor)),
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor.withValues(alpha: 0.8))),
+          Text(count, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
         ],
       ),
     );

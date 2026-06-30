@@ -1,3 +1,4 @@
+// lib/screens/dashboard/user_dashboard.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -59,7 +60,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     try {
       final profileResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId'));
       final statsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/dashboard-stats'));
-      final docsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
+      final docsResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/originators/$userId/documents'));
 
       if (profileResponse.statusCode == 200 && mounted) {
         final profileData = json.decode(profileResponse.body);
@@ -72,7 +73,10 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
       if (statsResponse.statusCode == 200 && mounted) {
         final statsData = json.decode(statsResponse.body);
         setState(() {
-          // Extremely safe parsing to prevent null errors
+          // Aligning with our 1-5 Status Flow:
+          // Pending = Pending (Scan-In) OR In Verification
+          // Action Required = Action Required
+          // Completed = Completed
           _totalDocs = int.tryParse(statsData['total_docs']?.toString() ?? '') ?? 0;
           _pendingDocs = int.tryParse(statsData['pending_docs']?.toString() ?? '') ?? 0;
           _sentBackDocs = int.tryParse(statsData['sent_back_docs']?.toString() ?? '') ?? 0;
@@ -183,7 +187,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                         const SizedBox(height: 24),
                         
                         if (_latestDocument != null) ...[
-                          _buildHorizontalStepper(_latestDocument!['status'] ?? 'pending'),
+                          _buildHorizontalStepper(_latestDocument!['status'] ?? 'Pending'),
                           const SizedBox(height: 24),
                           Container(
                             padding: const EdgeInsets.all(16),
@@ -198,7 +202,7 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                                     children: [
                                       Text(_latestDocument!['title'] ?? 'Untitled', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 4),
-                                      Text('${_latestDocument!['current_location'] ?? 'Routing'} • ${_latestDocument!['status'] ?? 'pending'}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
+                                      Text('${_latestDocument!['current_location'] ?? 'Routing'} • ${_latestDocument!['status'] ?? 'Pending'}', style: const TextStyle(color: Colors.black54, fontSize: 11)),
                                     ],
                                   ),
                                 ),
@@ -263,14 +267,20 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
   }
 
   Widget _buildHorizontalStepper(String status) {
+    // Aligned with backend IDs: 1 (Pending), 2 (In Verification), 3 (Signed), 4 (Action Required), 5 (Completed)
     bool isCompleted = status == 'Completed';
-    bool step2Done = status == 'In Verification' || status == 'Signed' || status == 'Action Required' || isCompleted;
-    bool step3Done = status == 'Signed' || isCompleted;
+    bool isSigned = status == 'Signed';
+    bool isInVerification = status == 'In Verification';
+    bool isActionRequired = status == 'Action Required';
+    bool isPending = status == 'Pending';
+
+    bool step2Done = isInVerification || isSigned || isActionRequired || isCompleted;
+    bool step3Done = isSigned || isCompleted;
     bool step4Done = isCompleted;
 
-    bool step2Active = status == 'pending';
-    bool step3Active = status == 'In Verification' || status == 'Action Required';
-    bool step4Active = status == 'Signed';
+    bool step2Active = isPending;
+    bool step3Active = isInVerification || isActionRequired;
+    bool step4Active = isSigned;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
