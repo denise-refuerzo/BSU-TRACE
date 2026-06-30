@@ -20,9 +20,7 @@ class ProcessorDashboardScreen extends StatefulWidget {
 class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   bool _isLoading = true;
   List<dynamic> _documents = [];
-  int _totalCount = 0;
-  int _actionRequiredCount = 0;
-  int _completedCount = 0;
+  
   int _awaitingScanInCount = 0;
   int _pendingCount = 0;
   int _inVerificationCount = 0;
@@ -34,30 +32,35 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
-  // EXACT BUSINESS RULE STATUS LOGIC
-String _resolveStatus(dynamic doc) {
-    String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
-    bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+  /// EXACT BUSINESS RULE STATUS LOGIC
+  /// Maps server data fields to UI status strings
+  String _resolveStatus(dynamic doc) {
+    if (doc == null) return 'unknown';
 
-    // 1. Completed state
+    final String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
+    final bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
+    final bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+    final bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
+
+    // 1. Completed state overrides
     if (dbStatus == 'completed' || isCompletedByMe) {
       return 'completed';
     }
 
     if (isAtCurrentOffice) {
-      // 2. Awaiting scan-in
+      // 2. Awaiting scan-in at this office
       if (doc['time_in'] == null) return 'awaiting scan in'; 
       
-      // 3. Map statuses clearly instead of returning 'pending'
-      if (dbStatus == 'in verification') return 'in verification';
-      if (dbStatus == 'signed') return 'signed';
-      if (dbStatus == 'action required') return 'action required';
+      // 3. Scanned in but waiting for processing or scan-out
+      if (dbStatus == 'signed') return 'pending'; 
+      if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
+      if (doc['time_out'] == null) return 'pending'; 
       
-      return 'pending'; 
+      return 'verified'; 
     } else {
       // 4. Currently at another office
-      return 'incoming'; 
+      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
+      return 'incoming'; // In the route, but not here yet
     }
   }
 
@@ -65,55 +68,45 @@ String _resolveStatus(dynamic doc) {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
-    if (mounted) {
-      setState(() => _isLoading = true);
-    }
+    if (!mounted) return;
+    setState(() => _isLoading = true);
 
     try {
-      // Fetches using your original comprehensive endpoint (Endpoint 5.5 in server.js)
-      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'),
+        headers: {'Content-Type': 'application/json'},
+      );
       
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         if (mounted) {
-          // Update this section inside _fetchDashboardData
-        setState(() {
-          _documents = data;
-          _totalCount = data.length;
-
-          // Use a helper to identify completed status (matches string "completed" OR ID "5")
-          bool isCompleted(dynamic d) {
-            final status = d['status']?.toString().toLowerCase() ?? '';
-            return status == 'completed' || status == '5';
-          }
-
-          bool isPending(dynamic d) {
-            final status = d['status']?.toString().toLowerCase() ?? '';
-            return status == 'pending' || status == '1';
-          }
-
-          bool isActionRequired(dynamic d) {
-            final status = d['status']?.toString().toLowerCase() ?? '';
-            return status == 'action required' || status == '4';
-          }
-
-          _pendingCount = data.where(isPending).length;
-          _actionRequiredCount = data.where(isActionRequired).length;
-          _completedCount = data.where(isCompleted).length;
-
-  _isLoading = false;
-});
+          setState(() {
+            _documents = data;
+            
+            _awaitingScanInCount = data.where((d) => _resolveStatus(d) == 'awaiting scan in').length;
+            _pendingCount = data.where((d) => _resolveStatus(d) == 'pending').length;
+            _inVerificationCount = data.where((d) => _resolveStatus(d) == 'in verification').length;
+            
+            // Total queue excluding documents this office has already completed
+            _totalIncomingCount = data.where((d) => _resolveStatus(d) != 'completed').length; 
+            
+            _isLoading = false;
+          });
         }
       } else {
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load dashboard data.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to load dashboard data.'))
+          );
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error while fetching data.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connection error while fetching data.'))
+        );
       }
     }
   }
@@ -143,6 +136,8 @@ String _resolveStatus(dynamic doc) {
   @override
   Widget build(BuildContext context) {
     final role = SessionManager().currentRole;
+    
+    // Auth Guard
     if (role != UserRole.processor) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
@@ -178,7 +173,7 @@ String _resolveStatus(dynamic doc) {
                   const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 20),
                   
-                  // YOUR RESTORED 4 KPIs
+                  // 4 KPIs Grid
                   GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
@@ -215,7 +210,6 @@ String _resolveStatus(dynamic doc) {
                       final office = doc['origin_office'] ?? 'Unknown Office';
                       final date = _formatDateString(doc['created_at']);
                       final rawStatus = _resolveStatus(doc);
-                      
                       final formattedStatus = rawStatus.split(' ').map((s) => s.isNotEmpty ? s[0].toUpperCase() + s.substring(1) : '').join(' ');
 
                       return _buildActivityItem(title, '$office • $date', formattedStatus, _getStatusColor(rawStatus));
@@ -226,7 +220,6 @@ String _resolveStatus(dynamic doc) {
           ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
-          // AWAIT the scanner modal so the dashboard refreshes immediately when closed!
           await showDialog(
             context: context,
             builder: (context) => const DocumentScannerModal(),
@@ -272,7 +265,11 @@ String _resolveStatus(dynamic doc) {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(12), 
+        border: Border.all(color: Colors.red.shade100)
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -325,12 +322,19 @@ String _resolveStatus(dynamic doc) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: statusColor.withOpacity(0.3))),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(8), 
+        border: Border.all(color: statusColor.withOpacity(0.3))
+      ),
       child: Row(
         children: [
           Icon(Icons.description_outlined, color: statusColor.withOpacity(0.7)),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)])),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), 
+            Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)
+          ])),
           Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
         ],
       ),

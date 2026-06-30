@@ -871,7 +871,7 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 // ==========================================
 app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
-  const { u_id, o_id } = req.body; // Pass User ID and Office ID from the mobile app
+  let { u_id, o_id } = req.body; // CHANGED to 'let'
 
   try {
     await pool.query('BEGIN');
@@ -1108,7 +1108,7 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
 // ==========================================
 app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
-  const { u_id, o_id } = req.body;
+  let { u_id, o_id } = req.body; // CHANGED to 'let'
 
   try {
     await pool.query('BEGIN');
@@ -1150,7 +1150,7 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
       UPDATE public.processed_document 
       SET time_out = timezone('Asia/Manila', now()), s_id = 6 
       WHERE pd_id = $1
-    `, [pd_id]); // s_id = 6 is 'Verified' (or completed for this office)
+    `, [pd_id]);
 
     // 4. Log Action History
     await pool.query(`
@@ -1160,17 +1160,15 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
 
     // 5. Determine next destination
     if (currentIndex !== -1 && currentIndex < stops.length - 1) {
-      // There is a next stop! Create a NEW pending row for the next office.
       const nextOffice = stops[currentIndex + 1];
       const nextNextOffice = (currentIndex + 2 < stops.length) ? stops[currentIndex + 2] : null;
 
       await pool.query(`
         INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
         VALUES ($1, 1, $2, $3, NULL)
-      `, [ini_id, nextOffice, nextNextOffice]); // s_id = 1 (Pending)
+      `, [ini_id, nextOffice, nextNextOffice]);
 
     } else {
-      // Reached the end of the line! Update status to Completed (s_id = 5)
       await pool.query(`UPDATE public.processed_document SET s_id = 5 WHERE pd_id = $1`, [pd_id]);
     }
 

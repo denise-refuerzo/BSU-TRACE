@@ -20,7 +20,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
   bool _isLoading = true;
   
   // Lists and KPI counters
-  List<dynamic> _allOfficeDocs = [];
   List<dynamic> _actionableDocs = [];
   
   int _awaitingSignatureCount = 0;
@@ -53,7 +52,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
         
         if (mounted) {
           setState(() {
-            _allOfficeDocs = data;
             
             // Calculate KPIs based on the status of documents currently at this office
             _awaitingSignatureCount = data.where((d) => d['status'].toString().toLowerCase() == 'in verification').length;
