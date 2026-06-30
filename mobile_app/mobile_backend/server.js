@@ -289,28 +289,16 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // FIX: We removed the predictive 'route' checking. 
-    // It now strictly checks if the document is CURRENTLY at their office, 
-    // or if they have previously interacted with it.
+    // FIX: 
+    // 1. Sorts by pd_id to ensure "Awaiting Scan In" (NULL timestamps) appear at the very top.
+    // 2. Strictly tracks physical custody to prevent false-positive "Incoming" floods from custom routes.
     const query = `
       WITH RankedDocs AS (
         SELECT 
-          i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
+          i.ini_id, i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
           s.current_status AS status, pd.time_in, pd.time_out,
-          TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-          pd.current_office_id, pd.is_adhoc,
-          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn,
-          EXISTS (
-            SELECT 1 FROM public.processed_document past_pd 
-            WHERE past_pd.ini_id = i.ini_id 
-              AND past_pd.current_office_id = $1 
-              AND past_pd.time_out IS NOT NULL
-          ) as is_completed_by_me,
-          EXISTS (
-            SELECT 1 FROM public.processed_document all_pd 
-            WHERE all_pd.ini_id = i.ini_id 
-              AND all_pd.current_office_id = $1
-          ) as touches_my_office
+          pd.current_office_id, pd.is_adhoc, pd.pd_id,
+          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
         LEFT JOIN public.route r ON p.r_id = r.r_id
@@ -318,14 +306,27 @@ app.get('/api/processors/:id/documents', async (req, res) => {
         LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
         LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
-      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, created_at, current_office_id,
+      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, current_office_id,
+        TO_CHAR(COALESCE(time_in, CURRENT_TIMESTAMP), 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
         CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office,
-        is_adhoc, is_completed_by_me
+        is_adhoc,
+        EXISTS (
+          SELECT 1 FROM public.processed_document past_pd 
+          WHERE past_pd.ini_id = RankedDocs.ini_id 
+            AND past_pd.current_office_id = $1 
+            AND past_pd.time_out IS NOT NULL
+        ) as is_completed_by_me
       FROM RankedDocs
       WHERE rn = 1 
-        AND touches_my_office = true
-        AND status NOT ILIKE 'Completed'
-      ORDER BY time_in DESC NULLS LAST
+        AND (
+          current_office_id = $1 
+          OR EXISTS (
+            SELECT 1 FROM public.processed_document all_pd 
+            WHERE all_pd.ini_id = RankedDocs.ini_id 
+              AND all_pd.current_office_id = $1
+          )
+        )
+      ORDER BY pd_id DESC;
     `;
 
     const result = await pool.query(query, [o_id]);
