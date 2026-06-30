@@ -12,6 +12,8 @@ app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key';
 
+const failed2faAttemptsTracker = {};
+
 // 1. CONDITIONAL LOGIN ENDPOINT WITH 2FA VERIFICATION CHANNELS
 app.post('/api/login', async (req, res) => {
   const { username, password, pinCode } = req.body;
@@ -31,14 +33,48 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ error: 'Invalid username or password' });
 
+    // 🛡️ THE DEACTIVATION LOCK GATEKEEPER
+    // Instantly rejects login attempts if the account access flag has been disabled by the admin
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'Access Revoked: This user profile has been deactivated by administration.' });
+    }
+
+    // Initialize state counter if missing from cache array
+    if (!failed2faAttemptsTracker[user.u_id]) {
+      failed2faAttemptsTracker[user.u_id] = 0;
+    }
+
+    // Lockout gatekeeper: if failed entries surpass 10 consecutive loops, throw structural lockout code
+    if (user.two_fa_enabled && failed2faAttemptsTracker[user.u_id] >= 10) {
+      return res.status(423).json({ 
+        error: 'Security Lockout: 10 consecutive wrong entry combinations detected. Manual security PIN reset required.',
+        requiresPinReset: true 
+      });
+    }
+
     if (user.two_fa_enabled && !pinCode) {
       return res.json({ require2FA: true });
     }
 
     if (user.two_fa_enabled && pinCode) {
       if (user.two_fa_code !== pinCode) {
-        return res.status(401).json({ error: 'Invalid security PIN combination code' });
+        failed2faAttemptsTracker[user.u_id] += 1; // Increment metric log
+        
+        const remainingAttempts = 10 - failed2faAttemptsTracker[user.u_id];
+        if (remainingAttempts <= 0) {
+          return res.status(423).json({ 
+            error: 'Security Lockout: 10 consecutive wrong entry combinations detected. Manual security PIN reset required.',
+            requiresPinReset: true 
+          });
+        }
+        
+        return res.status(401).json({ 
+          error: `Invalid security PIN code combination. Warning: ${remainingAttempts} attempts remaining before system lockout.` 
+        });
       }
+      
+      // Clear memory tracking if evaluation succeeds
+      failed2faAttemptsTracker[user.u_id] = 0;
     }
 
     const token = jwt.encode({ u_id: user.u_id, username: user.username, a_id: user.a_id }, JWT_SECRET);
@@ -52,6 +88,73 @@ app.post('/api/login', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server logging calculation error' });
+  }
+});
+
+// ====================================================================
+// NEW ICT ADMIN ENDPOINT: FETCH ALL USERS WITH RELATIONALLY JOINED NAMES
+// ====================================================================
+app.get('/api/accounts', async (req, res) => {
+  try {
+    // We select critical profile fields, joining tables to map role strings and office names
+    const query = `
+                  SELECT u.u_id, u.username, u.full_name, u.uni_email, u.faculty_id, u.two_fa_enabled, u.a_id, u.d_id, u.o_id, u.is_active,
+                        a.account_type as role_name,
+                        d.department_name,
+                        off.office_name
+                  FROM public."User" u
+                  JOIN public.account a ON u.a_id = a.a_id
+                  JOIN public.department d ON u.d_id = d.d_id
+                  LEFT JOIN public.offices off ON u.o_id = off.o_id
+                  ORDER BY u.u_id DESC;
+                `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching institutional accounts database ledger:", err);
+    res.status(500).json({ error: 'Failed to extract institutional accounts mapping directory loop.' });
+  }
+});
+
+// ====================================================================
+// NEW ICT ADMIN ENDPOINT: SECURE ACCOUNT RECONFIGURATION OVERRIDE
+// ====================================================================
+app.put('/api/accounts/:userId', async (req, res) => {
+  const { userId } = req.params;
+  // 🛡️ SECURITY SHIELD: twoFaEnabled and twoFaCode are completely stripped out of parameters map
+  const { username, fullName, email, accountType, departmentId, officeId, isActive } = req.body;  
+  try {
+    // Validate if the modified username is taken by another account primary key identifier
+    const duplicateCheck = await pool.query(
+      `SELECT * FROM public."User" WHERE username = $1 AND u_id != $2`,
+      [username, parseInt(userId)]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'Rejection: This username identifier is already registered to another user account.' });
+    }
+
+    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3) && officeId 
+      ? parseInt(officeId) 
+      : null;
+
+    const assignedDepartmentId = departmentId ? parseInt(departmentId) : 1;
+
+    // 🛡️ IMMUTABLE QUERY: Omit setting the two_fa columns entirely to neutralize Admin override tampering
+    const query = `
+      UPDATE public."User"
+      SET username = $1, full_name = $2, uni_email = $3, a_id = $4, d_id = $5, o_id = $6, is_active = $7
+      WHERE u_id = $8
+    `;
+    
+    await pool.query(query, [
+      username, fullName, email, parseInt(accountType), assignedDepartmentId, assignedOfficeId, isActive, parseInt(userId)
+    ]);
+
+    res.json({ message: 'Personnel access profile parameters re-indexed and synchronized cleanly!' });
+  } catch (err) {
+    console.error("Account update failure:", err);
+    res.status(500).json({ error: 'Failed execution update sequence constraint loop.' });
   }
 });
 
@@ -185,7 +288,6 @@ app.post('/api/accounts', async (req, res) => {
       ? parseInt(officeId) 
       : null;
 
-    // 🛠️ FIXED: Fallback to 1 (CICS or a generic baseline row) to satisfy the NOT NULL constraint if blank
     const assignedDepartmentId = departmentId ? parseInt(departmentId) : 1;
 
     await pool.query(
@@ -578,9 +680,7 @@ app.post('/api/processor/documents/ad-hoc', async (req, res) => {
   }
 });
 
-// ====================================================================
-// FIXED: FETCH HISTORY DATA LEDGER FOR ALL PROCESSORS IN THE SPECIFIC OFFICE
-// ====================================================================
+// FETCH HISTORY DATA LEDGER FOR ALL PROCESSORS IN THE SPECIFIC OFFICE
 app.get('/api/processor/history/:officeId', async (req, res) => {
   const { officeId } = req.params;
   try {
@@ -641,14 +741,11 @@ app.get('/api/offices', async (req, res) => {
   }
 });
 
-// ====================================================================
 // SIGNEE ACTION: OFFICIAL ROUTING SIGNATURE RECORD
-// ====================================================================
 app.post('/api/signee/sign', async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId } = req.body;
   
   try {
-    // 1. Mutate the active workflow tracking block status to 'Signed' (s_id = 3)
     const updateResult = await pool.query(`
       UPDATE public.processed_document
       SET s_id = 3 
@@ -660,7 +757,6 @@ app.post('/api/signee/sign', async (req, res) => {
       return res.status(404).json({ error: "No active processing track found for signature in this branch." });
     }
 
-    // 2. Commit a validation snapshot to the historical ledger trail
     await pool.query(`
       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
       VALUES ($1, $2, $3, 'Approved & Signed', TIMEZONE('Asia/Manila', NOW()))
@@ -673,15 +769,11 @@ app.post('/api/signee/sign', async (req, res) => {
   }
 });
 
-// ====================================================================
 // SIGNEE ACTION: SEND BACK FOR REVISION (HALTS ALL WORKFLOW STEPS)
-// ====================================================================
 app.post('/api/signee/return', async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId, reason } = req.body;
 
   try {
-    // 1. Mutate tracking status to 'Action Required' (s_id = 4). 
-    // This stops it completely since scan-out guards block s_id = 4.
     const updateResult = await pool.query(`
       UPDATE public.processed_document
       SET s_id = 4
@@ -693,7 +785,6 @@ app.post('/api/signee/return', async (req, res) => {
       return res.status(404).json({ error: "Document active link context is missing." });
     }
 
-    // 2. Write down the audit reason in history
     const actionMessage = `Sent Back for Revision: ${reason.substring(0, 100)}`;
     await pool.query(`
       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
@@ -707,9 +798,7 @@ app.post('/api/signee/return', async (req, res) => {
   }
 });
 
-// ====================================================================
 // FORGOT PASSWORD STEP 1: IDENTIFY ACCOUNT & MASK EMAIL
-// ====================================================================
 app.post('/api/auth/forgot-password/identify', async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username is required.' });
@@ -726,7 +815,6 @@ app.post('/api/auth/forgot-password/identify', async (req, res) => {
 
     const { uni_email, full_name } = result.rows[0];
 
-    // Helper to mask/obscure email (e.g., alex@gmail.com -> a***x@gmail.com)
     const maskEmail = (email) => {
       const [localPart, domain] = email.split('@');
       if (localPart.length <= 2) return `${localPart[0]}***@${domain}`;
@@ -743,9 +831,7 @@ app.post('/api/auth/forgot-password/identify', async (req, res) => {
   }
 });
 
-// ====================================================================
 // FORGOT PASSWORD STEP 2 & 3: VERIFY EMAIL & DISPATCH 6-DIGIT CODE
-// ====================================================================
 app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
   const { username, fullEmail } = req.body;
   if (!username || !fullEmail) return res.status(400).json({ error: 'All fields are required.' });
@@ -760,18 +846,13 @@ app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
 
     const user = result.rows[0];
 
-    // Check if user input matches the true email in database cleanly
     if (user.uni_email.toLowerCase().trim() !== fullEmail.toLowerCase().trim()) {
       return res.status(400).json({ error: 'The email address provided does not match our records.' });
     }
 
-    // Generate a secure, highly randomized 6-digit number string
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Set expiry timestamp to exactly 10 minutes in the future
     const expiryTime = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Save recovery variables straight into the altered database columns
     await pool.query(
       `UPDATE public."User" 
        SET reset_token = $1, reset_token_expires = $2 
@@ -779,7 +860,6 @@ app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
       [verificationCode, expiryTime, username.trim()]
     );
 
-    // Dispatch notification utilizing our Nodemailer pipeline engine
     const emailDelivery = await sendResetCodeEmail(user.uni_email, user.full_name, verificationCode);
 
     if (!emailDelivery.success) {
@@ -793,9 +873,7 @@ app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
   }
 });
 
-// ====================================================================
 // FORGOT PASSWORD STEP 4: VALIDATE CODE AND COMMIT NEW HASHED PASSWORD
-// ====================================================================
 app.post('/api/auth/forgot-password/reset', async (req, res) => {
   const { username, code, newPassword } = req.body;
   if (!username || !code || !newPassword) return res.status(400).json({ error: 'All fields are required.' });
@@ -810,21 +888,17 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
 
     const user = result.rows[0];
 
-    // Verify token matching sequence validation
     if (!user.reset_token || user.reset_token !== code.trim()) {
       return res.status(400).json({ error: 'Invalid verification token mismatch.' });
     }
 
-    // Evaluate code timestamp limits against systemic check limits
     const now = new Date();
     if (new Date(user.reset_token_expires) < now) {
       return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
     }
 
-    // Safe hash generation matching standard structural password profiling
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
 
-    // Save final changes and completely clear recovery tokens for ultimate data integrity
     await pool.query(
       `UPDATE public."User" 
        SET password = $1, reset_token = NULL, reset_token_expires = NULL 
@@ -836,6 +910,31 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
   } catch (err) {
     console.error("Finalization password allocation loop breakdown:", err);
     res.status(500).json({ error: 'Structural commitment change sequence transaction breakdown.' });
+  }
+});
+
+app.post('/api/auth/forgot-pin/reset', async (req, res) => {
+  const { username } = req.body;
+  try {
+    const result = await pool.query(
+      'SELECT u_id, uni_email, full_name FROM public."User" WHERE username = $1',
+      [username.trim()]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Account username reference entry missing.' });
+
+    const user = result.rows[0];
+    const newRandomPin = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Directly overwrite code entries in the database and unlock any active memory lockouts
+    await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [newRandomPin, user.u_id]);
+    failed2faAttemptsTracker[user.u_id] = 0; 
+
+    // Send the freshly generated PIN code directly to the user's university email box
+    await sendResetCodeEmail(user.uni_email, user.full_name, `YOUR SECURITY DASHBOARD TWO-FACTOR AUTHENTICATION PIN HAS BEEN RESET TO: ${newRandomPin}`);
+
+    res.json({ message: 'A fresh verification PIN has been dispatched to your institutional inbox successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed autonomous self-service recovery tracking code loop.' });
   }
 });
 
