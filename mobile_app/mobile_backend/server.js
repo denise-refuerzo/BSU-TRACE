@@ -1,4 +1,6 @@
 // require('dotenv').config();
+const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -18,6 +20,18 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false 
   }
+});
+
+// In-memory store for OTPs (For production, consider saving these to Postgres or Redis)
+const resetOtpStore = {}; 
+
+// Configure the email transporter using environment variables
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
 });
 
 pool.connect((err, client, release) => {
@@ -1021,6 +1035,158 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
     console.error('Send Back Document Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// ==========================================
+// 21. FORGOT PASSWORD ROUTES
+// ==========================================
+
+// Request Password Reset Code
+app.post('/api/auth/forgot-password', async (req, res) => {
+    const { uni_email } = req.body;
+
+    try {
+        const userCheck = await pool.query('SELECT u_id FROM "User" WHERE uni_email = $1', [uni_email]);
+        
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ message: "No account found with that email." });
+        }
+
+        const code = crypto.randomInt(100000, 999999).toString();
+        
+        resetOtpStore[uni_email] = {
+            code: code,
+            expiresAt: Date.now() + 15 * 60 * 1000 // 15 minutes
+        };
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: uni_email,
+            subject: 'BSU-Trace Password Reset Code',
+            text: `Your password reset code is: ${code}\n\nThis code will expire in 15 minutes. If you did not request this, please ignore this email.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "Verification code sent to your email." });
+
+    } catch (error) {
+        console.error("Forgot Password Route Error:", error);
+        res.status(500).json({ message: "Internal server error while sending email." });
+    }
+});
+
+// Verify Code & Update Password
+app.post('/api/auth/reset-password', async (req, res) => {
+    const { uni_email, code, new_password } = req.body;
+
+    try {
+        const storedData = resetOtpStore[uni_email];
+
+        if (!storedData) {
+            return res.status(400).json({ message: "No reset request found for this email." });
+        }
+        if (Date.now() > storedData.expiresAt) {
+            delete resetOtpStore[uni_email];
+            return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
+        }
+        if (storedData.code !== code) {
+            return res.status(400).json({ message: "Invalid reset code." });
+        }
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(new_password, salt);
+
+        await pool.query('UPDATE "User" SET password = $1 WHERE uni_email = $2', [hashedPassword, uni_email]);
+
+        delete resetOtpStore[uni_email];
+
+        res.status(200).json({ message: "Password updated successfully!" });
+
+    } catch (error) {
+        console.error("Reset Password Route Error:", error);
+        res.status(500).json({ message: "Internal server error while resetting password." });
+    }
+});
+
+
+// ==========================================
+// 22. 2FA RECOVERY ROUTES
+// ==========================================
+
+// Request 2FA Recovery Code
+app.post('/api/auth/forgot-2fa', async (req, res) => {
+    const { uni_email } = req.body;
+
+    try {
+        const userCheck = await pool.query(
+            'SELECT u_id, two_fa_enabled FROM "User" WHERE uni_email = $1', 
+            [uni_email]
+        );
+        
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ message: "No account found with that email." });
+        }
+        
+        if (!userCheck.rows[0].two_fa_enabled) {
+            return res.status(400).json({ message: "2FA is not enabled on this account." });
+        }
+
+        const code = crypto.randomInt(100000, 999999).toString();
+        
+        // Prefix with '2fa_' so it doesn't conflict with password reset codes
+        resetOtpStore[`2fa_${uni_email}`] = {
+            code: code,
+            expiresAt: Date.now() + 15 * 60 * 1000 
+        };
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: uni_email,
+            subject: 'BSU-Trace 2FA Recovery Code',
+            text: `Your 2FA recovery code is: ${code}\n\nEnter this code in the app to disable 2FA and regain access to your account. This code expires in 15 minutes.`
+        };
+
+        await transporter.sendMail(mailOptions);
+        res.status(200).json({ message: "2FA Recovery code sent to your email." });
+
+    } catch (error) {
+        console.error("Forgot 2FA Route Error:", error);
+        res.status(500).json({ message: "Internal server error while sending email." });
+    }
+});
+
+// Verify Code & Disable 2FA
+app.post('/api/auth/reset-2fa', async (req, res) => {
+    const { uni_email, code } = req.body;
+
+    try {
+        const storeKey = `2fa_${uni_email}`;
+        const storedData = resetOtpStore[storeKey];
+
+        if (!storedData) {
+            return res.status(400).json({ message: "No 2FA recovery request found." });
+        }
+        if (Date.now() > storedData.expiresAt) {
+            delete resetOtpStore[storeKey]; 
+            return res.status(400).json({ message: "Recovery code has expired." });
+        }
+        if (storedData.code !== code) {
+            return res.status(400).json({ message: "Invalid recovery code." });
+        }
+
+        await pool.query(
+            'UPDATE "User" SET two_fa_enabled = false, two_fa_code = NULL WHERE uni_email = $1', 
+            [uni_email]
+        );
+
+        delete resetOtpStore[storeKey];
+
+        res.status(200).json({ message: "2FA has been disabled. You can now log in normally." });
+
+    } catch (error) {
+        console.error("Reset 2FA Route Error:", error);
+        res.status(500).json({ message: "Internal server error while resetting 2FA." });
+    }
 });
 
 // ==========================================

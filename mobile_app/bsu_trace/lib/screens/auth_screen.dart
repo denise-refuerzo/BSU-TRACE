@@ -6,6 +6,8 @@ import '../theme/app_theme.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config.dart';
+import 'package:bsu_trace/screens/forgot_password_screen.dart';
+import 'forgot_2fa_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -84,8 +86,22 @@ class _AuthScreenState extends State<AuthScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context), 
-                child: const Text('Cancel', style: TextStyle(color: Colors.grey))
+                onPressed: () {
+                  // Close the 2FA modal first
+                  Navigator.pop(context); 
+
+                  // Navigate to the recovery screen
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => Forgot2FAScreen(
+                        // Pass the email controller's text from your login form so they don't have to type it again
+                        initialEmail: _emailController.text, 
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('Lost access to 2FA?'),
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
@@ -229,11 +245,13 @@ class _AuthScreenState extends State<AuthScreen> {
                         Align(
                           alignment: Alignment.centerRight,
                           child: TextButton(
-                            onPressed: () { /* Navigate to forgot password screen */ },
-                            child: const Text(
-                              'Forgot Password?', 
-                              style: TextStyle(color: AppTheme.primaryRed, fontSize: 12),
-                            ),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const ForgotPasswordScreen()),
+                              );
+                            },
+                            child: const Text('Forgot Password?'),
                           ),
                         ),
                         const SizedBox(height: 24),
