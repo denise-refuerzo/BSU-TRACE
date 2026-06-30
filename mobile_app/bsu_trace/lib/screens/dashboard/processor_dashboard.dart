@@ -20,7 +20,9 @@ class ProcessorDashboardScreen extends StatefulWidget {
 class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   bool _isLoading = true;
   List<dynamic> _documents = [];
-  
+  int _totalCount = 0;
+  int _actionRequiredCount = 0;
+  int _completedCount = 0;
   int _awaitingScanInCount = 0;
   int _pendingCount = 0;
   int _inVerificationCount = 0;
@@ -33,32 +35,29 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   }
 
   // EXACT BUSINESS RULE STATUS LOGIC
-  String _resolveStatus(dynamic doc) {
+String _resolveStatus(dynamic doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    
     bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
     bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
-    bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
 
-    // 1. If it's globally completed or this processor has already scanned it out
+    // 1. Completed state
     if (dbStatus == 'completed' || isCompletedByMe) {
       return 'completed';
     }
 
     if (isAtCurrentOffice) {
-      // 2. Awaiting scan-in at this office
+      // 2. Awaiting scan-in
       if (doc['time_in'] == null) return 'awaiting scan in'; 
       
-      // 3. Scanned in but waiting for processing or scan-out
-      if (dbStatus == 'signed') return 'pending'; 
-      if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
-      if (doc['time_out'] == null) return 'pending'; 
+      // 3. Map statuses clearly instead of returning 'pending'
+      if (dbStatus == 'in verification') return 'in verification';
+      if (dbStatus == 'signed') return 'signed';
+      if (dbStatus == 'action required') return 'action required';
       
-      return 'verified'; 
+      return 'pending'; 
     } else {
       // 4. Currently at another office
-      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
-      return 'incoming'; // In the route, but not here yet
+      return 'incoming'; 
     }
   }
 
@@ -77,18 +76,33 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         if (mounted) {
-          setState(() {
-            _documents = data;
-            
-            _awaitingScanInCount = data.where((d) => _resolveStatus(d) == 'awaiting scan in').length;
-            _pendingCount = data.where((d) => _resolveStatus(d) == 'pending').length;
-            _inVerificationCount = data.where((d) => _resolveStatus(d) == 'in verification').length;
-            
-            // Total queue excluding documents this office has already completed
-            _totalIncomingCount = data.where((d) => _resolveStatus(d) != 'completed').length; 
-            
-            _isLoading = false;
-          });
+          // Update this section inside _fetchDashboardData
+        setState(() {
+          _documents = data;
+          _totalCount = data.length;
+
+          // Use a helper to identify completed status (matches string "completed" OR ID "5")
+          bool isCompleted(dynamic d) {
+            final status = d['status']?.toString().toLowerCase() ?? '';
+            return status == 'completed' || status == '5';
+          }
+
+          bool isPending(dynamic d) {
+            final status = d['status']?.toString().toLowerCase() ?? '';
+            return status == 'pending' || status == '1';
+          }
+
+          bool isActionRequired(dynamic d) {
+            final status = d['status']?.toString().toLowerCase() ?? '';
+            return status == 'action required' || status == '4';
+          }
+
+          _pendingCount = data.where(isPending).length;
+          _actionRequiredCount = data.where(isActionRequired).length;
+          _completedCount = data.where(isCompleted).length;
+
+  _isLoading = false;
+});
         }
       } else {
         if (mounted) {
