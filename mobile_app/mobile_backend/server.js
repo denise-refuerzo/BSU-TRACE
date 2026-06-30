@@ -533,7 +533,6 @@ app.get('/api/process-types/:id/route', async (req, res) => {
 // 10. CREATE NEW DOCUMENT ENDPOINT
 // ==========================================
 app.post('/api/documents', async (req, res) => {
-  // FIX: Extract 'route' or 'stops' array passed from the app's routing setup modal
   const { u_id, title, p_id, route, stops } = req.body;
 
   if (!u_id || !title || !p_id) {

@@ -34,9 +34,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     {'id': 14, 'name': 'CE / CIT'},
   ];
 
-  // Replaced TextEditingControllers with a list of integer IDs
   List<int?> _selectedStops = [];
-  
   List<dynamic> _processTypes = [];
   int? _selectedProcessId;
   
@@ -44,6 +42,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
   bool _isSubmitting = false;
   bool _isLoadingProcesses = true; 
   bool _isLoadingRoute = false; 
+  bool _isRouteCustomized = false; // Tracks if the user altered the default setup
   
   String? _errorMessage;
 
@@ -91,15 +90,26 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final List<dynamic> fetchedStops = data['stops']; // Expected to be an array of integers (o_id)
+        final List<dynamic> fetchedStops = data['stops']; 
 
         setState(() {
           _selectedStops.clear();
+          _isRouteCustomized = false; // Reset customization flag on new process selection
+
           for (var stop in fetchedStops) {
             if (stop != null) {
               int? parsedId = int.tryParse(stop.toString());
-              // Only add if it's a valid ID matching our database list
-              if (_offices.any((o) => o['id'] == parsedId)) {
+              
+              // If backend sends text (e.g., "CICS"), find the matching ID
+              if (parsedId == null) {
+                final matchedOffice = _offices.firstWhere(
+                  (o) => o['name'].toString().toLowerCase() == stop.toString().toLowerCase(),
+                  orElse: () => <String, dynamic>{'id': null},
+                );
+                parsedId = matchedOffice['id'] as int?;
+              }
+
+              if (parsedId != null && _offices.any((o) => o['id'] == parsedId)) {
                 _selectedStops.add(parsedId);
               }
             }
@@ -128,7 +138,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
     // Filter out any nulls from the dropdowns to create a clean integer array
     List<int> customRoute = _selectedStops.where((stop) => stop != null).cast<int>().toList();
 
-    if (customRoute.isEmpty) {
+    if (_isRouteCustomized && customRoute.isEmpty) {
       setState(() {
         _errorMessage = 'Please define at least one stop for the route.';
       });
@@ -148,8 +158,8 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
           'u_id': userId,
           'title': _titleController.text.trim(),
           'p_id': _selectedProcessId,
-          // Transmit strictly as an array of integers (e.g. [10, 11])
-          'route': customRoute, 
+          // Only send the array if it was modified, otherwise send null for backend defaults
+          'route': _isRouteCustomized ? customRoute : null, 
         }),
       );
 
@@ -252,17 +262,17 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                         if (_selectedStops.isEmpty && !_isLoadingRoute && _selectedProcessId == null)
                           const Text('Select a process to view route', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12)),
                         
-                        // Dynamically map routing stops via the integers list
+                        // Dynamically map routing stops
                         ...List.generate(_selectedStops.length, (index) => _buildRoutingStop(index)),
                         
                         const SizedBox(height: 16),
                         
-                        // Enforce max 7 stops (route table constraint)
                         if (_selectedStops.length < 7)
                           GestureDetector(
                             onTap: () {
                               setState(() {
                                 _selectedStops.add(null);
+                                _isRouteCustomized = true; // Flag as customized
                               });
                             },
                             child: Row(children: const [Icon(Icons.add_circle_outline, color: AppTheme.primaryRed, size: 16), SizedBox(width: 8), Text('Add Custom Stop', style: TextStyle(color: AppTheme.primaryRed, fontSize: 13, fontWeight: FontWeight.bold))])
@@ -370,6 +380,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
                 onChanged: (int? newValue) {
                   setState(() {
                     _selectedStops[index] = newValue;
+                    _isRouteCustomized = true; // Flag as customized
                   });
                 },
               ),
@@ -380,6 +391,7 @@ class _NewDocumentModalState extends State<NewDocumentModal> {
             onTap: () {
               setState(() {
                 _selectedStops.removeAt(index);
+                _isRouteCustomized = true; // Flag as customized
               });
             },
             child: const Icon(Icons.delete_outline, color: Colors.red, size: 18)
