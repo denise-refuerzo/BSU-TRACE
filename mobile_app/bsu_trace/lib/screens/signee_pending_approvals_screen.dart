@@ -8,6 +8,7 @@ import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/modals/signee_document_details_modal.dart';
 import '../config.dart';
+import '../services/session_manager.dart';
 
 class SigneePendingApprovalsScreen extends StatefulWidget {
   const SigneePendingApprovalsScreen({super.key});
@@ -24,6 +25,7 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
 
   String _searchQuery = '';
   String _selectedStatus = 'All Statuses';
+  String? _errorMessage; // Added to catch and display exact errors on the screen
 
   int _currentPage = 1;
   final int _itemsPerPage = 5;
@@ -46,15 +48,24 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
 
   Future<void> fetchDocuments() async {
     try {
-      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
+      final userId = SessionManager().userId;
+      if (userId == null) {
+        if (mounted) setState(() => _errorMessage = "No logged in user found.");
+        return; 
+      }
+
+      // Added a strict 10-second timeout to prevent infinite hanging
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/signees/$userId/pending-documents')
+      ).timeout(const Duration(seconds: 10));
       
       if (response.statusCode == 200) {
         if (mounted) {
           List<dynamic> fetchedDocs = json.decode(response.body);
 
           fetchedDocs.sort((a, b) {
-            String dateAStr = a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00+08:00';
-            String dateBStr = b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+            String dateAStr = a['time_in'] ?? a['created_at'] ?? '1970-01-01T00:00:00+08:00';
+            String dateBStr = b['time_in'] ?? b['created_at'] ?? '1970-01-01T00:00:00+08:00';
 
             dateAStr = dateAStr.replaceAll(' ', 'T');
             if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
@@ -64,19 +75,36 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
             DateTime dateA = DateTime.tryParse(dateAStr) ?? DateTime.utc(1970);
             DateTime dateB = DateTime.tryParse(dateBStr) ?? DateTime.utc(1970);
             
-            return dateB.compareTo(dateA);
+            return dateB.compareTo(dateA); 
           });
 
           setState(() {
             allDocuments = fetchedDocs;
+            _errorMessage = null; // Clear any previous errors on success
             _applyFilters();
-            isLoading = false;
+          });
+        }
+      } else {
+        // If backend throws an error (404, 500), display it directly to the user
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Server returned code ${response.statusCode}. Please check the Node.js console.';
           });
         }
       }
     } catch (e) {
-      debugPrint('Error fetching pending approvals: $e');
-      if (mounted) setState(() => isLoading = false);
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Network Error: Unable to reach the server. Ensure backend is running and URL is correct.';
+        });
+      }
+    } finally {
+      // THIS GUARANTEES THE SPINNER STOPS, NO MATTER WHAT HAPPENS
+      if (mounted) {
+        setState(() {
+          isLoading = false; 
+        });
+      }
     }
   }
 
@@ -92,9 +120,7 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
         
         bool matchesStatus = _selectedStatus == 'All Statuses' || docStatus == _selectedStatus.toLowerCase();
         
-        // STAYS in list if In Verification or Signed. 
-        // ONLY disappears if Pending (not scanned in yet) or Verified (scanned out)
-        bool isPendingAction = ['in verification', 'signed', 'action required'].contains(docStatus);
+        bool isPendingAction = ['in verification', 'signed', 'action required', 'pending'].contains(docStatus);
         
         return matchesSearch && matchesStatus && isPendingAction;
       }).toList();
@@ -156,6 +182,25 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
                   const Text('Documents', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
                   const SizedBox(height: 16),
                   
+                  // ERROR DISPLAY WIDGET
+                  if (_errorMessage != null)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        border: Border.all(color: Colors.red.shade200),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13))),
+                        ],
+                      ),
+                    ),
+                  
                   TextField(
                     onChanged: (value) {
                       _searchQuery = value;
@@ -183,8 +228,7 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
                         isExpanded: true,
                         value: _selectedStatus,
                         icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-                        // Re-added 'Signed' so they can filter by documents waiting to be picked up
-                        items: ['All Statuses', 'In Verification', 'Signed', 'Action Required']
+                        items: ['All Statuses', 'Pending', 'In Verification', 'Signed', 'Action Required']
                             .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
                         onChanged: (String? newValue) {
                           if (newValue != null) {
@@ -199,7 +243,7 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
                   ),
                   const SizedBox(height: 24),
                   
-                  if (displayDocs.isEmpty)
+                  if (displayDocs.isEmpty && _errorMessage == null)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 40),
                       child: Center(child: Text("No incoming documents in the pipeline.", style: TextStyle(color: Colors.grey))),
@@ -245,7 +289,8 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
     final String id = document['qr_code'] ?? 'N/A';
     final String title = document['title'] ?? 'No Title';
     final String formType = (document['form_type'] ?? 'Document').toString().toUpperCase();
-    final String date = formatDate(document['created_at'] ?? document['updated_at']);
+    
+    final String date = formatDate(document['time_in'] ?? document['created_at']);
     
     final String rawStatus = document['status'] ?? 'Pending';
     final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
@@ -255,6 +300,7 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
       case 'action required':
         statusColor = Colors.orange;
         break;
+      case 'pending':
       case 'in verification':
         statusColor = Colors.blue;
         break;
@@ -290,7 +336,6 @@ class _SigneePendingApprovalsScreenState extends State<SigneePendingApprovalsScr
                     context: context,
                     builder: (context) => SigneeDocumentDetailsModal(document: document),
                   );
-                  // Refresh the list if an action was taken
                   if (signed == true) fetchDocuments();
                 },
                 child: Container(

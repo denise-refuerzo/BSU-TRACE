@@ -336,6 +336,50 @@ app.get('/api/processors/:id/documents', async (req, res) => {
 });
 
 // ==========================================
+// 5.6 FETCH SIGNEE PENDING APPROVALS
+// ==========================================
+app.get('/api/signees/:id/pending-documents', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // 1. Get the Signee's Office ID
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
+      return res.status(404).json({ error: 'Signee office not found' });
+    }
+    const o_id = userRes.rows[0].o_id;
+
+    // 2. Fetch documents currently at the Signee's office waiting to be signed
+    const query = `
+      SELECT 
+        i.qr_code, 
+        i.title, 
+        p.process_name AS form_type, 
+        u.full_name AS requestor,
+        s.current_status AS status, 
+        TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public."User" u ON i.u_id = u.u_id
+      WHERE pd.current_office_id = $1
+        AND pd.time_in IS NOT NULL 
+        AND pd.time_out IS NULL
+        AND s.current_status IN ('pending', 'In Verification')
+      ORDER BY pd.time_in ASC;
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Signee Pending Documents Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // 6. FETCH USER DASHBOARD STATS ENDPOINT
 // ==========================================
 app.get('/api/users/:id/dashboard-stats', async (req, res) => {
