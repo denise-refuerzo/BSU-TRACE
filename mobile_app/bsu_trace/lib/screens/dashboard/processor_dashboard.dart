@@ -32,17 +32,16 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     _fetchDashboardData();
   }
 
-  /// EXACT BUSINESS RULE STATUS LOGIC
-  /// Maps server data fields to UI status strings
+  // EXACT BUSINESS RULE STATUS LOGIC
+// EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(dynamic doc) {
-    if (doc == null) return 'unknown';
+    String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
+    
+    bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
+    bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+    bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
 
-    final String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    final bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
-    final bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
-    final bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
-
-    // 1. Completed state overrides
+    // 1. If it's globally completed or this processor has already scanned it out (Fixes AA3)
     if (dbStatus == 'completed' || isCompletedByMe) {
       return 'completed';
     }
@@ -52,14 +51,14 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       if (doc['time_in'] == null) return 'awaiting scan in'; 
       
       // 3. Scanned in but waiting for processing or scan-out
-      if (dbStatus == 'signed') return 'pending'; 
+      if (dbStatus == 'signed') return 'pending'; // Fixes AA2
       if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
       if (doc['time_out'] == null) return 'pending'; 
       
       return 'verified'; 
     } else {
       // 4. Currently at another office
-      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
+      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; // Fixes AA1
       return 'incoming'; // In the route, but not here yet
     }
   }
@@ -68,14 +67,8 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
     try {
-      final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'),
-        headers: {'Content-Type': 'application/json'},
-      );
+      final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
       
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
@@ -96,17 +89,13 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       } else {
         if (mounted) {
           setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to load dashboard data.'))
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to load dashboard data.')));
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Connection error while fetching data.'))
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error while fetching data.')));
       }
     }
   }
@@ -118,7 +107,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       case 'in verification': return Colors.blue;
       case 'incoming': return Colors.grey;
       case 'verified': return Colors.green;
-      case 'completed': return Colors.teal;
+      case 'completed': return Colors.teal; // Added styling for Completed
       default: return Colors.grey;
     }
   }
@@ -136,8 +125,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final role = SessionManager().currentRole;
-    
-    // Auth Guard
     if (role != UserRole.processor) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
@@ -173,7 +160,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 20),
                   
-                  // 4 KPIs Grid
                   GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
@@ -205,11 +191,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                       child: Text('No documents currently routed to your office.', style: TextStyle(color: Colors.grey)),
                     )
                   else
-                    ..._documents.take(10).map((doc) {
+                    ..._documents.take(5).map((doc) {
                       final title = doc['title'] ?? 'Untitled Document';
                       final office = doc['origin_office'] ?? 'Unknown Office';
                       final date = _formatDateString(doc['created_at']);
                       final rawStatus = _resolveStatus(doc);
+                      
                       final formattedStatus = rawStatus.split(' ').map((s) => s.isNotEmpty ? s[0].toUpperCase() + s.substring(1) : '').join(' ');
 
                       return _buildActivityItem(title, '$office • $date', formattedStatus, _getStatusColor(rawStatus));
@@ -218,17 +205,15 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
               ),
             ),
           ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await showDialog(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          showDialog(
             context: context,
             builder: (context) => const DocumentScannerModal(),
           );
-          _fetchDashboardData();
         },
         backgroundColor: AppTheme.primaryRed,
-        icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
-        label: const Text('Scan Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        child: const Icon(Icons.qr_code_scanner, color: Colors.white),
       ),
     );
   }
@@ -236,11 +221,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   Widget _buildStatCard(String count, String label, Color bgColor, Color borderColor) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bgColor, 
-        borderRadius: BorderRadius.circular(12), 
-        border: Border.all(color: borderColor, width: 2)
-      ),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -265,11 +246,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white, 
-        borderRadius: BorderRadius.circular(12), 
-        border: Border.all(color: Colors.red.shade100)
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -322,19 +299,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white, 
-        borderRadius: BorderRadius.circular(8), 
-        border: Border.all(color: statusColor.withOpacity(0.3))
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
       child: Row(
         children: [
-          Icon(Icons.description_outlined, color: statusColor.withOpacity(0.7)),
+          Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), 
-            Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)
-          ])),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)])),
           Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))
         ],
       ),
