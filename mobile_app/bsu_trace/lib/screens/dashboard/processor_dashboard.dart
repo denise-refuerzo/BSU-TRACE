@@ -33,7 +33,6 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   }
 
   // EXACT BUSINESS RULE STATUS LOGIC
-// EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(dynamic doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
     
@@ -41,7 +40,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
     bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true';
 
-    // 1. If it's globally completed or this processor has already scanned it out (Fixes AA3)
+    // 1. If it's globally completed or this processor has already scanned it out
     if (dbStatus == 'completed' || isCompletedByMe) {
       return 'completed';
     }
@@ -51,14 +50,14 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       if (doc['time_in'] == null) return 'awaiting scan in'; 
       
       // 3. Scanned in but waiting for processing or scan-out
-      if (dbStatus == 'signed') return 'pending'; // Fixes AA2
+      if (dbStatus == 'signed') return 'pending'; 
       if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
       if (doc['time_out'] == null) return 'pending'; 
       
       return 'verified'; 
     } else {
       // 4. Currently at another office
-      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; // Fixes AA1
+      if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
       return 'incoming'; // In the route, but not here yet
     }
   }
@@ -67,7 +66,12 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
+
     try {
+      // Fetches using your original comprehensive endpoint (Endpoint 5.5 in server.js)
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'));
       
       if (response.statusCode == 200) {
@@ -107,7 +111,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
       case 'in verification': return Colors.blue;
       case 'incoming': return Colors.grey;
       case 'verified': return Colors.green;
-      case 'completed': return Colors.teal; // Added styling for Completed
+      case 'completed': return Colors.teal;
       default: return Colors.grey;
     }
   }
@@ -160,6 +164,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                   const Text('Document Overview', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 20),
                   
+                  // YOUR RESTORED 4 KPIs
                   GridView.count(
                     crossAxisCount: 2,
                     shrinkWrap: true,
@@ -191,7 +196,7 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
                       child: Text('No documents currently routed to your office.', style: TextStyle(color: Colors.grey)),
                     )
                   else
-                    ..._documents.take(5).map((doc) {
+                    ..._documents.take(10).map((doc) {
                       final title = doc['title'] ?? 'Untitled Document';
                       final office = doc['origin_office'] ?? 'Unknown Office';
                       final date = _formatDateString(doc['created_at']);
@@ -205,15 +210,18 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
               ),
             ),
           ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          showDialog(
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          // AWAIT the scanner modal so the dashboard refreshes immediately when closed!
+          await showDialog(
             context: context,
             builder: (context) => const DocumentScannerModal(),
           );
+          _fetchDashboardData();
         },
         backgroundColor: AppTheme.primaryRed,
-        child: const Icon(Icons.qr_code_scanner, color: Colors.white),
+        icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+        label: const Text('Scan Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -221,7 +229,11 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
   Widget _buildStatCard(String count, String label, Color bgColor, Color borderColor) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderColor)),
+      decoration: BoxDecoration(
+        color: bgColor, 
+        borderRadius: BorderRadius.circular(12), 
+        border: Border.all(color: borderColor, width: 2)
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -299,10 +311,10 @@ class _ProcessorDashboardScreenState extends State<ProcessorDashboardScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: statusColor.withOpacity(0.3))),
       child: Row(
         children: [
-          Icon(Icons.description_outlined, color: AppTheme.primaryRed.withValues(alpha: 0.5)),
+          Icon(Icons.description_outlined, color: statusColor.withOpacity(0.7)),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis), Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey), overflow: TextOverflow.ellipsis)])),
           Text(status, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10))

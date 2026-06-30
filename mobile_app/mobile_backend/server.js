@@ -316,6 +316,47 @@ app.get('/api/processors/:id/upcoming', async (req, res) => {
 });
 
 // ==========================================
+// 5.5b (RESTORED) FETCH ALL PROCESSOR DOCUMENTS
+// Used for the Processor Dashboard KPIs and Activity List
+// ==========================================
+app.get('/api/processors/:id/documents', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
+      return res.status(404).json({ error: 'Processor office not found' });
+    }
+    const o_id = userRes.rows[0].o_id;
+
+    // Fetch all documents assigned to this processor's office
+    const query = `
+      SELECT 
+        pd.pd_id, i.qr_code, i.title, p.process_name AS form_type, u.full_name AS requestor,
+        s.current_status AS status, pd.time_in, pd.time_out, pd.is_adhoc,
+        (SELECT office_name FROM public.offices WHERE o_id = u.o_id) AS origin_office,
+        CASE WHEN pd.current_office_id = $1 THEN 'true' ELSE 'false' END as is_at_current_office,
+        CASE WHEN pd.s_id = 5 THEN 'true' ELSE 'false' END as is_completed_by_me,
+        i.created_at
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public."User" u ON i.u_id = u.u_id
+      WHERE pd.current_office_id = $1
+      ORDER BY pd.pd_id DESC;
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Processor Documents Fetch Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // 5.6 FETCH PROCESSOR ACTIONABLE DOCUMENTS (Awaiting Scan-Out)
 // (Documents signed by signee, ready to go to next office)
 // ==========================================
