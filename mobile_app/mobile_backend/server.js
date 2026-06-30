@@ -530,92 +530,95 @@ app.get('/api/process-types/:id/route', async (req, res) => {
 });
 
 // ==========================================
-// 10. CREATE NEW DOCUMENT ENDPOINT
+// 16. SCAN OUT DOCUMENT (Processor) WITH AUTO-ROUTING
 // ==========================================
-app.post('/api/documents', async (req, res) => {
-  const { u_id, title, p_id, route, stops } = req.body;
-
-  if (!u_id || !title || !p_id) {
-    return res.status(400).json({ error: 'Missing required fields' });
-  }
+app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
+  const { qrCode } = req.params;
 
   try {
-    let firstOfficeId, secondOfficeId;
-    let processIdToUse = p_id;
-    
-    // Accept either 'route' or 'stops' array from the frontend
-    const customRoute = route || stops;
+    // 1. Get the current active step and document details
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id, i.p_id, pd.current_office_id
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1 
+        AND pd.time_in IS NOT NULL 
+        AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC 
+      LIMIT 1
+    `, [qrCode]);
 
-    if (customRoute && Array.isArray(customRoute) && customRoute.length > 0) {
-      // 1. The user explicitly defined a custom routing order (e.g., [10, 11])
-      firstOfficeId = customRoute[0];
-      secondOfficeId = customRoute.length > 1 ? customRoute[1] : null;
-
-      // 2. Insert this unique route sequence into the route table to persist it
-      // Note: stop_2 uses a fallback to satisfy the NOT NULL constraint if a 1-stop route is passed
-      const routeInsert = await pool.query(
-        `INSERT INTO public.route (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7) 
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING r_id`,
-        [
-          customRoute[0] || null, 
-          customRoute.length > 1 ? customRoute[1] : customRoute[0], 
-          customRoute[2] || null, customRoute[3] || null, 
-          customRoute[4] || null, customRoute[5] || null, customRoute[6] || null
-        ]
-      );
-      const newRouteId = routeInsert.rows[0].r_id;
-
-      // 3. Fetch the base process name so the document still identifies correctly
-      const pNameRes = await pool.query('SELECT process_name FROM public.process_type WHERE p_id = $1', [p_id]);
-      const baseProcessName = pNameRes.rows.length > 0 ? pNameRes.rows[0].process_name : 'Custom Form';
-
-      // 4. Create a unique process_type entry linking to the new custom route
-      const processInsert = await pool.query(
-        `INSERT INTO public.process_type (r_id, process_name) VALUES ($1, $2) RETURNING p_id`,
-        [newRouteId, baseProcessName]
-      );
-      processIdToUse = processInsert.rows[0].p_id;
-
-    } else {
-      // Standard behavior: Fallback to the default hardcoded process route
-      const processResult = await pool.query(
-        'SELECT r.stop_1, r.stop_2 FROM public.process_type p JOIN public.route r ON p.r_id = r.r_id WHERE p.p_id = $1',
-        [p_id]
-      );
-
-      if (processResult.rows.length === 0) {
-        return res.status(404).json({ error: 'Process type not found' });
-      }
-
-      firstOfficeId = processResult.rows[0].stop_1;
-      secondOfficeId = processResult.rows[0].stop_2;
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No active document found ready for scan-out.' });
     }
 
-    // Generate QR and expiration date
-    const qrCode = `TRK-${Date.now()}-${Math.floor(Math.random() * 100)}`;
-    const edcDate = new Date();
-    edcDate.setDate(edcDate.getDate() + 7);
+    const { pd_id, current_status, ini_id, p_id, current_office_id } = docResult.rows[0];
+    const statusLower = current_status.toLowerCase();
 
-    // Create the initial document using the resolved p_id (Custom or Default)
-    const insertDocQuery = `
-      INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING ini_id
-    `;
-    const docResult = await pool.query(insertDocQuery, [processIdToUse, u_id, title, edcDate, qrCode]);
-    const newIniId = docResult.rows[0].ini_id;
+    // Prevent scan out if the signee hasn't approved it yet
+    if (statusLower === 'in verification' || statusLower === 'pending') {
+      return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
+    }
 
-    // Log the very first step in the tracking ledger ensuring it registers at the correct first stop
-    const insertTrackQuery = `
-      INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
-      VALUES ($1, 1, $2, $3, NULL)
-    `;
-    await pool.query(insertTrackQuery, [newIniId, firstOfficeId, secondOfficeId]);
+    // 2. Fetch the assigned route for this specific document process
+    const routeResult = await pool.query(`
+      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
+      FROM public.process_type p
+      JOIN public.route r ON p.r_id = r.r_id
+      WHERE p.p_id = $1
+    `, [p_id]);
 
-    res.status(201).json({ message: 'Document created successfully', qr_code: qrCode });
+    let nextOfficeId = null;
+    let isFinalStop = false;
+
+    if (routeResult.rows.length > 0) {
+      const r = routeResult.rows[0];
+      // Create a clean array of the route sequence, removing any empty (null) stops
+      const routeStops = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(stop => stop !== null);
+      
+      // Determine where the document currently is within its route
+      const currentIndex = routeStops.lastIndexOf(current_office_id);
+
+      if (currentIndex !== -1) {
+        if (currentIndex < routeStops.length - 1) {
+          // There is a next stop in the sequence
+          nextOfficeId = routeStops[currentIndex + 1];
+        } else {
+          // This was the very last stop in the sequence
+          isFinalStop = true;
+        }
+      }
+    }
+
+    // 3. Mark the CURRENT step as scanned out (Verified or Completed if it's the end)
+    const updateStatus = isFinalStop ? 'Completed' : 'Verified';
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET time_out = timezone('Asia/Manila', now()),
+           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE $1 LIMIT 1)
+       WHERE pd_id = $2`,
+      [updateStatus, pd_id]
+    );
+
+    // 4. AUTO-ROUTE: If there is a next stop, generate the next tracking ledger entry
+    if (nextOfficeId) {
+      // s_id = 1 creates the default initial status (Incoming/Awaiting Scan In)
+      await pool.query(
+        `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
+         VALUES ($1, 1, $2, NULL)`,
+        [ini_id, nextOfficeId]
+      );
+    }
+
+    res.status(200).json({ 
+      message: isFinalStop 
+        ? 'Document scanned OUT and Completed.' 
+        : 'Document scanned OUT and successfully routed to the next office.' 
+    });
 
   } catch (error) {
-    console.error('Create Document Error:', error);
+    console.error('Scan Out Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
