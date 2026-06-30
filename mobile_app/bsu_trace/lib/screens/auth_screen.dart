@@ -19,7 +19,6 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   
-  UserRole? _selectedRole;
   bool _isLoading = false;
   bool _obscurePassword = true;
 
@@ -128,14 +127,6 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     
-    if (_selectedRole == null) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select your designated role from the dropdown.')),
-      );
-      return;
-    }
-    
     setState(() {
       _isLoading = true;
     });
@@ -156,22 +147,13 @@ class _AuthScreenState extends State<AuthScreen> {
         final data = json.decode(response.body);
         final int accountId = data['a_id'];
         final int userId = data['u_id'];
-        final bool is2faEnabled = data['two_fa_enabled'] ?? false; // Grab the 2FA flag from backend
+        final bool is2faEnabled = data['two_fa_enabled'] ?? false; 
         
+        // Automatically determine the role based on the backend's account ID (a_id)
         final UserRole actualRole = accountId.toRole();
 
-        if (actualRole != _selectedRole) {
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Role mismatch. Please select your correct designated role.')),
-          );
-          return;
-        }
-
         if (!mounted) return;
-        setState(() => _isLoading = false); // Stop loading spinner before handling next steps
+        setState(() => _isLoading = false); 
 
         // INTERCEPT NAVIGATION FOR 2FA
         if (is2faEnabled) {
@@ -184,7 +166,7 @@ class _AuthScreenState extends State<AuthScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid credentials or unauthorized role.')),
+          const SnackBar(content: Text('Invalid credentials.')),
         );
         setState(() {
           _isLoading = false;
@@ -194,7 +176,7 @@ class _AuthScreenState extends State<AuthScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection error.')),
+        const SnackBar(content: Text('Connection error. Please check your network.')),
       );
       setState(() {
         _isLoading = false;
@@ -242,44 +224,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         _buildAuthTextField('Username', ' ', Icons.badge_outlined, _emailController),
                         const SizedBox(height: 16),
                         _buildAuthTextField('Password', ' ', Icons.lock_outline, _passwordController, isPassword: true),
-                        const SizedBox(height: 16),
-                                                 
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade50, 
-                            borderRadius: BorderRadius.circular(8), 
-                            border: Border.all(color: Colors.red.shade100),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<UserRole>(
-                              value: _selectedRole,
-                              isExpanded: true,
-                              hint: const Text(
-                                'Select Designated Role', 
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryRed),
-                              ),
-                              icon: const Icon(Icons.arrow_drop_down, color: AppTheme.primaryRed),
-                              items: UserRole.values.map((UserRole role) {
-                                String displayRole = role.name.toUpperCase();
-                                if (displayRole == 'USER') displayRole = 'ORIGINATOR';
-
-                                return DropdownMenuItem<UserRole>(
-                                  value: role,
-                                  child: Text(
-                                    'Login As: $displayRole', 
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppTheme.primaryRed),
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (UserRole? newValue) {
-                                if (newValue != null) {
-                                  setState(() { _selectedRole = newValue; });
-                                }
-                              },
-                            ),
-                          ),
-                        ),
+                        const SizedBox(height: 8),
                                                  
                         Align(
                           alignment: Alignment.centerRight,

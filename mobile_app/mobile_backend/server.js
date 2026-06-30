@@ -276,36 +276,41 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
-/// ==========================================
+// ==========================================
 // 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS 
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
   const userId = req.params.id;
 
   try {
-    // 1. Identify which office this processor works for
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     if (userRes.rows.length === 0 || !userRes.rows[0].o_id) {
       return res.status(404).json({ error: 'Processor office not found' });
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch ONLY documents that have this office in their route or currently at their office.
+    // FIX: We removed the predictive 'route' checking. 
+    // It now strictly checks if the document is CURRENTLY at their office, 
+    // or if they have previously interacted with it.
     const query = `
       WITH RankedDocs AS (
         SELECT 
           i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
           s.current_status AS status, pd.time_in, pd.time_out,
           TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-          pd.current_office_id, pd.is_adhoc, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
+          pd.current_office_id, pd.is_adhoc,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn,
-          -- NEW: Check if this specific office has already completely processed this document
           EXISTS (
             SELECT 1 FROM public.processed_document past_pd 
             WHERE past_pd.ini_id = i.ini_id 
               AND past_pd.current_office_id = $1 
               AND past_pd.time_out IS NOT NULL
-          ) as is_completed_by_me
+          ) as is_completed_by_me,
+          EXISTS (
+            SELECT 1 FROM public.processed_document all_pd 
+            WHERE all_pd.ini_id = i.ini_id 
+              AND all_pd.current_office_id = $1
+          ) as touches_my_office
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
         LEFT JOIN public.route r ON p.r_id = r.r_id
@@ -318,10 +323,7 @@ app.get('/api/processors/:id/documents', async (req, res) => {
         is_adhoc, is_completed_by_me
       FROM RankedDocs
       WHERE rn = 1 
-        AND (
-          current_office_id = $1 
-          OR stop_1 = $1 OR stop_2 = $1 OR stop_3 = $1 OR stop_4 = $1 OR stop_5 = $1 OR stop_6 = $1 OR stop_7 = $1
-        )
+        AND touches_my_office = true
         AND status NOT ILIKE 'Completed'
       ORDER BY time_in DESC NULLS LAST
     `;

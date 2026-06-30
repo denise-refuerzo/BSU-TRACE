@@ -21,6 +21,7 @@ class SigneeDashboardScreen extends StatefulWidget {
 class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
   bool isLoading = true;
   Timer? _timer;
+  String? _errorMessage;
 
   // Live Statistics
   int pendingCount = 0;
@@ -49,52 +50,83 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
 
   Future<void> fetchDashboardData() async {
     try {
-      final docResponse = await http.get(Uri.parse('${AppConfig.baseUrl}/documents'));
-      
-      if (docResponse.statusCode == 200) {
-        final List<dynamic> docs = json.decode(docResponse.body);
+      final userId = SessionManager().userId;
+      if (userId == null) {
+        if (mounted) setState(() => _errorMessage = "No logged in user found.");
+        return;
+      }
 
-        int pCount = 0;
+      // 1. Fetch live pending queue for this specific signee
+      final pendingFuture = http.get(
+        Uri.parse('${AppConfig.baseUrl}/signees/$userId/pending-documents')
+      ).timeout(const Duration(seconds: 10));
+      
+      // 2. Fetch all historical actions for this specific office to get total signed/sent back stats
+      final timelineFuture = http.get(
+        Uri.parse('${AppConfig.baseUrl}/users/$userId/processing-timeline')
+      ).timeout(const Duration(seconds: 10));
+
+      final results = await Future.wait([pendingFuture, timelineFuture]);
+      final pendingResponse = results[0];
+      final timelineResponse = results[1];
+
+      if (pendingResponse.statusCode == 200 && timelineResponse.statusCode == 200) {
+        final List<dynamic> pDocs = json.decode(pendingResponse.body);
+        final List<dynamic> tDocs = json.decode(timelineResponse.body);
+
         int sCount = 0;
         int vCount = 0;
         int sbCount = 0;
-        List<dynamic> recentPending = [];
 
-      for (var doc in docs) {
+        // Calculate historical stats from timeline
+        for (var doc in tDocs) {
           String status = (doc['status'] ?? '').toString().toLowerCase();
-          
-          // STRICT RULE: If it hasn't been scanned in by the processor, completely hide it
-          if (status == 'pending') continue;
-          
-          // Count logic
-          if (status == 'action required' || status == 'in verification') {
-            pCount++;
-          } else if (status == 'signed' || status == 'approved' || status == 'completed' || status == 'verified') {
+          if (['signed', 'verified', 'approved', 'completed'].contains(status)) {
             sCount++;
-          } else if (status == 'sent back' || status == 'rejected') {
+          } else if (['action required', 'sent back', 'rejected'].contains(status)) {
             sbCount++;
-          }
-
-          // VISIBILITY logic for the "Documents Pending" visual list
-          // Stays in the list UNTIL scanned out (verified)
-          if (['in verification', 'action required', 'signed'].contains(status)) {
-            recentPending.add(doc);
+          } else if (status == 'in verification') {
+            vCount++;
           }
         }
 
+        // Sort pending documents by newest scanned-in first
+        pDocs.sort((a, b) {
+          String dateAStr = a['time_in'] ?? a['created_at'] ?? '1970-01-01T00:00:00+08:00';
+          String dateBStr = b['time_in'] ?? b['created_at'] ?? '1970-01-01T00:00:00+08:00';
+
+          dateAStr = dateAStr.replaceAll(' ', 'T');
+          if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
+          dateBStr = dateBStr.replaceAll(' ', 'T');
+          if (!dateBStr.endsWith('Z') && !dateBStr.contains('+')) dateBStr += '+08:00';
+
+          DateTime dateA = DateTime.tryParse(dateAStr) ?? DateTime.utc(1970);
+          DateTime dateB = DateTime.tryParse(dateBStr) ?? DateTime.utc(1970);
+          
+          return dateB.compareTo(dateA); 
+        });
+
         if (mounted) {
           setState(() {
-            pendingCount = pCount;
+            pendingCount = pDocs.length;
             signedCount = sCount;
             verificationCount = vCount;
             sentBackCount = sbCount;
-            pendingDocuments = recentPending.take(5).toList();
-            isLoading = false;
+            pendingDocuments = pDocs.take(5).toList(); // Take latest 5 for the dashboard
+            _errorMessage = null;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _errorMessage = 'Server Error. Pending Code: ${pendingResponse.statusCode}, Timeline Code: ${timelineResponse.statusCode}';
           });
         }
       }
     } catch (e) {
       debugPrint('Error fetching signee dashboard data: $e');
+      if (mounted) setState(() => _errorMessage = 'Network Error: Unable to reach the server.');
+    } finally {
       if (mounted) setState(() => isLoading = false);
     }
   }
@@ -126,6 +158,24 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (_errorMessage != null)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          border: Border.all(color: Colors.red.shade200),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 13))),
+                          ],
+                        ),
+                      ),
+                  
                     Row(
                       children: [
                         Expanded(
@@ -161,18 +211,21 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                           'Documents Pending',
                           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
                         ),
-                        Row(
-                          children: const [
-                            Text('View All', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
-                            SizedBox(width: 4),
-                            Icon(Icons.arrow_forward, color: AppTheme.primaryRed, size: 16),
-                          ],
+                        GestureDetector(
+                          onTap: () => Navigator.pushNamed(context, '/signee_pending'),
+                          child: Row(
+                            children: const [
+                              Text('View All', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
+                              SizedBox(width: 4),
+                              Icon(Icons.arrow_forward, color: AppTheme.primaryRed, size: 16),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
                     
-                    if (pendingDocuments.isEmpty)
+                    if (pendingDocuments.isEmpty && _errorMessage == null)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 20),
                         child: Center(child: Text("No incoming documents in the pipeline.", style: TextStyle(color: Colors.grey))),
@@ -270,7 +323,9 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
     final String title = document['title'] ?? 'No Title';
     final String id = document['qr_code'] ?? 'N/A';
     final String formType = document['form_type'] ?? 'Document';
-    final String office = document['origin_office'] ?? 'Origin Office';
+    
+    // Fallbacks to avoid null errors on historical documents
+    final String office = document['origin_office'] ?? document['requestor'] ?? 'N/A';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -299,6 +354,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                     context: context,
                     builder: (context) => SigneeDocumentDetailsModal(document: document),
                   );
+                  // Refresh the dashboard stats automatically if a document is signed
                   if (signed == true) fetchDashboardData(); 
                 },
                 child: const Padding(padding: EdgeInsets.all(4.0), child: Icon(Icons.remove_red_eye_outlined, color: AppTheme.primaryRed)),
@@ -317,7 +373,7 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [const Text('OFFICE', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text(office, style: const TextStyle(fontSize: 12, color: Colors.black87))],
+                  children: [const Text('FROM', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text(office, style: const TextStyle(fontSize: 12, color: Colors.black87))],
                 ),
               ),
             ],
