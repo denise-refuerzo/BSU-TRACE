@@ -883,6 +883,9 @@ app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   try {
     await pool.query('BEGIN');
 
+    // Auto-detect the exact office ID of the user performing the action
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [u_id]);
+    o_id = userRes.rows[0].o_id;
     // 1. Get the document ID and active process row
     const docResult = await pool.query(`
       SELECT pd.pd_id, i.ini_id
@@ -931,6 +934,9 @@ app.put('/api/documents/:qrCode/sign', async (req, res) => {
 
   try {
     await pool.query('BEGIN');
+     // Auto-detect the exact office ID of the user performing the action
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [u_id]);
+    o_id = userRes.rows[0].o_id;
 
     const docResult = await pool.query(`
       SELECT pd.pd_id, i.ini_id 
@@ -975,6 +981,10 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 
   try {
     await pool.query('BEGIN');
+
+    // Auto-detect the exact office ID of the user performing the action
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [u_id]);
+    o_id = userRes.rows[0].o_id;
 
     const docResult = await pool.query(`
       SELECT pd.pd_id, i.ini_id 
