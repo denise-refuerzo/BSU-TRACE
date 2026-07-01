@@ -24,14 +24,19 @@ const pool = new Pool({
 // In-memory store for OTPs
 const resetOtpStore = {}; 
 
-// Configure the email transporter to bypass Render's firewall using Brevo (Port 2525)
 const transporter = nodemailer.createTransport({
   host: "smtp-relay.brevo.com",
-  port: 587,
+  port: 2525,
+  secure: false, // Port 2525 requires secure to be false
   auth: {
-    user: process.env.BREVO_SMTP_USER, // Your verified Brevo login email
-    pass: process.env.BREVO_SMTP_PASS  // Your generated master SMTP password from Brevo
-  }
+    user: process.env.BREVO_SMTP_USER,
+    pass: process.env.BREVO_SMTP_PASS
+  },
+  tls: {
+    rejectUnauthorized: false,
+    ciphers: 'SSLv3'
+  },
+  connectionTimeout: 5000 // Prevents long hangs by failing after 5 seconds
 });
 
 pool.connect((err, client, release) => {
