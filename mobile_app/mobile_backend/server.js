@@ -1045,10 +1045,9 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // ==========================================
 
 // Request Password Reset Code
-app.post('/api/auth/forgot-password', async (req, res) => {
-    const { uni_email } = req.body;
-
+app.post('/auth/forgot-password', async (req, res) => {
     try {
+        const { email } = req.body;
         const userCheck = await pool.query('SELECT u_id FROM "User" WHERE uni_email = $1', [uni_email]);
         
         if (userCheck.rows.length === 0) {
@@ -1069,14 +1068,21 @@ app.post('/api/auth/forgot-password', async (req, res) => {
             text: `Your password reset code is: ${code}\n\nThis code will expire in 15 minutes. If you did not request this, please ignore this email.`
         };
 
-        await transporter.sendMail(mailOptions);
-        res.status(200).json({ message: "Verification code sent to your email." });
+        await transporter.sendMail({
+              from: process.env.EMAIL_USER,
+              to: email,
+              subject: "Your BSU-Trace Password Reset Code",
+              text: `Your reset code is: ${code}`
+            });
 
-    } catch (error) {
-        console.error("Forgot Password Route Error:", error);
-        res.status(500).json({ message: "Internal server error while sending email." });
-    }
-});
+        res.status(200).json({ message: "Code sent successfully" });
+
+          } catch (error) {
+            console.error("Email Error:", error);
+            // 🚨 CRITICAL: You MUST have this line to tell Flutter if it failed!
+            res.status(500).json({ message: "Failed to send email" });
+          }
+        });
 
 // Verify Code & Update Password
 app.post('/api/auth/reset-password', async (req, res) => {
