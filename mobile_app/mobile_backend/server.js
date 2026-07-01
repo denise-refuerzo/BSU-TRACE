@@ -24,12 +24,13 @@ const pool = new Pool({
 // In-memory store for OTPs
 const resetOtpStore = {}; 
 
+// Configure the email transporter to bypass Render's firewall using Brevo (Port 2525)
 const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com", 
-  port: 587, // <-- This port successfully bypasses Render's firewall
+  host: "smtp-relay.brevo.com",
+  port: 587,
   auth: {
-    user: process.env.BREVO_SMTP_USER, // Usually your login email
-    pass: process.env.BREVO_SMTP_PASS  // The generated master SMTP password
+    user: process.env.BREVO_SMTP_USER, // Your verified Brevo login email
+    pass: process.env.BREVO_SMTP_PASS  // Your generated master SMTP password from Brevo
   }
 });
 
@@ -1044,32 +1045,36 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // Step 1: Send the Code
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
+    // Safely pull the email regardless of which JSON key the frontend uses
     const email = req.body.email || req.body.uni_email; 
-    if (!email) return res.status(400).json({ message: "Email is required" });
 
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // Generate a secure, random 6-digit number
     const resetCode = crypto.randomInt(100000, 999999).toString();
 
+    // Store it temporarily mapped to the user's email
     resetOtpStore[email] = {
       code: resetCode,
-      expiresAt: Date.now() + 15 * 60 * 1000
+      expiresAt: Date.now() + 15 * 60 * 1000 // 15 mins expiry
     };
 
-    // TEMPORARY BYPASS: Comment out Nodemailer to avoid Render's firewall
-    
+    // Send the email using the unblocked port 2525
     await transporter.sendMail({
-      from: process.env.BREVO_SMTP_USER,
+      from: process.env.BREVO_SMTP_USER, // Must match your verified Brevo sender
       to: email,
       subject: "Your BSU-Trace Password Reset Code",
       text: `Your password reset code is: ${resetCode}`
     });
-    
 
-    // Pass the code into the success message so it appears on the phone screen
-    res.status(200).json({ message: `Code generated: ${resetCode}` });
+    // Reverted the response so the code does NOT show on the screen
+    res.status(200).json({ message: "Reset code sent successfully!" });
 
   } catch (error) {
     console.error("Backend Error:", error);
-    res.status(500).json({ message: "Failed to process request" });
+    res.status(500).json({ message: "Failed to send email" });
   }
 });
 
