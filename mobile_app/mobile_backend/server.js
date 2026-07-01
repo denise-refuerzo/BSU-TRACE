@@ -1045,7 +1045,7 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // ==========================================
 
 // Request Password Reset Code
-app.post('/auth/forgot-password', async (req, res) => {
+app.post('/api/users/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
         const userCheck = await pool.query('SELECT u_id FROM "User" WHERE uni_email = $1', [uni_email]);
