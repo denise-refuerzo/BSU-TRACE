@@ -27,24 +27,10 @@ const resetOtpStore = {};
 const transporter = nodemailer.createTransport({
   host: "smtp-relay.brevo.com",
   port: 2525,
-  secure: false, // Port 2525 requires secure to be false
   auth: {
-    user: process.env.BREVO_SMTP_USER,
-    pass: process.env.BREVO_SMTP_PASS
-  },
-  tls: {
-    rejectUnauthorized: false,
-    ciphers: 'SSLv3'
-  },
-  connectionTimeout: 5000 // Prevents long hangs by failing after 5 seconds
-});
-
-pool.connect((err, client, release) => {
-  if (err) {
-    return console.error('Error acquiring client', err.stack);
+    user: "b08181001@smtp-brevo.com", 
+    pass: process.env.BREVO_SMTP_PASS // <-- Reverted to hide the secret
   }
-  console.log('Successfully connected to the Neon PostgreSQL database');
-  release();
 });
 
 // ==========================================
