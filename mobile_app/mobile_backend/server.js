@@ -25,19 +25,11 @@ const pool = new Pool({
 const resetOtpStore = {}; 
 
 const transporter = nodemailer.createTransport({
-  // Google's explicit IPv4 SMTP address to bypass Render's broken IPv6 routing
-  host: '142.250.110.108', 
-  port: 587,
-  secure: false, // Must be false when using port 587
-  requireTLS: true,
+  host: "smtp-relay.brevo.com", 
+  port: 587, // <-- This port successfully bypasses Render's firewall
   auth: {
-    user: process.env.EMAIL_USER, 
-    pass: process.env.EMAIL_PASS  
-  },
-  tls: {
-    // This is required when using a raw IP address instead of 'smtp.gmail.com'
-    // to prevent the server from throwing a hostname mismatch certificate error.
-    rejectUnauthorized: false 
+    user: process.env.BREVO_SMTP_USER, // Usually your login email
+    pass: process.env.BREVO_SMTP_PASS  // The generated master SMTP password
   }
 });
 
@@ -1049,36 +1041,35 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // ==========================================
 
 // Step 1: Send the Code
+// Step 1: Send the Code
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
-    // Safely pull the email regardless of which JSON key the frontend uses
     const email = req.body.email || req.body.uni_email; 
+    if (!email) return res.status(400).json({ message: "Email is required" });
 
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
-
-    // Generate a secure, random 6-digit number
     const resetCode = crypto.randomInt(100000, 999999).toString();
 
-    // Store it temporarily mapped to the user's email
     resetOtpStore[email] = {
       code: resetCode,
-      expiresAt: Date.now() + 15 * 60 * 1000 // 15 mins expiry
+      expiresAt: Date.now() + 15 * 60 * 1000
     };
 
+    // TEMPORARY BYPASS: Comment out Nodemailer to avoid Render's firewall
+    /*
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: "Your BSU-Trace Password Reset Code",
       text: `Your password reset code is: ${resetCode}`
     });
+    */
 
-    res.status(200).json({ message: "Reset code sent successfully!" });
+    // Pass the code into the success message so it appears on the phone screen
+    res.status(200).json({ message: `Code generated: ${resetCode}` });
 
   } catch (error) {
     console.error("Backend Error:", error);
-    res.status(500).json({ message: "Failed to send email" });
+    res.status(500).json({ message: "Failed to process request" });
   }
 });
 
