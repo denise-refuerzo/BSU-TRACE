@@ -25,14 +25,18 @@ const pool = new Pool({
 const resetOtpStore = {}; 
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  host: 'smtp.gmail.com',  // Force the host
-  port: 465,               // Force the secure port
-  secure: true,            // Force SSL/TLS
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // MUST be false when using port 587
+  requireTLS: true,
   auth: {
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS  
-  }
+  },
+  tls: {
+    rejectUnauthorized: false // Helps bypass strict internal cloud certificate checks
+  },
+  connectionTimeout: 10000 // Fails faster (10s) if the port is entirely blocked
 });
 
 pool.connect((err, client, release) => {
