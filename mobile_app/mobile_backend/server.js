@@ -1055,14 +1055,14 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     };
 
     // TEMPORARY BYPASS: Comment out Nodemailer to avoid Render's firewall
-    /*
+    
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: "Your BSU-Trace Password Reset Code",
       text: `Your password reset code is: ${resetCode}`
     });
-    */
+    
 
     // Pass the code into the success message so it appears on the phone screen
     res.status(200).json({ message: `Code generated: ${resetCode}` });
