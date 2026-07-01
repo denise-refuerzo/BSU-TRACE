@@ -25,18 +25,20 @@ const pool = new Pool({
 const resetOtpStore = {}; 
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
+  // Google's explicit IPv4 SMTP address to bypass Render's broken IPv6 routing
+  host: '142.250.110.108', 
   port: 587,
-  secure: false, // MUST be false when using port 587
+  secure: false, // Must be false when using port 587
   requireTLS: true,
   auth: {
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS  
   },
   tls: {
-    rejectUnauthorized: false // Helps bypass strict internal cloud certificate checks
-  },
-  connectionTimeout: 10000 // Fails faster (10s) if the port is entirely blocked
+    // This is required when using a raw IP address instead of 'smtp.gmail.com'
+    // to prevent the server from throwing a hostname mismatch certificate error.
+    rejectUnauthorized: false 
+  }
 });
 
 pool.connect((err, client, release) => {
