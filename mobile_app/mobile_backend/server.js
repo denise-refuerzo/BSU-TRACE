@@ -1,10 +1,6 @@
-// require('dotenv').config();
 const express = require('express');
 const nodemailer = require('nodemailer');
-const app = express();
-
 const crypto = require('crypto');
-const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
@@ -25,14 +21,10 @@ const pool = new Pool({
   }
 });
 
-// In-memory store for OTPs (For production, consider saving these to Postgres or Redis)
+// In-memory store for OTPs
 const resetOtpStore = {}; 
 
-// Configure the email transporter using environment variables
-
-app.use(express.json()); 
-
-// 2. Your Mail Transporter (Using Render Environment Variables)
+// Configure the email transporter using Render Environment Variables
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -1045,54 +1037,58 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 });
 
 // ==========================================
-// 21. FORGOT PASSWORD ROUTES
+// 21. AUTHENTICATION & PASSWORD RESET 
 // ==========================================
 
+// Step 1: Send the Code
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
-    // This looks for the 'email' key you sent from Flutter
-    const { email } = req.body; 
+    // Safely pull the email regardless of which JSON key the frontend uses
+    const email = req.body.email || req.body.uni_email; 
 
     if (!email) {
       return res.status(400).json({ message: "Email is required" });
     }
 
-    // (Your logic here to generate a 6-digit code and save it to your database)
-    const resetCode = "123456"; // Example code
+    // Generate a secure, random 6-digit number
+    const resetCode = crypto.randomInt(100000, 999999).toString();
 
-    // Send the email via Gmail
+    // Store it temporarily mapped to the user's email
+    resetOtpStore[email] = {
+      code: resetCode,
+      expiresAt: Date.now() + 15 * 60 * 1000 // 15 mins expiry
+    };
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
-      subject: "Your BSU-Trace Reset Code",
+      subject: "Your BSU-Trace Password Reset Code",
       text: `Your password reset code is: ${resetCode}`
     });
 
-    // 4. CRITICAL: Tell Flutter it was a success! (Sends the 200 status and JSON message)
     res.status(200).json({ message: "Reset code sent successfully!" });
 
   } catch (error) {
     console.error("Backend Error:", error);
-    // 5. CRITICAL: Tell Flutter it failed so the app stops loading
     res.status(500).json({ message: "Failed to send email" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-// Verify Code & Update Password
+// Step 2: Verify Code & Update Password
 app.post('/api/auth/reset-password', async (req, res) => {
-    const { uni_email, code, new_password } = req.body;
+    // Fallback variables to handle mismatching flutter keys
+    const email = req.body.email || req.body.uni_email;
+    const code = req.body.code;
+    const newPassword = req.body.newPassword || req.body.new_password;
 
     try {
-        const storedData = resetOtpStore[uni_email];
+        const storedData = resetOtpStore[email];
 
         if (!storedData) {
             return res.status(400).json({ message: "No reset request found for this email." });
         }
         if (Date.now() > storedData.expiresAt) {
-            delete resetOtpStore[uni_email];
+            delete resetOtpStore[email];
             return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
         }
         if (storedData.code !== code) {
@@ -1100,11 +1096,11 @@ app.post('/api/auth/reset-password', async (req, res) => {
         }
 
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(new_password, salt);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        await pool.query('UPDATE "User" SET password = $1 WHERE uni_email = $2', [hashedPassword, uni_email]);
+        await pool.query('UPDATE public."User" SET password = $1 WHERE uni_email = $2', [hashedPassword, email]);
 
-        delete resetOtpStore[uni_email];
+        delete resetOtpStore[email];
 
         res.status(200).json({ message: "Password updated successfully!" });
 
@@ -1115,89 +1111,53 @@ app.post('/api/auth/reset-password', async (req, res) => {
 });
 
 
-// ==========================================
-// 22. 2FA RECOVERY ROUTES
-// ==========================================
-
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
     const { uni_email } = req.body;
-
     try {
-        const userCheck = await pool.query(
-            'SELECT u_id, two_fa_enabled FROM "User" WHERE uni_email = $1', 
-            [uni_email]
-        );
-        
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ message: "No account found with that email." });
-        }
-        
-        if (!userCheck.rows[0].two_fa_enabled) {
-            return res.status(400).json({ message: "2FA is not enabled on this account." });
-        }
+        const userCheck = await pool.query('SELECT u_id, two_fa_enabled FROM public."User" WHERE uni_email = $1', [uni_email]);
+        if (userCheck.rows.length === 0) return res.status(404).json({ message: "No account found." });
+        if (!userCheck.rows[0].two_fa_enabled) return res.status(400).json({ message: "2FA is not enabled." });
 
         const code = crypto.randomInt(100000, 999999).toString();
-        
-        // Prefix with '2fa_' so it doesn't conflict with password reset codes
-        resetOtpStore[`2fa_${uni_email}`] = {
-            code: code,
-            expiresAt: Date.now() + 15 * 60 * 1000 
-        };
+        resetOtpStore[`2fa_${uni_email}`] = { code, expiresAt: Date.now() + 15 * 60 * 1000 };
 
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: uni_email,
-            subject: 'BSU-Trace 2FA Recovery Code',
-            text: `Your 2FA recovery code is: ${code}\n\nEnter this code in the app to disable 2FA and regain access to your account. This code expires in 15 minutes.`
-        };
-
-        await transporter.sendMail(mailOptions);
-        res.status(200).json({ message: "2FA Recovery code sent to your email." });
-
+        await transporter.sendMail({
+            from: process.env.EMAIL_USER, to: uni_email, subject: 'BSU-Trace 2FA Recovery',
+            text: `Your 2FA recovery code is: ${code}\n\nThis expires in 15 minutes.`
+        });
+        res.status(200).json({ message: "2FA Recovery code sent." });
     } catch (error) {
-        console.error("Forgot 2FA Route Error:", error);
-        res.status(500).json({ message: "Internal server error while sending email." });
+        res.status(500).json({ message: "Error sending email." });
     }
 });
 
 // Verify Code & Disable 2FA
 app.post('/api/auth/reset-2fa', async (req, res) => {
     const { uni_email, code } = req.body;
-
     try {
         const storeKey = `2fa_${uni_email}`;
         const storedData = resetOtpStore[storeKey];
 
-        if (!storedData) {
-            return res.status(400).json({ message: "No 2FA recovery request found." });
-        }
+        if (!storedData) return res.status(400).json({ message: "No request found." });
         if (Date.now() > storedData.expiresAt) {
             delete resetOtpStore[storeKey]; 
-            return res.status(400).json({ message: "Recovery code has expired." });
+            return res.status(400).json({ message: "Code has expired." });
         }
-        if (storedData.code !== code) {
-            return res.status(400).json({ message: "Invalid recovery code." });
-        }
+        if (storedData.code !== code) return res.status(400).json({ message: "Invalid code." });
 
-        await pool.query(
-            'UPDATE "User" SET two_fa_enabled = false, two_fa_code = NULL WHERE uni_email = $1', 
-            [uni_email]
-        );
-
+        await pool.query('UPDATE public."User" SET two_fa_enabled = false, two_fa_code = NULL WHERE uni_email = $1', [uni_email]);
         delete resetOtpStore[storeKey];
-
-        res.status(200).json({ message: "2FA has been disabled. You can now log in normally." });
-
+        res.status(200).json({ message: "2FA has been disabled." });
     } catch (error) {
-        console.error("Reset 2FA Route Error:", error);
-        res.status(500).json({ message: "Internal server error while resetting 2FA." });
+        res.status(500).json({ message: "Error resetting 2FA." });
     }
 });
 
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
+// Ensure this block is at the VERY bottom, and only appears once.
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API Server running on port ${PORT}`);

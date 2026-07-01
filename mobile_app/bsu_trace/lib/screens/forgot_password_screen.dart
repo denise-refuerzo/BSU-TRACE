@@ -66,10 +66,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       return;
     }
     
-    setState(() => _isLoading = true);
+setState(() => _isLoading = true);
     try {
-      // FIX: Removed duplicate '/api'[cite: 1]
-      final url = Uri.parse('${AppConfig.baseUrl}/auth/forgot-password');
+      
+      // CHANGE THIS LINE: 
+      // Replace '/auth/forgot-password' with '/auth/reset-password'
+      final url = Uri.parse('${AppConfig.baseUrl}/auth/reset-password');
 
       final response = await http.post(
         url,
