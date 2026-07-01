@@ -25,13 +25,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       
       debugPrint('Sending request to: $url');
 
+      // Inside _sendCode()
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        // FIX: Changed 'bsutrace@gmail.com' back to a standard payload key 'email'[cite: 1]
         body: jsonEncode({'email': _emailController.text.trim()}),
       ).timeout(
-        const Duration(seconds: 30), // Protects against live Render server sleep hanging
+        const Duration(seconds: 60), // Increased from 30 to allow the Render server to wake up
       );
 
       // Diagnostic logging to reveal any HTML error bodies safely
@@ -73,17 +73,17 @@ setState(() => _isLoading = true);
       // Replace '/auth/forgot-password' with '/auth/reset-password'
       final url = Uri.parse('${AppConfig.baseUrl}/auth/reset-password');
 
+      // Inside _resetPassword()
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        // FIX: Replaced explicit config values with structural JSON key identifiers[cite: 1]
         body: jsonEncode({
           'email': _emailController.text.trim(),
           'code': _codeController.text.trim(),
           'newPassword': _newPasswordController.text, 
         }),
       ).timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 60), // Increased from 30
       );
 
       debugPrint('HTTP Status Code: ${response.statusCode}');

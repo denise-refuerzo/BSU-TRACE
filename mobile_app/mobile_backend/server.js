@@ -24,9 +24,11 @@ const pool = new Pool({
 // In-memory store for OTPs
 const resetOtpStore = {}; 
 
-// Configure the email transporter using Render Environment Variables
 const transporter = nodemailer.createTransport({
   service: 'gmail',
+  host: 'smtp.gmail.com',  // Force the host
+  port: 465,               // Force the secure port
+  secure: true,            // Force SSL/TLS
   auth: {
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS  
