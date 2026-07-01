@@ -1,5 +1,14 @@
 // require('dotenv').config();
 const nodemailer = require('nodemailer');
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    // This tells Node to look at the variables you just typed into Render!
+    user: process.env.EMAIL_USER, 
+    pass: process.env.EMAIL_PASS  
+  }
+});
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');

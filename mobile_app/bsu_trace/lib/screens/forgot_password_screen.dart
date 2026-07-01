@@ -18,58 +18,61 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final TextEditingController _codeController = TextEditingController();
   final TextEditingController _newPasswordController = TextEditingController();
 
-  Future<void> _sendCode() async {
-    setState(() => _isLoading = true);
-    try {
-      final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/api/auth/forgot-password'), // Adjust API URL
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'uni_email': _emailController.text.trim()}),
-      );
+Future<void> _sendCode() async {
+  setState(() => _isLoading = true);
+  try {
+    final response = await http.post(
+      // Ensure this points cleanly to your endpoint without duplicating '/api'
+      Uri.parse('${AppConfig.baseUrl}/auth/forgot-password'), 
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'uni_email': _emailController.text.trim(), // FIXED: Key changed to 'uni_email'
+      }),
+    );
 
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        setState(() => _currentStep = 1);
-        _showMessage(data['message']);
-      } else {
-        _showMessage(data['message'] ?? 'Error sending code', isError: true);
-      }
-    } catch (e) {
-      _showMessage('Network error. Please try again.', isError: true);
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200) {
+      setState(() => _currentStep = 1);
+      _showMessage(data['message']);
+    } else {
+      _showMessage(data['message'] ?? 'Error sending code', isError: true);
     }
-    setState(() => _isLoading = false);
+  } catch (e) {
+    _showMessage('Network error. Please try again.', isError: true);
   }
+  setState(() => _isLoading = false);
+}
 
-  Future<void> _resetPassword() async {
-    if (_newPasswordController.text.length < 6) {
-      _showMessage('Password must be at least 6 characters', isError: true);
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    try {
-      final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/api/auth/forgot-password'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'uni_email': _emailController.text.trim(),
-          'code': _codeController.text.trim(),
-          'new_password': _newPasswordController.text,
-        }),
-      );
-
-      final data = jsonDecode(response.body);
-      if (response.statusCode == 200) {
-        _showMessage('Password successfully reset! Please login.');
-        Navigator.pop(context); // Go back to login screen
-      } else {
-        _showMessage(data['message'] ?? 'Error resetting password', isError: true);
-      }
-    } catch (e) {
-      _showMessage('Network error. Please try again.', isError: true);
-    }
-    setState(() => _isLoading = false);
+Future<void> _resetPassword() async {
+  if (_newPasswordController.text.length < 6) {
+    _showMessage('Password must be at least 6 characters', isError: true);
+    return;
   }
+  setState(() => _isLoading = true);
+  try {
+    final response = await http.post(
+      // FIXED: Endpoint target path changed to 'reset-password'
+      Uri.parse('${AppConfig.baseUrl}/auth/reset-password'), 
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'uni_email': _emailController.text.trim(),   // FIXED: Key changed to 'uni_email'
+        'code': _codeController.text.trim(),         // Key matches backend 'code'
+        'new_password': _newPasswordController.text, // FIXED: Key changed to 'new_password'
+      }),
+    );
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200) {
+      _showMessage('Password successfully reset! Please login.');
+      Navigator.pop(context); // Head back to login screen safely
+    } else {
+      _showMessage(data['message'] ?? 'Error resetting password', isError: true);
+    }
+  } catch (e) {
+    _showMessage('Network error. Please try again.', isError: true);
+  }
+  setState(() => _isLoading = false);
+}
 
   void _showMessage(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
