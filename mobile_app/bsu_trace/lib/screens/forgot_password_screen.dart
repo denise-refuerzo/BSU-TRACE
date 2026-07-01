@@ -43,14 +43,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         setState(() => _currentStep = 1);
         _showMessage(data['message'] ?? 'Reset code sent successfully!');
       } else {
-        // Safe check if the server actually returned JSON or an error message string
-        try {
-          final data = jsonDecode(response.body);
-          _showMessage(data['message'] ?? 'Error sending code', isError: true);
-        } catch (_) {
-          _showMessage('Server Error (${response.statusCode}). Check Render backend logs.', isError: true);
-        }
-      }
+              // If the response starts with '<', it's an HTML page, not JSON!
+              if (response.body.trim().startsWith('<')) {
+                _showMessage('Server returned HTML instead of JSON. Status: ${response.statusCode}', isError: true);
+                debugPrint('RAW HTML: ${response.body}'); // Look at your Debug Console to read the HTML!
+              } else {
+                final data = jsonDecode(response.body);
+                _showMessage(data['message'] ?? 'Error sending code', isError: true);
+              }
+            }
     } catch (e) {
       debugPrint('Send Code Error Exception: $e');
       _showMessage('Connection error or timeout. Please check your network.', isError: true);

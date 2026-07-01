@@ -1,5 +1,7 @@
 // require('dotenv').config();
+const express = require('express');
 const nodemailer = require('nodemailer');
+const app = express();
 
 const crypto = require('crypto');
 const express = require('express');
@@ -28,10 +30,12 @@ const resetOtpStore = {};
 
 // Configure the email transporter using environment variables
 
+app.use(express.json()); 
+
+// 2. Your Mail Transporter (Using Render Environment Variables)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    // This tells Node to look at the variables you just typed into Render!
     user: process.env.EMAIL_USER, 
     pass: process.env.EMAIL_PASS  
   }
@@ -1044,45 +1048,38 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // 21. FORGOT PASSWORD ROUTES
 // ==========================================
 
-// Request Password Reset Code
-app.post('/api/users/forgot-password', async (req, res) => {
-    try {
-        const { email } = req.body;
-        const userCheck = await pool.query('SELECT u_id FROM "User" WHERE uni_email = $1', [uni_email]);
-        
-        if (userCheck.rows.length === 0) {
-            return res.status(404).json({ message: "No account found with that email." });
-        }
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    // This looks for the 'email' key you sent from Flutter
+    const { email } = req.body; 
 
-        const code = crypto.randomInt(100000, 999999).toString();
-        
-        resetOtpStore[uni_email] = {
-            code: code,
-            expiresAt: Date.now() + 15 * 60 * 1000 // 15 minutes
-        };
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
 
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: uni_email,
-            subject: 'BSU-Trace Password Reset Code',
-            text: `Your password reset code is: ${code}\n\nThis code will expire in 15 minutes. If you did not request this, please ignore this email.`
-        };
+    // (Your logic here to generate a 6-digit code and save it to your database)
+    const resetCode = "123456"; // Example code
 
-        await transporter.sendMail({
-              from: process.env.EMAIL_USER,
-              to: email,
-              subject: "Your BSU-Trace Password Reset Code",
-              text: `Your reset code is: ${code}`
-            });
+    // Send the email via Gmail
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: "Your BSU-Trace Reset Code",
+      text: `Your password reset code is: ${resetCode}`
+    });
 
-        res.status(200).json({ message: "Code sent successfully" });
+    // 4. CRITICAL: Tell Flutter it was a success! (Sends the 200 status and JSON message)
+    res.status(200).json({ message: "Reset code sent successfully!" });
 
-          } catch (error) {
-            console.error("Email Error:", error);
-            // 🚨 CRITICAL: You MUST have this line to tell Flutter if it failed!
-            res.status(500).json({ message: "Failed to send email" });
-          }
-        });
+  } catch (error) {
+    console.error("Backend Error:", error);
+    // 5. CRITICAL: Tell Flutter it failed so the app stops loading
+    res.status(500).json({ message: "Failed to send email" });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 // Verify Code & Update Password
 app.post('/api/auth/reset-password', async (req, res) => {
