@@ -1031,29 +1031,34 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 
 // Step 1: Send the Code and save it to the DB
 app.post('/api/auth/forgot-password', async (req, res) => {
+  console.log("1. Forgot password request received for:", req.body.email || req.body.uni_email);
+  
   try {
     const email = req.body.email || req.body.uni_email; 
 
     if (!email) {
+      console.log("1b. No email provided in request body.");
       return res.status(400).json({ message: "Email is required" });
     }
 
-    // Check if user exists first
+    console.log("2. Checking PostgreSQL database for user...");
     const userCheck = await pool.query('SELECT u_id FROM public."User" WHERE uni_email = $1', [email]);
+    
     if (userCheck.rows.length === 0) {
+      console.log("2b. User not found in database.");
       return res.status(404).json({ message: "No account found with this email." });
     }
 
+    console.log("3. User found! Updating reset token in database...");
     const resetCode = crypto.randomInt(100000, 999999).toString();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); 
 
-    // Save token and expiration to the User table
     await pool.query(
       'UPDATE public."User" SET reset_token = $1, reset_token_expires = $2 WHERE uni_email = $3',
       [resetCode, expiresAt, email]
     );
 
-    // Send the email
+    console.log("4. Token updated. Attempting to connect to Gmail and send email...");
     await transporter.sendMail({
       from: process.env.EMAIL_USER, 
       to: email,
@@ -1061,10 +1066,11 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       text: `Your password reset code is: ${resetCode}\n\nThis code will expire in 15 minutes.`
     });
 
+    console.log("5. Email sent successfully!");
     res.status(200).json({ message: "Reset code sent successfully!" });
 
   } catch (error) {
-    console.error("Forgot Password Error:", error);
+    console.error("6. Forgot Password Error Caught:", error);
     res.status(500).json({ message: "Failed to send email" });
   }
 });

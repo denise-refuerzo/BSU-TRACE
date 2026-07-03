@@ -26,8 +26,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       debugPrint('Sending request to: $url');
 
       // Inside _sendCode()
+      final eurl = Uri.parse('${AppConfig.baseUrl}/auth/forgot-password');
+      debugPrint('Sending request to: $eurl');
       final response = await http.post(
-        url,
+        eurl,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': _emailController.text.trim()}),
       ).timeout(
