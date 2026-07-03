@@ -14,7 +14,7 @@ import 'screens/procurement_hub_screen.dart';
 import 'screens/dashboard/user_dashboard.dart';
 import 'screens/dashboard/processor_dashboard.dart';
 import 'screens/dashboard/signee_dashboard.dart';
-import 'screens/dashboard/admin_dashboard.dart';
+import 'screens/dashboard/gso_admin_dashboard.dart';
 import 'screens/operational_analytics_screen.dart';
 import 'screens/documents_screen.dart';
 // --- FIX: Using an alias to prevent naming collisions ---

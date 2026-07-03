@@ -21,15 +21,12 @@ const pool = new Pool({
   }
 });
 
-// In-memory store for OTPs
-const resetOtpStore = {}; 
-
+// Setup standard Nodemailer (e.g., using Gmail)
 const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 2525,
+  service: 'gmail', // You can change this to 'outlook', 'yahoo', etc.
   auth: {
-    user: "b08181001@smtp-brevo.com", 
-    pass: process.env.BREVO_SMTP_PASS // <-- Reverted to hide the secret
+    user: process.env.EMAIL_USER, // e.g., yourgmail@gmail.com
+    pass: process.env.EMAIL_PASS  // Use an "App Password" here, not your real password
   }
 });
 
@@ -1032,7 +1029,7 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
 // 21. AUTHENTICATION & PASSWORD RESET 
 // ==========================================
 
-// Step 1: Send the Code
+// Step 1: Send the Code and save it to the DB
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const email = req.body.email || req.body.uni_email; 
@@ -1041,60 +1038,81 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(400).json({ message: "Email is required" });
     }
 
+    // Check if user exists first
+    const userCheck = await pool.query('SELECT u_id FROM public."User" WHERE uni_email = $1', [email]);
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ message: "No account found with this email." });
+    }
+
     const resetCode = crypto.randomInt(100000, 999999).toString();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
 
-    resetOtpStore[email] = {
-      code: resetCode,
-      expiresAt: Date.now() + 15 * 60 * 1000
-    };
+    // Save token and expiration to the User table
+    await pool.query(
+      'UPDATE public."User" SET reset_token = $1, reset_token_expires = $2 WHERE uni_email = $3',
+      [resetCode, expiresAt, email]
+    );
 
-    // Send the email via Brevo
+    // Send the email
     await transporter.sendMail({
-      from: "givano550@gmail.com", // <-- CHANGE THIS to your actual Brevo login/sender email!
+      from: process.env.EMAIL_USER, 
       to: email,
       subject: "Your BSU-Trace Password Reset Code",
-      text: `Your password reset code is: ${resetCode}`
+      text: `Your password reset code is: ${resetCode}\n\nThis code will expire in 15 minutes.`
     });
 
     res.status(200).json({ message: "Reset code sent successfully!" });
 
   } catch (error) {
-    // This logs the exact reason Brevo rejected it to your Render dashboard console
-    console.error("=== BREVO REJECTION ERROR ===");
-    console.error(error);
-    console.error("=============================");
-    
+    console.error("Forgot Password Error:", error);
     res.status(500).json({ message: "Failed to send email" });
   }
 });
 
-// Step 2: Verify Code & Update Password
+// Step 2: Verify Code & Update Password from DB
 app.post('/api/auth/reset-password', async (req, res) => {
-    // Fallback variables to handle mismatching flutter keys
     const email = req.body.email || req.body.uni_email;
     const code = req.body.code;
     const newPassword = req.body.newPassword || req.body.new_password;
 
     try {
-        const storedData = resetOtpStore[email];
+        // Fetch the user's stored token data
+        const result = await pool.query(
+          'SELECT reset_token, reset_token_expires FROM public."User" WHERE uni_email = $1', 
+          [email]
+        );
 
-        if (!storedData) {
+        if (result.rows.length === 0) {
+            return res.status(400).json({ message: "No user found with this email." });
+        }
+
+        const user = result.rows[0];
+
+        if (!user.reset_token) {
             return res.status(400).json({ message: "No reset request found for this email." });
         }
-        if (Date.now() > storedData.expiresAt) {
-            delete resetOtpStore[email];
+
+        // Check if the token is expired
+        if (new Date() > new Date(user.reset_token_expires)) {
+            // Clean up the expired token
+            await pool.query('UPDATE public."User" SET reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $1', [email]);
             return res.status(400).json({ message: "Reset code has expired. Please request a new one." });
         }
-        if (storedData.code !== code) {
+
+        // Check if the token matches
+        if (user.reset_token !== code) {
             return res.status(400).json({ message: "Invalid reset code." });
         }
 
+        // Hash the new password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        await pool.query('UPDATE public."User" SET password = $1 WHERE uni_email = $2', [hashedPassword, email]);
-
-        delete resetOtpStore[email];
+        // Update password AND clear the used reset token
+        await pool.query(
+          'UPDATE public."User" SET password = $1, reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $2', 
+          [hashedPassword, email]
+        );
 
         res.status(200).json({ message: "Password updated successfully!" });
 
@@ -1114,14 +1132,23 @@ app.post('/api/auth/forgot-2fa', async (req, res) => {
         if (!userCheck.rows[0].two_fa_enabled) return res.status(400).json({ message: "2FA is not enabled." });
 
         const code = crypto.randomInt(100000, 999999).toString();
-        resetOtpStore[`2fa_${uni_email}`] = { code, expiresAt: Date.now() + 15 * 60 * 1000 };
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+        // Save token to DB
+        await pool.query(
+          'UPDATE public."User" SET reset_token = $1, reset_token_expires = $2 WHERE uni_email = $3',
+          [code, expiresAt, uni_email]
+        );
 
         await transporter.sendMail({
-            from: process.env.EMAIL_USER, to: uni_email, subject: 'BSU-Trace 2FA Recovery',
+            from: process.env.EMAIL_USER, 
+            to: uni_email, 
+            subject: 'BSU-Trace 2FA Recovery',
             text: `Your 2FA recovery code is: ${code}\n\nThis expires in 15 minutes.`
         });
         res.status(200).json({ message: "2FA Recovery code sent." });
     } catch (error) {
+        console.error("Forgot 2FA Error:", error);
         res.status(500).json({ message: "Error sending email." });
     }
 });
@@ -1130,20 +1157,31 @@ app.post('/api/auth/forgot-2fa', async (req, res) => {
 app.post('/api/auth/reset-2fa', async (req, res) => {
     const { uni_email, code } = req.body;
     try {
-        const storeKey = `2fa_${uni_email}`;
-        const storedData = resetOtpStore[storeKey];
+        const result = await pool.query(
+          'SELECT reset_token, reset_token_expires FROM public."User" WHERE uni_email = $1', 
+          [uni_email]
+        );
 
-        if (!storedData) return res.status(400).json({ message: "No request found." });
-        if (Date.now() > storedData.expiresAt) {
-            delete resetOtpStore[storeKey]; 
+        if (result.rows.length === 0) return res.status(400).json({ message: "No request found." });
+
+        const user = result.rows[0];
+
+        if (!user.reset_token) return res.status(400).json({ message: "No request found." });
+        if (new Date() > new Date(user.reset_token_expires)) {
+            await pool.query('UPDATE public."User" SET reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $1', [uni_email]);
             return res.status(400).json({ message: "Code has expired." });
         }
-        if (storedData.code !== code) return res.status(400).json({ message: "Invalid code." });
+        if (user.reset_token !== code) return res.status(400).json({ message: "Invalid code." });
 
-        await pool.query('UPDATE public."User" SET two_fa_enabled = false, two_fa_code = NULL WHERE uni_email = $1', [uni_email]);
-        delete resetOtpStore[storeKey];
+        // Disable 2FA and clear token
+        await pool.query(
+          'UPDATE public."User" SET two_fa_enabled = false, two_fa_code = NULL, reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $1', 
+          [uni_email]
+        );
+        
         res.status(200).json({ message: "2FA has been disabled." });
     } catch (error) {
+        console.error("Reset 2FA Error:", error);
         res.status(500).json({ message: "Error resetting 2FA." });
     }
 });
