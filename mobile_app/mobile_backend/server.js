@@ -21,13 +21,18 @@ const pool = new Pool({
   }
 });
 
-// Setup standard Nodemailer (e.g., using Gmail)
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // You can change this to 'outlook', 'yahoo', etc.
+  host: 'smtp.gmail.com',
+  port: 465,         // Explicitly use the secure SMTP port
+  secure: true,      // true for 465, false for other ports
   auth: {
-    user: process.env.EMAIL_USER, // e.g., yourgmail@gmail.com
-    pass: process.env.EMAIL_PASS  // Use an "App Password" here, not your real password
-  }
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  // Add timeouts so it fails fast instead of freezing for 60 seconds
+  connectionTimeout: 10000, // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 // ==========================================
