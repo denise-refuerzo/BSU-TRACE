@@ -67,7 +67,7 @@ export default function Login() {
 
       // Redirect handles matching roles securely  
       if (data.role === 5) {
-        navigate('/admin/accounts');   
+        navigate('/admin/dashboard')  
       } else if (data.role === 2) {
         navigate('/processor/dashboard');   
       } else if (data.role === 3) {

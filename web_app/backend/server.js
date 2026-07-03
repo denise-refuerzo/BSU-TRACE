@@ -216,7 +216,8 @@ app.put('/api/profile/:userId/password', async (req, res) => {
 app.get('/api/process-types', async (req, res) => {
   try {
     const query = `
-      SELECT p.p_id, p.process_name, r.r_id,
+      SELECT p.p_id, p.process_name, p.is_active, r.r_id,
+             r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
              o1.office_name as stop_1_name, o2.office_name as stop_2_name, 
              o3.office_name as stop_3_name, o4.office_name as stop_4_name,
              o5.office_name as stop_5_name, o6.office_name as stop_6_name, 
@@ -229,10 +230,13 @@ app.get('/api/process-types', async (req, res) => {
       LEFT JOIN public.offices o4 ON r.stop_4 = o4.o_id
       LEFT JOIN public.offices o5 ON r.stop_5 = o5.o_id
       LEFT JOIN public.offices o6 ON r.stop_6 = o6.o_id
-      LEFT JOIN public.offices o7 ON r.stop_7 = o7.o_id`;
+      LEFT JOIN public.offices o7 ON r.stop_7 = o7.o_id
+      ORDER BY p.p_id DESC`;
     const result = await pool.query(query);
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: 'Failed to pull templates' }); }
+  } catch (err) { 
+    res.status(500).json({ error: 'Failed to pull templates' }); 
+  }
 });
 
 app.get('/api/documents/:userId', async (req, res) => {
@@ -935,6 +939,253 @@ app.post('/api/auth/forgot-pin/reset', async (req, res) => {
     res.json({ message: 'A fresh verification PIN has been dispatched to your institutional inbox successfully!' });
   } catch (err) {
     res.status(500).json({ error: 'Failed autonomous self-service recovery tracking code loop.' });
+  }
+});
+
+// ====================================================================
+// SECTION 3: ROLES, PERMISSIONS & WORKFLOW MANAGEMENT ENDPOINTS
+// ====================================================================
+
+// 1. DISPATCH NEW PROCESS TEMPLATE AND STEP WORKFLOW VIA TRANSACTION MATRIX
+app.post('/api/process-types', async (req, res) => {
+  const { processName, stops } = req.body;
+
+  // Structural Safeguard Rule Check: Enforce database constraint minimums
+  if (!processName || !stops || !Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'Rejection: Routing workflows require a valid process name and a minimum sequence of 2 office stops.' });
+  }
+
+  // Structural Safeguard Rule Check: Enforce maximum linear bounds
+  if (stops.length > 7) {
+    return res.status(400).json({ error: 'Rejection: System architecture restricts document tracking pipelines to a maximum configuration ceiling of 7 stops.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    // Check if the process name already exists to prevent duplicate workflows
+    const nameCheck = await client.query('SELECT * FROM public.process_type WHERE LOWER(process_name) = $1', [processName.trim().toLowerCase()]);
+    if (nameCheck.rows.length > 0) {
+      return res.status(400).json({ error: 'Rejection: A tracking template matching this process designation already exists.' });
+    }
+
+    await client.query('BEGIN'); // Start ACID database transaction sequence
+
+    // Pad the incoming array up to 7 elements with null values to map securely to table columns
+    const parameterizedStops = [...stops];
+    while (parameterizedStops.length < 7) {
+      parameterizedStops.push(null);
+    }
+
+    const insertRouteQuery = `
+      INSERT INTO public.route (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING r_id
+    `;
+    const routeResult = await client.query(insertRouteQuery, parameterizedStops);
+    const generatedRouteId = routeResult.rows[0].r_id;
+
+    const insertProcessQuery = `
+      INSERT INTO public.process_type (process_name, r_id)
+      VALUES ($1, $2)
+      RETURNING p_id
+    `;
+    await client.query(insertProcessQuery, [processName.trim(), generatedRouteId]);
+
+    await client.query('COMMIT'); // Commit structural variables across relational storage nodes
+    res.status(201).json({ message: 'Success: Workflow template compiled and active across routing tables!' });
+  } catch (err) {
+    await client.query('ROLLBACK'); // Abort and roll back tracking values safely on exceptions
+    console.error("Workflow creation processing exception:", err);
+    res.status(500).json({ error: 'Failed execution transaction sequence process template assignment loops.' });
+  } finally {
+    client.release();
+  }
+});
+
+// UPDATE AN EXISTING PROCESS NAME, ACCESS SELECTIONS, AND ITS COMPLETE ROUTE STOPS SEQUENCE
+app.put('/api/process-types/:processId', async (req, res) => {
+  const { processId } = req.params;
+  const { processName, stops, routeId, isActive } = req.body;
+
+  if (!processName || !stops || !Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'Rejection: Routing sequences require a title and a minimum of 2 office locations.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN'); // Start Transaction
+
+    // 1. Update the Process parameters and the active soft deletion state flag
+    await client.query(
+      `UPDATE public.process_type 
+       SET process_name = $1, is_active = $2 
+       WHERE p_id = $3`,
+      [processName.trim(), isActive, parseInt(processId)]
+    );
+
+    // Pad your incoming route selection numbers up to 7 options
+    const parameterizedStops = [...stops];
+    while (parameterizedStops.length < 7) {
+      parameterizedStops.push(null);
+    }
+
+    // 2. Overwrite the matching route stop columns sequence linked to this process template
+    const updateRouteQuery = `
+      UPDATE public.route 
+      SET stop_1 = $1, stop_2 = $2, stop_3 = $3, stop_4 = $4, stop_5 = $5, stop_6 = $6, stop_7 = $7
+      WHERE r_id = $8
+    `;
+    await client.query(updateRouteQuery, [...parameterizedStops, parseInt(routeId)]);
+
+    await client.query('COMMIT'); // Commit Transaction
+    res.json({ message: 'Success: Workflow template structural overrides committed cleanly!' });
+  } catch (err) {
+    await client.query('ROLLBACK'); // Abort on processing error exceptions
+    console.error("Workflow update error:", err);
+    res.status(500).json({ error: 'Failed transaction updates sequence routing allocation loops.' });
+  } finally {
+    client.release();
+  }
+});
+
+// 2. REGISTER DYNAMIC NEW CAMPUS DEPARTMENTS FOR THE ACCOUNT CREATION VIEW
+app.post('/api/departments', async (req, res) => {
+  const { departmentName } = req.body;
+  if (!departmentName || departmentName.trim() === "") {
+    return res.status(400).json({ error: 'Rejection: Department names cannot be instantiated as empty text strings.' });
+  }
+
+  try {
+    const checkDup = await pool.query('SELECT * FROM public.department WHERE LOWER(department_name) = $1', [departmentName.trim().toLowerCase()]);
+    if (checkDup.rows.length > 0) {
+      return res.status(400).json({ error: 'Rejection: This institutional department context is already indexed.' });
+    }
+
+    await pool.query('INSERT INTO public.department (department_name) VALUES ($1)', [departmentName.trim()]);
+    res.status(201).json({ message: 'Success: Global department structure synchronized successfully!' });
+  } catch (err) {
+    console.error("Department registration exception:", err);
+    res.status(500).json({ error: 'Failed execution query write department sequence context.' });
+  }
+});
+
+// 3. REGISTER DYNAMIC NEW PHYSICAL OFFICE STATION NODES
+app.post('/api/offices', async (req, res) => {
+  const { officeName } = req.body;
+  if (!officeName || officeName.trim() === "") {
+    return res.status(400).json({ error: 'Rejection: Office destination tags cannot be instantiated as empty text strings.' });
+  }
+
+  try {
+    const checkDup = await pool.query('SELECT * FROM public.offices WHERE LOWER(office_name) = $1', [officeName.trim().toLowerCase()]);
+    if (checkDup.rows.length > 0) {
+      return res.status(400).json({ error: 'Rejection: A structural branch mapping this destination name is already registered.' });
+    }
+
+    await pool.query('INSERT INTO public.offices (office_name) VALUES ($1)', [officeName.trim()]);
+    res.status(201).json({ message: 'Success: Physical campus office station indexed into global catalogs!' });
+  } catch (err) {
+    console.error("Office drop node registration exception:", err);
+    res.status(500).json({ error: 'Failed execution query write offices sequence context.' });
+  }
+});
+
+// 4. RETRIEVE GLOBAL AUDITING OVERVIEW OF CAMPUS INFRASTRUCTURE PARAMETERS
+app.get('/api/admin/infrastructure-summary', async (req, res) => {
+  try {
+    const deptRes = await pool.query('SELECT d_id AS id, department_name AS name FROM public.department ORDER BY department_name ASC');
+    const roleStatsRes = await pool.query(`
+      SELECT a.account_type, COUNT(u.u_id)::int as total_staff 
+      FROM public.account a 
+      LEFT JOIN public."User" u ON a.a_id = u.a_id 
+      GROUP BY a.account_type, a.a_id 
+      ORDER BY a.a_id ASC
+    `);
+    const officeCapacityRes = await pool.query(`
+      SELECT off.office_name, COUNT(u.u_id)::int as staff_count 
+      FROM public.offices off 
+      LEFT JOIN public."User" u ON off.o_id = u.o_id 
+      GROUP BY off.office_name 
+      ORDER BY office_name ASC
+    `);
+
+    res.json({
+      departments: deptRes.rows,
+      roleStatistics: roleStatsRes.rows,
+      officeCapacity: officeCapacityRes.rows
+    });
+  } catch (err) {
+    console.error("Summary analytical loading fault:", err);
+    res.status(500).json({ error: 'Failed compilation aggregate system status metrics loops.' });
+  }
+});
+
+app.get('/api/admin/dashboard-metrics', async (req, res) => {
+  try {
+    // Metric 1: Compute Total Open Active Tracks (Documents currently in processing)
+    const activeTracksRes = await pool.query(
+      'SELECT COUNT(DISTINCT ini_id)::int as total FROM public.processed_document WHERE time_out IS NULL'
+    );
+
+    // Metric 2: Compute Total System Users
+    const systemUsersRes = await pool.query(
+      'SELECT COUNT(u_id)::int as total FROM public."User"'
+    );
+
+    // Metric 3: Compute Total Workflow Templates Registered
+    const workflowsCountRes = await pool.query(
+      'SELECT COUNT(p_id)::int as total FROM public.process_type'
+    );
+
+    // Metric 4: Extract Live System Audit Feed (Most recent 15 operations campus-wide)
+    const liveFeedQuery = `
+      SELECT 
+        h.history_id,
+        h.action_type,
+        h.action_timestamp,
+        u.full_name as operator_name,
+        off.office_name,
+        idoc.title as document_title
+      FROM public.office_action_history h
+      JOIN public."User" u ON h.u_id = u.u_id
+      JOIN public.initial_document idoc ON h.ini_id = idoc.ini_id
+      LEFT JOIN public.offices off ON h.o_id = off.o_id
+      ORDER BY h.action_timestamp DESC
+      LIMIT 15;
+    `;
+    const liveFeedRes = await pool.query(liveFeedQuery);
+
+    // Metric 5: Detect Stalled Documents (Items sitting inside an office past 48 hours without sign-out)
+    const bottlenecksQuery = `
+      SELECT 
+        idoc.title as document_title,
+        off.office_name,
+        pdoc.time_in,
+        EXTRACT(EPOCH FROM (TIMEZONE('Asia/Manila', NOW()) - pdoc.time_in))/3600 as hours_stalled
+      FROM public.processed_document pdoc
+      JOIN public.initial_document idoc ON pdoc.ini_id = idoc.ini_id
+      JOIN public.offices off ON pdoc.current_office_id = off.o_id
+      WHERE pdoc.time_in IS NOT NULL 
+        AND pdoc.time_out IS NULL
+        AND pdoc.time_in < TIMEZONE('Asia/Manila', NOW()) - INTERVAL '48 hours'
+      ORDER BY pdoc.time_in ASC;
+    `;
+    const bottlenecksRes = await pool.query(bottlenecksQuery);
+
+    // Respond with consolidated JSON metrics objects payload
+    res.json({
+      counters: {
+        activeTracks: activeTracksRes.rows[0].total,
+        systemUsers: systemUsersRes.rows[0].total,
+        workflowBlueprints: workflowsCountRes.rows[0].total
+      },
+      liveAuditTrail: liveFeedRes.rows,
+      stalledBottlenecks: bottlenecksRes.rows
+    });
+
+  } catch (err) {
+    console.error("Dashboard operations metrics collection exception:", err);
+    res.status(500).json({ error: 'Failed aggregate calculation sequences for dashboard indicators.' });
   }
 });
 
