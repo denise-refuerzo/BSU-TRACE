@@ -83,17 +83,6 @@ const sendSystemEmail = async (to, subject, text) => {
   });
 };
 
-// Helper function to send emails cleanly from any route
-const sendSystemEmail = async (to, subject, text) => {
-  const emailTransporter = await createTransporter();
-  await emailTransporter.sendMail({
-    from: '"BSU-Trace Security" bsutrace@gmail.com', 
-    to: to,
-    subject: subject,
-    text: text
-  });
-};
-
 // ==========================================
 // 1. LOGIN ENDPOINT (Enforces is_active restriction)
 // ==========================================
