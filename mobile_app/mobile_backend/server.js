@@ -83,6 +83,44 @@ const sendSystemEmail = async (to, subject, text) => {
   });
 };
 
+// Add this near the very top of server.js with your other requires
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+// ==========================================
+// GEMINI AI CHATBOT ENDPOINT
+// ==========================================
+// Initialize the SDK. It automatically picks up process.env.GEMINI_API_KEY
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+app.post('/api/chat', async (req, res) => {
+  const { userMessage } = req.body;
+
+  if (!userMessage) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  try {
+    // We use gemini-1.5-flash because it is the fastest and most cost-effective
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    // SYSTEM PROMPT: This tells Gemini who it is and how to behave. 
+    // You can customize this to fit BSU-Trace perfectly.
+    const systemPrompt = `You are a helpful, professional AI assistant for BSU-Trace, a university document tracking system. 
+    Answer this user query politely and concisely: ${userMessage}`;
+
+    // Ask Gemini to generate the response
+    const result = await model.generateContent(systemPrompt);
+    const botReply = result.response.text();
+
+    // Send the text back to your Flutter app
+    res.status(200).json({ reply: botReply });
+
+  } catch (error) {
+    console.error('Gemini API Error:', error);
+    res.status(500).json({ error: 'Failed to generate a response from the AI' });
+  }
+});
+
 // ==========================================
 // 1. LOGIN ENDPOINT (Enforces is_active restriction)
 // ==========================================
