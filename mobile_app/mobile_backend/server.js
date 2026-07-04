@@ -55,8 +55,10 @@ const createTransporter = async () => {
     });
   });
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
+const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: {
       type: "OAuth2",
       user: process.env.EMAIL_USER,
