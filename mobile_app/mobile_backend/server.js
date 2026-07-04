@@ -30,11 +30,6 @@ const pool = new Pool({
 });
 
 // ==========================================
-// GOOGLE API OAUTH2 EMAIL SETUP
-// ==========================================
-const OAuth2 = google.auth.OAuth2;
-
-// ==========================================
 // GOOGLE API HTTPS EMAIL SETUP (Bypasses Render SMTP Block)
 // ==========================================
 const { google } = require('googleapis');
