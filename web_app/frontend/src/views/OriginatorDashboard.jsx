@@ -11,20 +11,16 @@ export default function OriginatorDashboard() {
   const userId = localStorage.getItem('userId');
   const userName = localStorage.getItem('user') || 'Faculty User';
   
-  // Tab Routing Context: 'dashboard' | 'documents' | 'resources' | 'profile'
   const [activeTab, setActiveTab] = useState('dashboard');
   
-  // Core Domain States
   const [documents, setDocuments] = useState([]);
   const [processTypes, setProcessTypes] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   
-  // Notification Hub States
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
-  // Profile Domain Configuration States with solid initial fallback defaults from session memory
   const [profile, setProfile] = useState({
     fullName: userName,
     email: 'faculty@batstate-u.edu.ph',
@@ -35,23 +31,19 @@ export default function OriginatorDashboard() {
     twoFaCode: ''
   });
   
-  // Reference copy to check for modifications
   const [initialProfile, setInitialProfile] = useState(null);
   
-  // Modal State Triggers
   const [showModal, setShowModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [generatedQr, setGeneratedQr] = useState('');
   
-  // Forms Hooks
   const [form, setForm] = useState({ title: '', processTypeId: '', confirmation: false });
   const [passForm, setPassForm] = useState({ currentPassword: '', newPassword: '', confirmNew: '' });
   const [selectedRoutePreview, setSelectedRoutePreview] = useState([]);
   const [estimatedDate, setEstimatedDate] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
 
-  // HOME DASHBOARD INTERFACE RECENT ROUTE EXTRACTION HELPER
   const [recentDocStops, setRecentDocStops] = useState([]);
 
   useEffect(() => {
@@ -65,7 +57,6 @@ export default function OriginatorDashboard() {
     fetchUserProfile();
   }, [userId]);
 
-  // Dynamic tracker look up listener block triggered upon document row indexing arrays loading
   useEffect(() => {
     if (documents.length > 0 && processTypes.length > 0) {
       const activeDoc = documents[0];
@@ -91,6 +82,31 @@ export default function OriginatorDashboard() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    fetchLiveNotificationFeeds();
+    const alertInterval = setInterval(fetchLiveNotificationFeeds, 10000);
+    return () => clearInterval(alertInterval);
+  }, [userId]);
+
+  const fetchLiveNotificationFeeds = async () => {
+    try {
+      // roleId = 1 signifies an Originator account
+      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/1/0`);
+      const data = await res.json();
+      if (res.ok) {
+        const alertCollection = data.map(n => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          time: new Date(n.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+        }));
+        setNotifications(alertCollection);
+      }
+    } catch (err) { 
+      console.error("Error retrieving notifications:", err); 
+    }
+  };
 
   const fetchUserProfile = async () => {
     try {
@@ -230,7 +246,6 @@ export default function OriginatorDashboard() {
 
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
-      {/* Sidebar Layout Frame */}
       <div className="w-64 bg-[#2D1F1E] text-neutral-300 flex flex-col justify-between p-4 flex-shrink-0">
         <div>
           <div className="flex items-center gap-3 border-b border-neutral-700 pb-4 mb-6">
@@ -259,7 +274,6 @@ export default function OriginatorDashboard() {
         </div>
       </div>
 
-      {/* Main Panel Content Frame */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
           <h2 className="text-lg font-bold text-neutral-800 capitalize">{activeTab} Hub</h2>
@@ -285,9 +299,6 @@ export default function OriginatorDashboard() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-8">
-          {/* ==========================================
-              TAB 1: HOME/DASHBOARD WORKSPACE
-              ========================================== */}
           {activeTab === 'dashboard' && (
             <div className="space-y-8 max-w-6xl mx-auto">
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -300,7 +311,7 @@ export default function OriginatorDashboard() {
                   <button onClick={() => setActiveTab('profile')} className="mt-4 px-4 py-1.5 w-max bg-red-800 text-white rounded-lg text-xs font-medium hover:bg-red-900">View Profile</button>
                 </div>
                 <div className="xl:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  {[{ label: 'Total Documents', val: documents.length, color: 'text-neutral-900' }, { label: 'Pending Process', val: pendingCount, color: 'text-amber-600' }, { label: 'Action Required', val: 0, color: 'text-red-600' }, { label: 'Completed Log', val: 0, color: 'text-green-600' }].map((kpi, idx) => (
+                  {[{ label: 'Total Documents', val: documents.length, color: 'text-neutral-900' }, { label: 'Pending Process', val: pendingCount, color: 'text-amber-600' }, { label: 'Action Required', val: 0, color: 'text-red-600' }, { label: 'Completed Log', val: documents.filter(d => d.status?.toLowerCase() === 'completed').length, color: 'text-green-600' }].map((kpi, idx) => (
                     <div key={idx} className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm text-center">
                       <p className="text-xs font-bold text-neutral-400 uppercase tracking-tight mb-2">{kpi.label}</p>
                       <p className={`text-4xl font-extrabold ${kpi.color}`}>{String(kpi.val).padStart(2, '0')}</p>
@@ -309,14 +320,12 @@ export default function OriginatorDashboard() {
                 </div>
               </div>
 
-              {/* DYNAMIC PATCH APPLIED HERE: Renders all real stops from database templates */}
               {mostRecentDoc && (
               <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm text-left">
                 <h4 className="text-sm font-bold tracking-tight text-neutral-500 uppercase mb-4">
                   Recent Document: <span className="text-neutral-900 font-extrabold uppercase">{mostRecentDoc.title}</span>
                 </h4>
                 <div className="relative flex items-center justify-between mt-6 px-4">
-                  {/* Dynamic Connector Background Track Lines */}
                   <div className="absolute left-4 right-4 h-1 bg-neutral-200 top-3 -z-10"></div>
                   <div 
                     className="absolute left-4 h-1 bg-red-700 top-3 -z-10 transition-all duration-500 ease-in-out"
@@ -373,9 +382,6 @@ export default function OriginatorDashboard() {
             </div>
           )}
 
-          {/* ==========================================
-              TAB 2: DOCUMENTS HUB LINKING
-              ========================================== */}
           {activeTab === 'documents' && (
             <DocumentsHub 
               userId={userId}
@@ -386,9 +392,6 @@ export default function OriginatorDashboard() {
             />
           )}
 
-          {/* ==========================================
-              TAB 3: PROFILE HUB
-              ========================================== */}
           {activeTab === 'profile' && (
             <form onSubmit={saveProfileChanges} className="max-w-4xl mx-auto space-y-6 text-left animate-in fade-in duration-150">
               {statusMsg && <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-700 text-xs font-semibold">{statusMsg}</div>}
@@ -476,7 +479,7 @@ export default function OriginatorDashboard() {
                   </div>
 
                   <div className="p-4 bg-red-50/50 border border-red-100 text-red-800 rounded-xl text-[11px] leading-relaxed">
-                    ℹ️ Institutional data variables are managed natively by the university registry core database. Please contact <span className="font-bold underline cursor-pointer">ICT Support</span> for data correction rules.
+                    ℹ️ Institutional data variables are managed natively by the university registry core database. Please contact <span className="font-bold underline underline-offset-2 cursor-pointer">ICT Support</span> for data correction rules.
                   </div>
                 </div>
               </div>
@@ -504,7 +507,6 @@ export default function OriginatorDashboard() {
         </div>
       </div>
 
-      {/* SECURE PASSWORD MODAL */}
       {showPassModal && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl border overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
@@ -519,7 +521,6 @@ export default function OriginatorDashboard() {
         </div>
       )}
 
-      {/* NEW DOCUMENT SUBMISSION FORM MODAL */}
       {showModal && ( 
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white w-full max-w-xl rounded-2xl shadow-xl border overflow-hidden flex flex-col text-left animate-in fade-in zoom-in-95 duration-150">
@@ -574,7 +575,6 @@ export default function OriginatorDashboard() {
         </div> 
       )}
 
-      {/* QR DISPATCH CONFIRMATION OVERLAY */}
       {showQrModal && ( 
         <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 text-center max-w-sm w-full border shadow-2xl space-y-4 animate-in zoom-in-95 duration-100">

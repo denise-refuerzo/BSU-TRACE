@@ -15,6 +15,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key';
 const failed2faAttemptsTracker = {};
 
 // 1. CONDITIONAL LOGIN ENDPOINT WITH 2FA VERIFICATION CHANNELS
+
 app.post('/api/login', async (req, res) => {
   const { username, password, pinCode } = req.body;
   try {
@@ -33,18 +34,14 @@ app.post('/api/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ error: 'Invalid username or password' });
 
-    // 🛡️ THE DEACTIVATION LOCK GATEKEEPER
-    // Instantly rejects login attempts if the account access flag has been disabled by the admin
     if (user.is_active === false) {
       return res.status(403).json({ error: 'Access Revoked: This user profile has been deactivated by administration.' });
     }
 
-    // Initialize state counter if missing from cache array
     if (!failed2faAttemptsTracker[user.u_id]) {
       failed2faAttemptsTracker[user.u_id] = 0;
     }
 
-    // Lockout gatekeeper: if failed entries surpass 10 consecutive loops, throw structural lockout code
     if (user.two_fa_enabled && failed2faAttemptsTracker[user.u_id] >= 10) {
       return res.status(423).json({ 
         error: 'Security Lockout: 10 consecutive wrong entry combinations detected. Manual security PIN reset required.',
@@ -58,7 +55,7 @@ app.post('/api/login', async (req, res) => {
 
     if (user.two_fa_enabled && pinCode) {
       if (user.two_fa_code !== pinCode) {
-        failed2faAttemptsTracker[user.u_id] += 1; // Increment metric log
+        failed2faAttemptsTracker[user.u_id] += 1;
         
         const remainingAttempts = 10 - failed2faAttemptsTracker[user.u_id];
         if (remainingAttempts <= 0) {
@@ -73,7 +70,6 @@ app.post('/api/login', async (req, res) => {
         });
       }
       
-      // Clear memory tracking if evaluation succeeds
       failed2faAttemptsTracker[user.u_id] = 0;
     }
 
@@ -91,12 +87,8 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// ====================================================================
-// NEW ICT ADMIN ENDPOINT: FETCH ALL USERS WITH RELATIONALLY JOINED NAMES
-// ====================================================================
 app.get('/api/accounts', async (req, res) => {
   try {
-    // We select critical profile fields, joining tables to map role strings and office names
     const query = `
                   SELECT u.u_id, u.username, u.full_name, u.uni_email, u.faculty_id, u.two_fa_enabled, u.a_id, u.d_id, u.o_id, u.is_active,
                         a.account_type as role_name,
@@ -116,15 +108,10 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
-// ====================================================================
-// NEW ICT ADMIN ENDPOINT: SECURE ACCOUNT RECONFIGURATION OVERRIDE
-// ====================================================================
 app.put('/api/accounts/:userId', async (req, res) => {
   const { userId } = req.params;
-  // 🛡️ SECURITY SHIELD: twoFaEnabled and twoFaCode are completely stripped out of parameters map
   const { username, fullName, email, accountType, departmentId, officeId, isActive } = req.body;  
   try {
-    // Validate if the modified username is taken by another account primary key identifier
     const duplicateCheck = await pool.query(
       `SELECT * FROM public."User" WHERE username = $1 AND u_id != $2`,
       [username, parseInt(userId)]
@@ -140,7 +127,6 @@ app.put('/api/accounts/:userId', async (req, res) => {
 
     const assignedDepartmentId = departmentId ? parseInt(departmentId) : 1;
 
-    // 🛡️ IMMUTABLE QUERY: Omit setting the two_fa columns entirely to neutralize Admin override tampering
     const query = `
       UPDATE public."User"
       SET username = $1, full_name = $2, uni_email = $3, a_id = $4, d_id = $5, o_id = $6, is_active = $7
@@ -158,7 +144,6 @@ app.put('/api/accounts/:userId', async (req, res) => {
   }
 });
 
-// 2. RETRIEVE DETAILED PROFILE METADATA 
 app.get('/api/profile/:userId', async (req, res) => {
   try {
     const result = await pool.query(
@@ -179,7 +164,6 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
-// 3. RE-INDEX AND SAVE PROFILE CHANGES
 app.put('/api/profile/:userId', async (req, res) => {
   const { fullName, email, twoFaEnabled, twoFaCode } = req.body;
   try {
@@ -195,7 +179,6 @@ app.put('/api/profile/:userId', async (req, res) => {
   }
 });
 
-// 4. SECURE PASSWORD UPDATE ENDPOINT
 app.put('/api/profile/:userId/password', async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   try {
@@ -250,7 +233,14 @@ app.get('/api/documents/:userId', async (req, res) => {
              pt.process_name,
              curr_o.office_name as current_office, 
              next_o.office_name as next_office, 
-             st.current_status as status
+             st.current_status as status,
+             (
+               SELECT action_type 
+               FROM public.office_action_history 
+               WHERE ini_id = idoc.ini_id AND action_type LIKE 'Sent Back for Revision:%'
+               ORDER BY history_id DESC 
+               LIMIT 1
+             ) as last_action
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       LEFT JOIN public.processed_document pdoc ON idoc.ini_id = pdoc.ini_id
@@ -319,9 +309,6 @@ app.post('/api/accounts', async (req, res) => {
   }
 });
 
-// ==========================================
-// SCHOOL RESOURCES SCHEDULER ENDPOINTS
-// ==========================================
 app.get('/api/resources/bookings', async (req, res) => {
   try {
     const query = `
@@ -403,7 +390,7 @@ app.post('/api/resources/book', async (req, res) => {
   }
 });
 
-// FETCH INCOMING DOCUMENTS FILTERED BY THE PROCESSOR'S ASSIGNED OFFICE
+// FETCH INCOMING ACTIVE PENDING DOCUMENTS FOR PROCESSOR/SIGNEE DASHBOARD LISTS ONLY
 app.get('/api/processor/documents/:officeId', async (req, res) => {
   const { officeId } = req.params;
   try {
@@ -420,21 +407,66 @@ app.get('/api/processor/documents/:officeId', async (req, res) => {
         pdoc.time_in,
         pdoc.time_out,
         pdoc.is_adhoc,
-        pdoc.adhoc_return_office_id
+        pdoc.adhoc_return_office_id,
+        r.stop_1 as route_start_id,
+        creator.full_name AS requestor_name
       FROM public.processed_document pdoc
       JOIN public.initial_document idoc ON pdoc.ini_id = idoc.ini_id
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      JOIN public."User" creator ON idoc.u_id = creator.u_id
       LEFT JOIN public.offices curr_o ON pdoc.current_office_id = curr_o.o_id
       LEFT JOIN public.offices next_o ON pdoc.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON pdoc.s_id = st.s_id
       WHERE pdoc.current_office_id = $1 AND pdoc.time_out IS NULL
-      ORDER BY pdoc.time_in DESC NULLS LAST;
+      ORDER BY pdoc.pd_id DESC;
     `;
     const result = await pool.query(query, [parseInt(officeId)]);
     res.json(result.rows);
   } catch (err) {
-    console.error("Processor document query error:", err);
-    res.status(500).json({ error: "Failed to load office document streams" });
+    console.error("Processor active document lookup failure:", err);
+    res.status(500).json({ error: "Failed to load active office document stream parameters." });
+  }
+});
+
+// FETCH EXTENDED PIPELINE TRACKS CONTAINING HISTORICAL ENGAGEMENTS UNIQUE TO THIS STATION
+app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
+  const { officeId } = req.params;
+  try {
+    const query = `
+      SELECT DISTINCT ON (idoc.ini_id)
+        idoc.ini_id, 
+        idoc.title, 
+        idoc.edc, 
+        idoc.qr_code, 
+        pt.process_name,
+        INITCAP(st.current_status) as status,
+        orig_o.office_name as originating_office,
+        curr_o.office_name as current_office, 
+        next_o.office_name as next_office,
+        pdoc_office.time_in,
+        pdoc_office.time_out,
+        pdoc_active.current_office_id,
+        pdoc_active.is_adhoc AS current_step_is_adhoc,
+        creator.full_name AS requestor_name
+      FROM public.initial_document idoc
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      JOIN public."User" creator ON idoc.u_id = creator.u_id
+      JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id
+      LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
+      LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
+      LEFT JOIN public.offices curr_o ON COALESCE(pdoc_active.current_office_id, pdoc_office.current_office_id) = curr_o.o_id
+      LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
+      LEFT JOIN public.status st ON COALESCE(pdoc_active.s_id, pdoc_office.s_id) = st.s_id
+      WHERE pdoc_office.current_office_id = $1
+      ORDER BY idoc.ini_id DESC, pdoc_office.pd_id DESC;
+    `;
+    const result = await pool.query(query, [parseInt(officeId)]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Pipeline analytics ledger parsing fault:", err);
+    res.status(500).json({ error: "Failed compiling analytical structural route loops." });
   }
 });
 
@@ -502,8 +534,9 @@ app.post('/api/documents/scan-out', async (req, res) => {
     const procRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
     const processorOfficeId = procRes.rows[0]?.o_id;
 
+    // 1. Fetch current document state along with its numeric status ID (s_id)
     const checkStatusRes = await pool.query(`
-      SELECT pd.pd_id, pd.time_in, st.current_status, pd.next_office_id, pd.ini_id, idoc.title
+      SELECT pd.pd_id, pd.time_in, pd.s_id, st.current_status, pd.next_office_id, pd.ini_id, idoc.title
       FROM public.processed_document pd
       JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
       JOIN public.status st ON pd.s_id = st.s_id
@@ -523,19 +556,38 @@ app.post('/api/documents/scan-out', async (req, res) => {
       });
     }
 
+    // 2. Prevent scanning out if it's still generic pending or verification state
     if (currentStatusClean === 'pending' || currentStatusClean === 'in verification') {
       return res.status(400).json({ 
-        error: "Rejection: This document cannot be signed out yet. It requires approval/signature from the office Signee." 
+        error: "Rejection: This document cannot be signed out yet. It requires approval/signature or explicit action from the office Signee." 
       });
     }
 
-    // Record the checkout timestamp for the current station
-    await pool.query(`
-      UPDATE public.processed_document 
-      SET time_out = TIMEZONE('Asia/Manila', NOW()) 
-      WHERE pd_id = $1
-    `, [currentActiveStep.pd_id]);
+    // ==========================================================
+    // CRITICAL PATCH: HANDLE SENT BACK / ACTION REQUIRED WORKFLOW
+    // ==========================================================
+    if (currentActiveStep.s_id === 4 || currentStatusClean === 'action required') {
+      // Clock out of current office but preserve s_id = 4 so it remains frozen as Action Required
+      await pool.query(`
+        UPDATE public.processed_document 
+        SET time_out = TIMEZONE('Asia/Manila', NOW())
+        WHERE pd_id = $1
+      `, [currentActiveStep.pd_id]);
 
+      if (processorOfficeId) {
+        await pool.query(`
+          INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+          VALUES ($1, $2, $3, 'Scanned Out (Halted - Revision Required)', TIMEZONE('Asia/Manila', NOW()))
+        `, [currentActiveStep.ini_id, processorUserId, processorOfficeId]);
+      }
+
+      return res.json({ 
+        message: "Document safely checked out and frozen. Workflow halted pending Originator revisions." 
+      });
+    }
+    // ==========================================================
+
+    // 3. Normal route processing continues below for non-halted documents
     const adhocCheckRes = await pool.query(`
       SELECT is_adhoc, adhoc_return_office_id, is_returned_from_adhoc, current_office_id
       FROM public.processed_document
@@ -544,47 +596,54 @@ app.post('/api/documents/scan-out', async (req, res) => {
 
     const adhocData = adhocCheckRes.rows[0];
 
+    const routeRes = await pool.query(`
+      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
+      FROM public.initial_document idoc
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      WHERE idoc.ini_id = $1
+    `, [currentActiveStep.ini_id]);
+
+    const r = routeRes.rows[0];
+    let foundNextStop = null;
+    let targetCurrentOffice = currentActiveStep.next_office_id || adhocData.current_office_id;
+
+    if (r && !adhocData.is_adhoc) {
+      const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
+      const currentIndex = sequence.indexOf(targetCurrentOffice);
+      if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
+        foundNextStop = sequence[currentIndex + 1];
+      }
+    }
+
     if (adhocData && adhocData.is_adhoc) {
-      // Return route execution from ad-hoc detour sub-loops
+      await pool.query(`
+        UPDATE public.processed_document 
+        SET time_out = TIMEZONE('Asia/Manila', NOW()) 
+        WHERE pd_id = $1
+      `, [currentActiveStep.pd_id]);
+
       await pool.query(`
         INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, is_returned_from_adhoc, time_in)
         VALUES ($1, 1, $2, NULL, true, NULL)
       `, [currentActiveStep.ini_id, adhocData.adhoc_return_office_id]);
+    } else if (!foundNextStop) {
+      await pool.query(`
+        UPDATE public.processed_document 
+        SET time_out = TIMEZONE('Asia/Manila', NOW()), s_id = 5
+        WHERE pd_id = $1
+      `, [currentActiveStep.pd_id]);
     } else {
-      const routeRes = await pool.query(`
-        SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
-        FROM public.initial_document idoc
-        JOIN public.process_type pt ON idoc.p_id = pt.p_id
-        JOIN public.route r ON pt.r_id = r.r_id
-        WHERE idoc.ini_id = $1
-      `, [currentActiveStep.ini_id]);
+      await pool.query(`
+        UPDATE public.processed_document 
+        SET time_out = TIMEZONE('Asia/Manila', NOW()) 
+        WHERE pd_id = $1
+      `, [currentActiveStep.pd_id]);
 
-      const r = routeRes.rows[0];
-      let foundNextStop = null;
-      let targetCurrentOffice = currentActiveStep.next_office_id || adhocData.current_office_id;
-
-      if (r) {
-        const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
-        const currentIndex = sequence.indexOf(targetCurrentOffice);
-        if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
-          foundNextStop = sequence[currentIndex + 1];
-        }
-      }
-
-      if (!foundNextStop) {
-        // 🏁 PIPELINE ROUTE COMPLETION
-        // No further stops remaining in sequence: allocate finalized confirmation step log (s_id = 5)
-        await pool.query(`
-          INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in, time_out)
-          VALUES ($1, 5, $2, NULL, TIMEZONE('Asia/Manila', NOW()), TIMEZONE('Asia/Manila', NOW()))
-        `, [currentActiveStep.ini_id, targetCurrentOffice]);
-      } else {
-        // Dispatch document forward to next standard sequence office lane block
-        await pool.query(`
-          INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
-          VALUES ($1, 1, $2, $3, NULL)
-        `, [currentActiveStep.ini_id, targetCurrentOffice, foundNextStop]);
-      }
+      await pool.query(`
+        INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
+        VALUES ($1, 1, $2, $3, NULL)
+      `, [currentActiveStep.ini_id, targetCurrentOffice, foundNextStop]);
     }
 
     if (processorOfficeId) {
@@ -599,110 +658,6 @@ app.post('/api/documents/scan-out', async (req, res) => {
   } catch (err) {
     console.error("Scan-Out Error:", err);
     res.status(500).json({ error: "Internal Server Error checking out document." });
-  }
-});
-
-// FETCH EXTENDED PIPELINE RECORDS FOR THE MASTER DOCUMENTS TAB
-app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
-  const { officeId } = req.params;
-  try {
-    const query = `
-      SELECT DISTINCT ON (idoc.ini_id)
-        idoc.ini_id, 
-        idoc.title, 
-        idoc.edc, 
-        idoc.qr_code, 
-        pt.process_name,
-        INITCAP(st.current_status) as status,
-        orig_o.office_name as originating_office,
-        curr_o.office_name as current_office, 
-        next_o.office_name as next_office,
-        pdoc_office.time_in,
-        pdoc_office.time_out,
-        pdoc_active.current_office_id,
-        pdoc_active.is_adhoc AS current_step_is_adhoc,
-        creator.full_name AS requestor_name
-      FROM public.initial_document idoc
-      JOIN public.process_type pt ON idoc.p_id = pt.p_id
-      JOIN public.route r ON pt.r_id = r.r_id
-      JOIN public."User" creator ON idoc.u_id = creator.u_id
-      LEFT JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id AND pdoc_office.current_office_id = $1
-      LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
-      LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
-      LEFT JOIN public.offices curr_o ON pdoc_active.current_office_id = curr_o.o_id
-      LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
-      LEFT JOIN public.status st ON pdoc_active.s_id = st.s_id
-      WHERE pdoc_office.pd_id IS NOT NULL 
-         OR pdoc_active.current_office_id = $1
-         OR r.stop_1 = $1 OR r.stop_2 = $1 OR r.stop_3 = $1 OR r.stop_4 = $1 OR r.stop_5 = $1 OR r.stop_6 = $1 OR r.stop_7 = $1
-      ORDER BY idoc.ini_id DESC;
-    `;
-    const result = await pool.query(query, [parseInt(officeId)]);
-    res.json(result.rows);
-  } catch (err) {
-    console.error("Pipeline query error:", err);
-    res.status(500).json({ error: "Failed to load master pipeline streams" });
-  }
-});
-
-// EXECUTE AD-HOC DETOUR VERIFICATION REROUTE
-app.post('/api/processor/documents/ad-hoc', async (req, res) => {
-  const { iniId, targetOfficeId, currentOfficeId, executorUserId } = req.body;
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const activeStepRes = await client.query(`
-      SELECT pd_id, next_office_id, time_in 
-      FROM public.processed_document 
-      WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
-    `, [parseInt(iniId), parseInt(currentOfficeId)]);
-
-    if (activeStepRes.rows.length === 0) {
-      throw new Error("No active, open tracking step found for this document in your office.");
-    }
-
-    const currentStep = activeStepRes.rows[0];
-
-    if (currentStep.time_in === null) {
-      throw new Error("Rejection: Cannot request an ad-hoc detour. This document has not been scanned for Time-In at your office.");
-    }
-
-    await client.query (`
-      UPDATE public.processed_document
-      SET s_id = 2 -- 'In Verification'
-      WHERE pd_id = $1
-    `, [currentStep.pd_id]);
-
-    await client.query(`
-      INSERT INTO public.processed_document (
-        ini_id, 
-        s_id, 
-        current_office_id, 
-        next_office_id, 
-        is_adhoc, 
-        adhoc_return_office_id, 
-        time_in, 
-        time_out
-      )
-      VALUES ($1, 1, $2, $3, true, $3, NULL, NULL)
-    `, [parseInt(iniId), parseInt(targetOfficeId), parseInt(currentOfficeId)]);
-
-    await client.query(`
-      INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
-      VALUES ($1, $2, $3, 'Ad-Hoc Detour Routed', TIMEZONE('Asia/Manila', NOW()))
-    `, [parseInt(iniId), parseInt(executorUserId), parseInt(currentOfficeId)]);
-
-    await client.query('COMMIT');
-    res.json({ message: "Ad-hoc verification detour successfully injected into tracking pipeline!" });
-
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error("Ad-hoc routing transaction error:", err);
-    res.status(500).json({ error: err.message || "Failed to commit ad-hoc routing detour step." });
-  } finally {
-    client.release();
   }
 });
 
@@ -738,10 +693,10 @@ app.get('/api/processor/history/:officeId', async (req, res) => {
         FROM public.processed_document pd
         WHERE pd.ini_id = h.ini_id 
           AND pd.current_office_id = h.o_id
-        ORDER BY ABS(EXTRACT(EPOCH FROM (pd.time_in - h.action_timestamp))) ASC NULLS LAST
+        ORDER BY pd.pd_id DESC
         LIMIT 1
       ) pdoc ON TRUE
-      LEFT JOIN public.offices curr_o ON pdoc.current_office_id = curr_o.o_id
+      LEFT JOIN public.offices curr_o ON h.o_id = curr_o.o_id
       LEFT JOIN public.offices next_o ON pdoc.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON pdoc.s_id = st.s_id
       WHERE h.o_id = $1
@@ -750,7 +705,7 @@ app.get('/api/processor/history/:officeId', async (req, res) => {
     const result = await pool.query(query, [parseInt(officeId)]);
     res.json(result.rows);
   } catch (err) {
-    console.error("Audit trail lookup log mapping error:", err);
+    console.error("Audit trail lookup mapping error:", err);
     res.status(500).json({ error: "Failed to map historical action segments." });
   }
 });
@@ -767,10 +722,8 @@ app.get('/api/offices', async (req, res) => {
   }
 });
 
-// SIGNEE ACTION: OFFICIAL ROUTING SIGNATURE RECORD
 app.post('/api/signee/sign', async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId } = req.body;
-  
   try {
     const updateResult = await pool.query(`
       UPDATE public.processed_document
@@ -795,14 +748,13 @@ app.post('/api/signee/sign', async (req, res) => {
   }
 });
 
-// SIGNEE ACTION: SEND BACK FOR REVISION (HALTS ALL WORKFLOW STEPS)
 app.post('/api/signee/return', async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId, reason } = req.body;
-
   try {
+    // Set status to 'Action Required' (s_id = 4) and decouple next_office_id to freeze the route
     const updateResult = await pool.query(`
       UPDATE public.processed_document
-      SET s_id = 4
+      SET s_id = 4, next_office_id = NULL
       WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
       RETURNING pd_id
     `, [parseInt(iniId), parseInt(currentOfficeId)]);
@@ -811,20 +763,19 @@ app.post('/api/signee/return', async (req, res) => {
       return res.status(404).json({ error: "Document active link context is missing." });
     }
 
-    const actionMessage = `Sent Back for Revision: ${reason.substring(0, 100)}`;
+    const actionMessage = `Sent Back for Revision: ${reason}`;
     await pool.query(`
       INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
       VALUES ($1, $2, $3, $4, TIMEZONE('Asia/Manila', NOW()))
     `, [parseInt(iniId), parseInt(signeeUserId), parseInt(currentOfficeId), actionMessage]);
 
-    res.json({ message: "Document flagged for corrections and halted cleanly." });
+    res.json({ message: "Document flagged for corrections and route path frozen cleanly." });
   } catch (err) {
-    console.error("Return routing tracking mismatch error:", err);
+    console.error("Return routing tracking error:", err);
     res.status(500).json({ error: "Internal processing structural breakdown." });
   }
 });
 
-// FORGOT PASSWORD STEP 1: IDENTIFY ACCOUNT & MASK EMAIL
 app.post('/api/auth/forgot-password/identify', async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username is required.' });
@@ -857,7 +808,6 @@ app.post('/api/auth/forgot-password/identify', async (req, res) => {
   }
 });
 
-// FORGOT PASSWORD STEP 2 & 3: VERIFY EMAIL & DISPATCH 6-DIGIT CODE
 app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
   const { username, fullEmail } = req.body;
   if (!username || !fullEmail) return res.status(400).json({ error: 'All fields are required.' });
@@ -899,7 +849,6 @@ app.post('/api/auth/forgot-password/verify-email', async (req, res) => {
   }
 });
 
-// FORGOT PASSWORD STEP 4: VALIDATE CODE AND COMMIT NEW HASHED PASSWORD
 app.post('/api/auth/forgot-password/reset', async (req, res) => {
   const { username, code, newPassword } = req.body;
   if (!username || !code || !newPassword) return res.status(400).json({ error: 'All fields are required.' });
@@ -951,11 +900,9 @@ app.post('/api/auth/forgot-pin/reset', async (req, res) => {
     const user = result.rows[0];
     const newRandomPin = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Directly overwrite code entries in the database and unlock any active memory lockouts
     await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [newRandomPin, user.u_id]);
     failed2faAttemptsTracker[user.u_id] = 0; 
 
-    // Send the freshly generated PIN code directly to the user's university email box
     await sendResetCodeEmail(user.uni_email, user.full_name, `YOUR SECURITY DASHBOARD TWO-FACTOR AUTHENTICATION PIN HAS BEEN RESET TO: ${newRandomPin}`);
 
     res.json({ message: 'A fresh verification PIN has been dispatched to your institutional inbox successfully!' });
@@ -964,35 +911,26 @@ app.post('/api/auth/forgot-pin/reset', async (req, res) => {
   }
 });
 
-// ====================================================================
-// SECTION 3: ROLES, PERMISSIONS & WORKFLOW MANAGEMENT ENDPOINTS
-// ====================================================================
-
-// 1. DISPATCH NEW PROCESS TEMPLATE AND STEP WORKFLOW VIA TRANSACTION MATRIX
 app.post('/api/process-types', async (req, res) => {
   const { processName, stops } = req.body;
 
-  // Structural Safeguard Rule Check: Enforce database constraint minimums
   if (!processName || !stops || !Array.isArray(stops) || stops.length < 2) {
     return res.status(400).json({ error: 'Rejection: Routing workflows require a valid process name and a minimum sequence of 2 office stops.' });
   }
 
-  // Structural Safeguard Rule Check: Enforce maximum linear bounds
   if (stops.length > 7) {
     return res.status(400).json({ error: 'Rejection: System architecture restricts document tracking pipelines to a maximum configuration ceiling of 7 stops.' });
   }
 
   const client = await pool.connect();
   try {
-    // Check if the process name already exists to prevent duplicate workflows
     const nameCheck = await client.query('SELECT * FROM public.process_type WHERE LOWER(process_name) = $1', [processName.trim().toLowerCase()]);
     if (nameCheck.rows.length > 0) {
       return res.status(400).json({ error: 'Rejection: A tracking template matching this process designation already exists.' });
     }
 
-    await client.query('BEGIN'); // Start ACID database transaction sequence
+    await client.query('BEGIN');
 
-    // Pad the incoming array up to 7 elements with null values to map securely to table columns
     const parameterizedStops = [...stops];
     while (parameterizedStops.length < 7) {
       parameterizedStops.push(null);
@@ -1013,10 +951,10 @@ app.post('/api/process-types', async (req, res) => {
     `;
     await client.query(insertProcessQuery, [processName.trim(), generatedRouteId]);
 
-    await client.query('COMMIT'); // Commit structural variables across relational storage nodes
+    await client.query('COMMIT');
     res.status(201).json({ message: 'Success: Workflow template compiled and active across routing tables!' });
   } catch (err) {
-    await client.query('ROLLBACK'); // Abort and roll back tracking values safely on exceptions
+    await client.query('ROLLBACK');
     console.error("Workflow creation processing exception:", err);
     res.status(500).json({ error: 'Failed execution transaction sequence process template assignment loops.' });
   } finally {
@@ -1024,7 +962,6 @@ app.post('/api/process-types', async (req, res) => {
   }
 });
 
-// UPDATE AN EXISTING PROCESS NAME, ACCESS SELECTIONS, AND ITS COMPLETE ROUTE STOPS SEQUENCE
 app.put('/api/process-types/:processId', async (req, res) => {
   const { processId } = req.params;
   const { processName, stops, routeId, isActive } = req.body;
@@ -1035,9 +972,8 @@ app.put('/api/process-types/:processId', async (req, res) => {
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN'); // Start Transaction
+    await client.query('BEGIN');
 
-    // 1. Update the Process parameters and the active soft deletion state flag
     await client.query(
       `UPDATE public.process_type 
        SET process_name = $1, is_active = $2 
@@ -1045,13 +981,11 @@ app.put('/api/process-types/:processId', async (req, res) => {
       [processName.trim(), isActive, parseInt(processId)]
     );
 
-    // Pad your incoming route selection numbers up to 7 options
     const parameterizedStops = [...stops];
     while (parameterizedStops.length < 7) {
       parameterizedStops.push(null);
     }
 
-    // 2. Overwrite the matching route stop columns sequence linked to this process template
     const updateRouteQuery = `
       UPDATE public.route 
       SET stop_1 = $1, stop_2 = $2, stop_3 = $3, stop_4 = $4, stop_5 = $5, stop_6 = $6, stop_7 = $7
@@ -1059,10 +993,10 @@ app.put('/api/process-types/:processId', async (req, res) => {
     `;
     await client.query(updateRouteQuery, [...parameterizedStops, parseInt(routeId)]);
 
-    await client.query('COMMIT'); // Commit Transaction
+    await client.query('COMMIT');
     res.json({ message: 'Success: Workflow template structural overrides committed cleanly!' });
   } catch (err) {
-    await client.query('ROLLBACK'); // Abort on processing error exceptions
+    await client.query('ROLLBACK');
     console.error("Workflow update error:", err);
     res.status(500).json({ error: 'Failed transaction updates sequence routing allocation loops.' });
   } finally {
@@ -1070,7 +1004,6 @@ app.put('/api/process-types/:processId', async (req, res) => {
   }
 });
 
-// 2. REGISTER DYNAMIC NEW CAMPUS DEPARTMENTS FOR THE ACCOUNT CREATION VIEW
 app.post('/api/departments', async (req, res) => {
   const { departmentName } = req.body;
   if (!departmentName || departmentName.trim() === "") {
@@ -1091,7 +1024,6 @@ app.post('/api/departments', async (req, res) => {
   }
 });
 
-// 3. REGISTER DYNAMIC NEW PHYSICAL OFFICE STATION NODES
 app.post('/api/offices', async (req, res) => {
   const { officeName } = req.body;
   if (!officeName || officeName.trim() === "") {
@@ -1112,7 +1044,6 @@ app.post('/api/offices', async (req, res) => {
   }
 });
 
-// 4. RETRIEVE GLOBAL AUDITING OVERVIEW OF CAMPUS INFRASTRUCTURE PARAMETERS
 app.get('/api/admin/infrastructure-summary', async (req, res) => {
   try {
     const deptRes = await pool.query('SELECT d_id AS id, department_name AS name FROM public.department ORDER BY department_name ASC');
@@ -1144,22 +1075,18 @@ app.get('/api/admin/infrastructure-summary', async (req, res) => {
 
 app.get('/api/admin/dashboard-metrics', async (req, res) => {
   try {
-    // Metric 1: Compute Total Open Active Tracks (Documents currently in processing)
     const activeTracksRes = await pool.query(
       'SELECT COUNT(DISTINCT ini_id)::int as total FROM public.processed_document WHERE time_out IS NULL'
     );
 
-    // Metric 2: Compute Total System Users
     const systemUsersRes = await pool.query(
       'SELECT COUNT(u_id)::int as total FROM public."User"'
     );
 
-    // Metric 3: Compute Total Workflow Templates Registered
     const workflowsCountRes = await pool.query(
       'SELECT COUNT(p_id)::int as total FROM public.process_type'
     );
 
-    // Metric 4: Extract Live System Audit Feed (Most recent 15 operations campus-wide)
     const liveFeedQuery = `
       SELECT 
         h.history_id,
@@ -1177,7 +1104,6 @@ app.get('/api/admin/dashboard-metrics', async (req, res) => {
     `;
     const liveFeedRes = await pool.query(liveFeedQuery);
 
-    // Metric 5: Detect Stalled Documents (Items sitting inside an office past 48 hours without sign-out)
     const bottlenecksQuery = `
       SELECT 
         idoc.title as document_title,
@@ -1194,7 +1120,6 @@ app.get('/api/admin/dashboard-metrics', async (req, res) => {
     `;
     const bottlenecksRes = await pool.query(bottlenecksQuery);
 
-    // Respond with consolidated JSON metrics objects payload
     res.json({
       counters: {
         activeTracks: activeTracksRes.rows[0].total,
@@ -1208,6 +1133,89 @@ app.get('/api/admin/dashboard-metrics', async (req, res) => {
   } catch (err) {
     console.error("Dashboard operations metrics collection exception:", err);
     res.status(500).json({ error: 'Failed aggregate calculation sequences for dashboard indicators.' });
+  }
+});
+
+app.get('/api/notifications/:userId/:roleId/:officeId', async (req, res) => {
+  const userId = parseInt(req.params.userId);
+  const roleId = parseInt(req.params.roleId);
+  const officeId = parseInt(req.params.officeId) || 0;
+
+  try {
+    let alertRows = [];
+    
+    if (roleId === 1) {
+      // 1. ORIGINATOR: Alerts every time any action occurs on their document
+      const query = `
+        SELECT 
+          h.history_id as id,
+          idoc.title,
+          h.action_type as title_alert,
+          ('Action performed at ' || off.office_name) as message,
+          h.action_timestamp as time
+        FROM public.office_action_history h
+        JOIN public.initial_document idoc ON h.ini_id = idoc.ini_id
+        LEFT JOIN public.offices off ON h.o_id = off.o_id
+        WHERE idoc.u_id = $1
+        ORDER BY h.action_timestamp DESC LIMIT 10;
+      `;
+      const result = await pool.query(query, [userId]);
+      alertRows = result.rows.map(row => ({
+        id: row.id,
+        title: row.title_alert,
+        message: `"${row.title}": ${row.message}`,
+        time: row.time
+      }));
+
+    } else if (roleId === 2) {
+      // 2. PROCESSOR: Alerts when an incoming document is created, showing title and requestor name
+      const query = `
+        SELECT 
+          pd.pd_id as id,
+          idoc.title,
+          u.full_name as requestor,
+          idoc.created_at as time
+        FROM public.processed_document pd
+        JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
+        JOIN public."User" u ON idoc.u_id = u.u_id
+        WHERE pd.current_office_id = $1 AND pd.time_in IS NULL
+        ORDER BY pd.pd_id DESC LIMIT 10;
+      `;
+      const result = await pool.query(query, [officeId]);
+      alertRows = result.rows.map(row => ({
+        id: row.id,
+        title: "Incoming Document",
+        message: `"${row.title}" submitted by ${row.requestor}`,
+        time: row.time
+      }));
+
+    } else if (roleId === 3) {
+      // 3. SIGNEE: Alerts when a processor signs a document in (Time-In matches, pending action)
+      const query = `
+        SELECT 
+          pd.pd_id as id,
+          idoc.title,
+          u.full_name as requestor,
+          pd.time_in as time
+        FROM public.processed_document pd
+        JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
+        JOIN public."User" u ON idoc.u_id = u.u_id
+        WHERE pd.current_office_id = $1 AND pd.time_in IS NOT NULL AND pd.s_id = 1
+        ORDER BY pd.pd_id DESC LIMIT 10;
+      `;
+      const result = await pool.query(query, [officeId]);
+      alertRows = result.rows.map(row => ({
+        id: row.id,
+        title: "Pending Document",
+        message: `"${row.title}" from ${row.requestor} is awaiting your signature.`,
+        time: row.time
+      }));
+    }
+
+    res.json(alertRows);
+  } catch (err) {
+    console.error("Notification pull error:", err);
+    res.json([]);
   }
 });
 

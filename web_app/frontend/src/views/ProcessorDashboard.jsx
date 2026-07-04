@@ -9,19 +9,17 @@ export default function ProcessorDashboard() {
   const userId = localStorage.getItem('userId');
   const userName = localStorage.getItem('user') || 'Office Processor';
   
-  // Tab States: 'dashboard' | 'documents' | 'history' | 'profile'
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
-  // Domain Data States
   const [incomingDocs, setIncomingDocs] = useState([]);
   const [pipelineDocs, setPipelineDocs] = useState([]);  
   const [actionHistory, setActionHistory] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [processTypes, setProcessTypes] = useState([]);
+  const [isHistoryDetails, setIsHistoryDetails] = useState(false);
   
-  // Interactive Modal Triggers
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showPipelineModal, setShowPipelineModal] = useState(false);
   const [showScannerModal, setShowScannerModal] = useState(false);
@@ -29,7 +27,6 @@ export default function ProcessorDashboard() {
   const [scanMode, setScanMode] = useState('time-in');
   const [simulatedQrInput, setSimulatedQrPayload] = useState('');
   
-  // Profile Editable State Fields
   const [profileName, setProfileName] = useState('');
   const [profileEmail, setProfileEmail] = useState('');
   const [facultyId, setFacultyId] = useState('N/A');
@@ -37,12 +34,10 @@ export default function ProcessorDashboard() {
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [twoFaCode, setTwoFaCode] = useState('');
   
-  // Password Input Fields
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Search & Filter Hooks
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All'); 
   const [historyFilter, setHistoryFilter] = useState('All');
@@ -53,7 +48,6 @@ export default function ProcessorDashboard() {
   const [selectedAdHocOffice, setSelectedAdHocOffice] = useState('');
   const [isAdHocProcessing, setIsAdHocProcessing] = useState(false);
 
-  // Pagination State Controls
   const [dashboardPage, setDashboardPage] = useState(1);
   const [pipelinePage, setPipelinePage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
@@ -79,6 +73,25 @@ export default function ProcessorDashboard() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const fetchLiveNotificationFeeds = async () => {
+    if (!processorOfficeId) return;
+    try {
+      // roleId = 2 signifies a Processor account
+      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/2/${processorOfficeId}`);
+      const data = await res.json();
+      if (res.ok) {
+        setNotifications(data.map(n => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          time: new Date(n.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+        })));
+      }
+    } catch (err) { 
+      console.error(err); 
+    }
+  };
+  
   const fetchProcessorMeta = async () => {
     try {
       const res = await fetch(`http://localhost:5000/api/profile/${userId}`);
@@ -250,8 +263,9 @@ export default function ProcessorDashboard() {
     setShowDetailsModal(true);
   };
 
-  const handleOpenPipelineDetails = (doc) => {
+  const handleOpenPipelineDetails = (doc, fromHistory = false) => {
     setSelectedDoc(doc);
+    setIsHistoryDetails(fromHistory);
     fetchOfficesList();
     setShowPipelineModal(true);
   };
@@ -322,9 +336,6 @@ export default function ProcessorDashboard() {
     return [doc.current_office || 'Active Office'];
   };
 
-  // =========================================================
-  // 🔍 REAL-TIME INTERCEPTOR FILTERS 
-  // =========================================================
   const filteredDocs = incomingDocs.filter(doc => {
     const matchesSearch = doc.title.toLowerCase().includes(search.toLowerCase()) || 
                           doc.qr_code.toLowerCase().includes(search.toLowerCase());
@@ -370,7 +381,6 @@ export default function ProcessorDashboard() {
     return matchesSearch;
   });
 
-  // Paginated slices
   const indexOfLastDash = dashboardPage * itemsPerPage;
   const indexOfFirstDash = indexOfLastDash - itemsPerPage;
   const currentDashDocs = filteredDocs.slice(indexOfFirstDash, indexOfLastDash);
@@ -386,22 +396,6 @@ export default function ProcessorDashboard() {
   const currentHistoryPageRows = filteredHistoryLogs.slice(indexOfFirstHistoryItem, indexOfLastHistoryItem);
   const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
-  // KPI Calculations
-  const incomingCount = pipelineDocs.filter(d => {
-    if (d.time_out !== null && d.time_out !== undefined) return false;
-    if (d.current_office_id === processorOfficeId) return true;
-
-    const match = processTypes.find(p => p.process_name === d.process_name);
-    if (match) {
-      const stops = [];
-      for (let i = 1; i <= 7; i++) {
-        if (match[`stop_${i}_name`]) stops.push(match[`stop_${i}_name`]);
-      }
-      return stops.includes(processorOfficeName);
-    }
-    return false;
-  }).length;
-
   const awaitingScanInCount = incomingDocs.filter(d => d.time_in === null || d.time_in === undefined).length;
   const pendingCount = incomingDocs.length;
   const completedProcessingCount = pipelineDocs.filter(d => d.time_out !== null && d.time_out !== undefined).length;
@@ -410,7 +404,6 @@ export default function ProcessorDashboard() {
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
-      {/* SIDEBAR NAVIGATION PANEL */}
       <div className="w-64 bg-[#2D1F1E] text-neutral-300 flex flex-col justify-between p-4 flex-shrink-0 text-left">
         <div>
           <div className="flex items-center gap-3 border-b border-neutral-700 pb-4 mb-6">
@@ -450,10 +443,8 @@ export default function ProcessorDashboard() {
         </div>
       </div>
 
-      {/* WORKSPACE AREA */}
       <div className="flex-1 flex flex-col overflow-hidden">
         
-        {/* TOP BAR HEADER */}
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
           <div className="text-left">
             <h2 className="text-lg font-black text-neutral-900">
@@ -490,17 +481,15 @@ export default function ProcessorDashboard() {
           </div>
         </header>
 
-        {/* CONTAINER SCROLL GRID SYSTEM */}
         <div className="flex-1 overflow-y-auto p-8">
           
-          {/* TAB 1: OPERATIONAL HUB DASHBOARD VIEW */}
           {activeTab === 'dashboard' && (
             <div className="space-y-8 max-w-6xl mx-auto text-left">
               
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm relative overflow-hidden">
                   <span className="text-[10px] uppercase font-black text-neutral-400 tracking-wider">Incoming Documents</span>
-                  <p className="text-3xl font-black text-neutral-900 mt-2">{String(incomingCount).padStart(2, '0')}</p>
+                  <p className="text-3xl font-black text-neutral-900 mt-2">{String(incomingDocs.length).padStart(2, '0')}</p>
                   <div className="absolute right-4 bottom-4 text-lg opacity-40">📂</div>
                   <div className="h-1 bg-blue-600 absolute bottom-0 left-0 right-0"></div>
                 </div>
@@ -577,7 +566,7 @@ export default function ProcessorDashboard() {
                           </td>
                           <td className="p-4 text-neutral-600 font-semibold">{doc.next_office || 'None (Final Stop)'}</td>
                           <td className="p-4 text-center">
-                            <button onClick={() => handleOpenDashboardDetails(doc)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
+                            <button onClick={() => handleOpenPipelineDetails(doc, false)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
                               View Details
                             </button>
                           </td>
@@ -601,7 +590,6 @@ export default function ProcessorDashboard() {
             </div>
           )}
 
-          {/* TAB 2: OPERATIONAL DOCUMENTS PIPELINE VIEW */}
           {activeTab === 'documents' && (
             <div className="space-y-8 max-w-6xl mx-auto text-left animate-in fade-in duration-200">
               <div>
@@ -611,7 +599,7 @@ export default function ProcessorDashboard() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
-                  { title: 'Incoming Docs', count: incomingCount, border: 'border-l-blue-500', icon: '📂' },
+                  { title: 'Incoming Docs', count: incomingDocs.length, border: 'border-l-blue-500', icon: '📂' },
                   { title: 'Awaiting Scan-In', count: awaitingScanInCount, border: 'border-l-red-600', icon: '📥' },
                   { title: 'Pending Docs', count: pendingCount, border: 'border-l-amber-500', icon: '🕒' },
                   { title: 'Completed Docs', count: completedProcessingCount, border: 'border-l-green-500', icon: '✅' },
@@ -685,7 +673,7 @@ export default function ProcessorDashboard() {
                           </td>
                           <td className="p-4 text-neutral-600 font-semibold">{doc.next_office || 'None (Final Stop)'}</td>
                           <td className="p-4 text-center">
-                            <button onClick={() => handleOpenPipelineDetails(doc)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
+                            <button onClick={() => handleOpenPipelineDetails(doc, false)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
                               View Details
                             </button>
                           </td>
@@ -693,7 +681,7 @@ export default function ProcessorDashboard() {
                       ))}
                     </tbody>
                   </table>
-                  {filteredPipelineDocs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📭 No operational document streams registered to this network.</div>}
+                  {filteredPipelineDocs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📭 No active requests in this pipeline matrix view.</div>}
                 </div>
 
                 {totalPipePages > 1 && (
@@ -709,111 +697,107 @@ export default function ProcessorDashboard() {
             </div>
           )}
 
-          {/* TAB 3: OFFICE TRANSACTION ACTION LEDGER HISTORY */}
           {activeTab === 'history' && (
-  <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-200">
-    <div>
-      <h2 className="text-2xl font-black text-neutral-900 tracking-tight">Office Transaction History</h2>
-      <p className="text-xs text-neutral-500 font-medium mt-0.5">Audit log of all processing events inside your office sector.</p>
-    </div>
+            <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-200">
+              <div>
+                <h2 className="text-2xl font-black text-neutral-900 tracking-tight">Office Transaction History</h2>
+                <p className="text-xs text-neutral-500 font-medium mt-0.5">Audit log of all processing events inside your office sector.</p>
+              </div>
 
-    <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-        <h3 className="text-sm font-black text-neutral-950 tracking-tight">Audit Trail Ledger</h3>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 text-neutral-400" size={14} />
-            <input type="text" placeholder="Search by user, title, or ID..." value={search} onChange={e => { setSearch(e.target.value); setHistoryPage(1); }} className="pl-9 pr-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-neutral-50 w-56 font-medium" />
-          </div>
-          <div className="flex items-center gap-1 border border-neutral-300 rounded-lg px-2 py-1.5 bg-neutral-50">
-            <Filter size={14} className="text-neutral-400" />
-            <select value={historyFilter} onChange={e => { setHistoryFilter(e.target.value); setHistoryPage(1); }} className="bg-transparent text-xs outline-none cursor-pointer font-bold text-neutral-600">
-              <option value="All">All Actions</option>
-              <option value="Scanned In">Scanned In</option>
-              <option value="Scanned Out">Scanned Out</option>
-              <option value="Ad-Hoc Detour Routed">Ad-Hoc Detour</option>
-            </select>
-          </div>
-        </div>
-      </div>
+              <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                  <h3 className="text-sm font-black text-neutral-950 tracking-tight">Audit Trail Ledger</h3>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 text-neutral-400" size={14} />
+                      <input type="text" placeholder="Search by user, title, or ID..." value={search} onChange={e => { setSearch(e.target.value); setHistoryPage(1); }} className="pl-9 pr-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-neutral-50 w-56 font-medium" />
+                    </div>
+                    <div className="flex items-center gap-1 border border-neutral-300 rounded-lg px-2 py-1.5 bg-neutral-50">
+                      <Filter size={14} className="text-neutral-400" />
+                      <select value={historyFilter} onChange={e => { setHistoryFilter(e.target.value); setHistoryPage(1); }} className="bg-transparent text-xs outline-none cursor-pointer font-bold text-neutral-600">
+                        <option value="All">All Actions</option>
+                        <option value="Scanned In">Scanned In</option>
+                        <option value="Scanned Out">Scanned Out</option>
+                        <option value="Ad-Hoc Detour Routed">Ad-Hoc Detour</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="bg-neutral-50 text-neutral-400 border-b border-neutral-200 font-black uppercase text-[10px] tracking-wider">
-              <th className="p-4">Timestamp</th>
-              <th className="p-4">Action Event</th>
-              <th className="p-4">Executed By</th>
-              <th className="p-4">Document Title</th>
-              <th className="p-4 text-center">Verification</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-neutral-100 font-medium">
-          {currentHistoryPageRows.map((log, index) => {
-                    const rawTimestamp = log.action_timestamp; 
-                    let formattedTime = 'N/A';
-                    
-                    if (rawTimestamp) {
-                      // 🛠️ FIX: Strip out the "+00", "Z", or "GMT" offset strings so JavaScript 
-                      // parses your text purely as a local Manila time string without shifting it.
-                      const localizedString = String(rawTimestamp).replace(/(\+00:00|\+00|Z)$/i, '');
-                      const d = new Date(localizedString);
-                      
-                      formattedTime = d.toLocaleDateString('en-US', { 
-                        month: 'short', 
-                        day: 'numeric', 
-                        year: 'numeric' 
-                      }) + ', ' + 
-                      d.toLocaleTimeString('en-US', { 
-                        hour: '2-digit', 
-                        minute: '2-digit', 
-                        hour12: true 
-                      });
-                    }
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-neutral-50 text-neutral-400 border-b border-neutral-200 font-black uppercase text-[10px] tracking-wider">
+                        <th className="p-4">Timestamp</th>
+                        <th className="p-4">Action Event</th>
+                        <th className="p-4">Executed By</th>
+                        <th className="p-4">Document Title</th>
+                        <th className="p-4 text-center">Verification</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100 font-medium">
+                    {currentHistoryPageRows.map((log, index) => {
+                              const rawTimestamp = log.action_timestamp; 
+                              let formattedTime = 'N/A';
+                              
+                              if (rawTimestamp) {
+                                const localizedString = String(rawTimestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+                                const d = new Date(localizedString);
+                                
+                                formattedTime = d.toLocaleDateString('en-US', { 
+                                  month: 'short', 
+                                  day: 'numeric', 
+                                  year: 'numeric' 
+                                }) + ', ' + 
+                                d.toLocaleTimeString('en-US', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit', 
+                                  hour12: true 
+                                });
+                              }
 
-                    return (
-                      <tr key={log.history_id || index} className="hover:bg-neutral-50/70 transition-colors">
-                        <td className="p-4 font-mono text-neutral-600">
-                          {formattedTime}
-                        </td>
-                  <td className="p-4">
-                    <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wide border ${
-                      log.action_type === 'Scanned In' ? 'bg-blue-50 text-blue-800 border-blue-100' :
-                      log.action_type === 'Scanned Out' ? 'bg-green-50 text-green-800 border-green-100' :
-                      log.action_type === 'Ad-Hoc Detour Routed' ? 'bg-purple-50 text-purple-800 border-purple-100' : 'bg-amber-50 text-amber-800 border-amber-100'
-                    }`}>
-                      {log.action_type}
-                    </span>
-                  </td>
-                  <td className="p-4 text-neutral-900 font-bold">{log.full_name}</td>
-                  <td className="p-4 text-neutral-700 font-semibold">{log.title}</td>
-                  <td className="p-4 text-center">
-                    {/* FIXED: Triggers the validation popup style profile layout structure */}
-                    <button onClick={() => handleOpenPipelineDetails(log)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
-                      View Details
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {filteredHistoryLogs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📜 No tracking entries match your filter rules.</div>}
-      </div>
+                              return (
+                                <tr key={log.history_id || index} className="hover:bg-neutral-50/70 transition-colors">
+                                  <td className="p-4 font-mono text-neutral-600">
+                                    {formattedTime}
+                                  </td>
+                            <td className="p-4">
+                              <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wide border ${
+                                log.action_type === 'Scanned In' ? 'bg-blue-50 text-blue-800 border-blue-100' :
+                                log.action_type === 'Scanned Out' ? 'bg-green-50 text-green-800 border-green-100' :
+                                log.action_type === 'Ad-Hoc Detour Routed' ? 'bg-purple-50 text-purple-800 border-purple-100' : 'bg-amber-50 text-amber-800 border-amber-100'
+                              }`}>
+                                {log.action_type}
+                              </span>
+                            </td>
+                            <td className="p-4 text-neutral-900 font-bold">{log.full_name}</td>
+                            <td className="p-4 text-neutral-700 font-semibold">{log.title}</td>
+                            <td className="p-4 text-center">
+                              <button onClick={() => handleOpenPipelineDetails(log, true)} className="text-xs text-red-700 font-black hover:underline px-3 py-1 bg-red-50/50 hover:bg-red-50 rounded-lg transition-all">
+                                View Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filteredHistoryLogs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📜 No tracking entries match your filter rules.</div>}
+                </div>
 
-      {totalHistoryTabPages > 1 && (
-        <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between text-xs px-6">
-          <span className="text-neutral-500 font-medium">Showing page <b>{historyPage}</b> of {totalHistoryTabPages}</span>
-          <div className="flex gap-1">
-            <button disabled={historyPage === 1} onClick={() => setHistoryPage(prev => prev - 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Previous</button>
-            <button disabled={historyPage === totalHistoryTabPages} onClick={() => setHistoryPage(prev => prev + 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Next</button>
-          </div>
-        </div>
-      )}
-    </div>
-  </div>
-)}
-          {/* TAB 4: PROFILE HUB */}
+                {totalHistoryTabPages > 1 && (
+                  <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex items-center justify-between text-xs px-6">
+                    <span className="text-neutral-500 font-medium">Showing page <b>{historyPage}</b> of {totalHistoryTabPages}</span>
+                    <div className="flex gap-1">
+                      <button disabled={historyPage === 1} onClick={() => setHistoryPage(prev => prev - 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Previous</button>
+                      <button disabled={historyPage === totalHistoryTabPages} onClick={() => setHistoryPage(prev => prev + 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40 transition-all">Next</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'profile' && (
             <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-200 text-left">
               <div className="lg:col-span-3 bg-white border border-neutral-200 p-6 rounded-2xl flex items-center gap-6 shadow-xs relative">
@@ -918,7 +902,6 @@ export default function ProcessorDashboard() {
         </div>
       </div>
 
-      {/* MODAL 1: LIVE SCANNER OVERLAY */}
       {showScannerModal && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-100">
           <div className="bg-white w-full max-w-sm rounded-2xl border shadow-2xl p-6 text-center space-y-4">
@@ -942,7 +925,6 @@ export default function ProcessorDashboard() {
         </div>
       )}
 
-      {/* MODAL 2: DASHBOARD DETAIL OVERVIEW */}
       {showDetailsModal && selectedDoc && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
@@ -993,7 +975,6 @@ export default function ProcessorDashboard() {
         </div>
       )}
 
-      {/* MODAL 3: DOCUMENTS PIPELINE VERIFICATION DETAILS */}
       {showPipelineModal && selectedDoc && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border overflow-hidden flex flex-col text-left">
@@ -1078,53 +1059,52 @@ export default function ProcessorDashboard() {
                 </div>
                 <p className="text-[10px] text-neutral-400 leading-normal max-w-[180px] font-medium">Scan to verify authenticity on any authorized workstation.</p>
                 
-                {selectedDoc.time_out ? (
-  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-    <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">
-      ℹ️ Ad-Hoc Unavailable: Document has been checked out and moved out of this branch.
-    </p>
-  </div>
-) : selectedDoc.status?.toLowerCase() === 'in verification' || selectedDoc.current_step_is_adhoc || selectedDoc.is_adhoc ? (
-  // 🔒 FIXED: Catching 'In Verification' status from both Pipeline and History views
-  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-    <p className="text-[10px] font-black text-purple-700 bg-purple-50/80 border border-purple-100 rounded-xl p-3 uppercase tracking-wide">
-      ⚖️ Ad-Hoc Active: This file is currently undergoing an active ad-hoc detour route step and is currently out of your hands.
-    </p>
-  </div>
-) : selectedDoc.time_in ? (
-  <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
-    <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
-      Request Ad-hoc Verification Detour
-    </label>
-    <div className="flex flex-col gap-2">
-      <select 
-        required 
-        value={selectedAdHocOffice} 
-        onChange={e => setSelectedAdHocOffice(e.target.value)}
-        className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
-      >
-        <option value="">-- Select Destination Office --</option>
-        {officesList.map((off, idx) => (
-          off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
-        ))}
-      </select>
-      
-      <button 
-        type="submit" 
-        disabled={isAdHocProcessing}
-        className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
-      >
-        {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
-      </button>
-    </div>
-  </form>
-) : (
-  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
-    <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
-      🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
-    </p>
-  </div>
-)}
+                {isHistoryDetails || selectedDoc.time_out ? (
+                  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                    <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">
+                      ℹ️ Vault History View: Read-only ledger context. Actions locked out cleanly.
+                    </p>
+                  </div>
+                ) : selectedDoc.status?.toLowerCase() === 'in verification' || selectedDoc.current_step_is_adhoc || selectedDoc.is_adhoc ? (
+                  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                    <p className="text-[10px] font-black text-purple-700 bg-purple-50/80 border border-purple-100 rounded-xl p-3 uppercase tracking-wide">
+                      ⚖️ Ad-Hoc Active: This file is currently undergoing an active ad-hoc detour route step and is currently out of your hands.
+                    </p>
+                  </div>
+                ) : selectedDoc.time_in ? (
+                  <form onSubmit={handleExecuteAdHocDetour} className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 space-y-2 text-left">
+                    <label className="block text-[9px] font-black text-neutral-400 uppercase tracking-wider">
+                      Request Ad-hoc Verification Detour
+                    </label>
+                    <div className="flex flex-col gap-2">
+                      <select 
+                        required 
+                        value={selectedAdHocOffice} 
+                        onChange={e => setSelectedAdHocOffice(e.target.value)}
+                        className="w-full bg-white border border-neutral-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700 cursor-pointer"
+                      >
+                        <option value="">-- Select Destination Office --</option>
+                        {officesList.map((off, idx) => (
+                          off.id !== processorOfficeId && <option key={idx} value={off.id}>{off.name}</option>
+                        ))}
+                      </select>
+                      
+                      <button 
+                        type="submit" 
+                        disabled={isAdHocProcessing}
+                        className="w-full py-2.5 bg-red-800 hover:bg-red-900 disabled:bg-neutral-400 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-all uppercase tracking-wider shadow-xs"
+                      >
+                        {isAdHocProcessing ? 'Processing Detour...' : '🛡️ Route Ad-hoc Verification'}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
+                    <p className="text-[10px] font-black text-red-700 bg-red-50/70 border border-red-100 rounded-xl p-3 uppercase tracking-wide">
+                      🛑 Ad-Hoc Detour Unavailable: Document must be scanned for Time-In at your office first.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1135,7 +1115,6 @@ export default function ProcessorDashboard() {
         </div>
       )}
 
-      {/* MODAL 4: PASSWORD RE-AUTHENTICATOR */}
       {showPassModal && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl border overflow-hidden flex flex-col text-left">

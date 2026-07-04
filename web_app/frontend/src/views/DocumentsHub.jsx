@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer } from 'lucide-react';
+import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle } from 'lucide-react';
 
 export default function DocumentsHub({ 
   userId, 
@@ -54,12 +54,14 @@ export default function DocumentsHub({
     return matchesSearch && matchesStatus;
   });
 
-  // Calculate dynamic line progress percentages
   const getCurrentProgressPercent = (doc, stops) => {
-    if (!doc || stops.length <= 1) return 0;
+    if (!doc || !stops || stops.length <= 1) return 0;
     if (doc.status?.toLowerCase() === 'completed') return 100;
+    
+    // If halted, lock progress representation to the current station visually
     const currentIndex = stops.indexOf(doc.current_office);
     if (currentIndex === -1) return 0;
+    
     return (currentIndex / (stops.length - 1)) * 100;
   };
 
@@ -77,42 +79,66 @@ export default function DocumentsHub({
               </p>
             </div>
             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-              selectedDoc.status?.toLowerCase() === 'completed' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
+              selectedDoc.status?.toLowerCase() === 'completed' ? 'bg-green-50 text-green-700' : 
+              selectedDoc.status?.toLowerCase() === 'action required' ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-amber-50 text-amber-700'
             }`}>
               {selectedDoc.status || 'Active Path'}
             </span>
           </div>
 
+          {/* EXPLICIT SIGNEE FEEDBACK ERROR NOTICE BOX */}
+          {selectedDoc.status?.toLowerCase() === 'action required' && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3 text-xs text-red-800 font-medium">
+              <AlertTriangle className="w-4 h-4 text-red-700 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black uppercase tracking-wide">⚠️ Workflow Halted (Action Required)</p>
+                <p className="text-red-600 mt-1 font-mono bg-white p-2 border rounded-lg">
+                  {selectedDoc.last_action || "Returned to Originator: Corrections required before workflow clearance can proceed further."}
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {selectedDoc.status?.toLowerCase() === 'completed' && (
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl text-xs text-green-800 font-bold uppercase tracking-wider">
+              🎉 Completed Successfully: Route completely clear and signed out of final stop.
+            </div>
+          )}
+
           <div className="relative flex items-center justify-between mt-8 mb-6 px-6">
-            {/* Background Tracks */}
             <div className="absolute left-6 right-6 h-1 bg-neutral-100 top-3 -z-10"></div>
             <div 
-              className="absolute left-6 h-1 bg-red-700 top-3 -z-10 transition-all duration-500 ease-in-out"
+              className={`absolute left-6 h-1 top-3 -z-10 transition-all duration-500 ease-in-out ${
+                selectedDoc.status?.toLowerCase() === 'action required' ? 'bg-red-600' : 'bg-red-700'
+              }`}
               style={{ width: `calc(${getCurrentProgressPercent(selectedDoc, activeRouteStops)}% - 12px)` }}
             ></div>
 
-              {activeRouteStops.map((stop, index) => {
-                const currentOfficeIdx = activeRouteStops.indexOf(selectedDoc.current_office);
-                const isCompletedAll = selectedDoc.status?.toLowerCase() === 'completed';
-                
-                // An active pulse should only occur if the tracking process is ongoing
-                const isCurrent = stop === selectedDoc.current_office && !isCompletedAll;
-                const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
-                
-                return (
-                  <div key={index} className="text-center flex flex-col items-center flex-1">
-                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
-                      isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
-                      isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
-                    }`}>
-                      {isPast && !isCurrent ? '✓' : index + 1}
-                    </div>
-                    <p className={`text-[11px] font-bold mt-2 truncate max-w-[120px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
-                      {stop}
-                    </p>
+            {activeRouteStops.map((stop, index) => {
+              const currentOfficeIdx = activeRouteStops.indexOf(selectedDoc.current_office);
+              const isCompletedAll = selectedDoc.status?.toLowerCase() === 'completed';
+              const isHalted = selectedDoc.status?.toLowerCase() === 'action required';
+              
+              const isCurrent = stop === selectedDoc.current_office && !isCompletedAll;
+              const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
+              
+              return (
+                <div key={index} className="text-center flex flex-col items-center flex-1">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                    isCurrent && isHalted ? 'bg-red-700 text-white ring-4 ring-red-100' :
+                    isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
+                    isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
+                  }`}>
+                    {isCurrent && isHalted ? '✕' : isPast && !isCurrent ? '✓' : index + 1}
                   </div>
-                );
-              })}
+                  <p className={`text-[11px] font-bold mt-2 truncate max-w-[120px] ${
+                    isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'
+                  }`}>
+                    {stop}
+                  </p>
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex justify-end pt-4 border-t border-neutral-100">
@@ -127,7 +153,6 @@ export default function DocumentsHub({
         </div>
       )}
 
-      {/* MASTER SUBMISSIONS TABLE LEDGER */}
       <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <h3 className="text-base font-bold text-neutral-950">Recent Submissions</h3>
@@ -192,8 +217,12 @@ export default function DocumentsHub({
                     {doc.edc ? new Date(doc.edc).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Processing'}
                   </td>
                   <td className="p-4">
-                    <span className={`font-bold ${doc.status?.toLowerCase() === 'completed' ? 'text-green-600' : 'text-neutral-800'}`}>
-                      {doc.status?.toLowerCase() === 'completed' ? 'Completed' : (doc.current_office || 'Origin Unit')}
+                    <span className={`font-bold ${
+                      doc.status?.toLowerCase() === 'completed' ? 'text-green-600' : 
+                      doc.status?.toLowerCase() === 'action required' ? 'text-red-600' : 'text-neutral-800'
+                    }`}>
+                      {doc.status?.toLowerCase() === 'completed' ? 'Completed' : 
+                       doc.status?.toLowerCase() === 'action required' ? 'Halted Checklist' : (doc.current_office || 'Origin Unit')}
                     </span>
                   </td>
                   <td className="p-4 text-center">
@@ -211,7 +240,6 @@ export default function DocumentsHub({
         </div>
       </div>
 
-      {/* DOCUMENT DETAILS MODAL FRAME */}
       {showDetailsModal && activeDetailsDoc && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col">
@@ -224,6 +252,19 @@ export default function DocumentsHub({
             </div>
             
             <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+            {activeDetailsDoc.status?.toLowerCase() === 'action required' && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900">
+                  <p className="font-black uppercase flex items-center gap-1.5">
+                    ⚠️ Revision Notes Added by Signee:
+                  </p>
+                  <p className="mt-2 font-medium font-mono text-red-700 bg-white p-2.5 border border-red-200 rounded-lg shadow-2xs">
+                    {activeDetailsDoc.last_action 
+                      ? activeDetailsDoc.last_action.replace('Sent Back for Revision:', '').trim()
+                      : 'Corrections required before workflow clearance can proceed further.'}
+                  </p>
+                </div>
+              )}
+
               <div className="flex justify-between items-start gap-4">
                 <div className="space-y-4 flex-1">
                   <div>
@@ -258,7 +299,10 @@ export default function DocumentsHub({
                   <div>
                     <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Current Status</span>
                     <div className="mt-1">
-                      <span className="px-3 py-1 bg-red-50 text-red-800 rounded-full font-black text-[10px] uppercase border border-red-100 shadow-2xs inline-block">
+                      <span className={`px-3 py-1 rounded-full font-black text-[10px] uppercase border shadow-2xs inline-block ${
+                        activeDetailsDoc.status?.toLowerCase() === 'completed' ? 'bg-green-50 text-green-800 border-green-200' :
+                        activeDetailsDoc.status?.toLowerCase() === 'action required' ? 'bg-red-50 text-red-800 border-red-200' : 'bg-amber-50 text-amber-800 border-amber-100'
+                      }`}>
                         {activeDetailsDoc.status || 'Active Path'}
                       </span>
                     </div>
@@ -271,7 +315,6 @@ export default function DocumentsHub({
                 </div>
               </div>
 
-              {/* Submission Route Status */}
               <div className="pt-4 border-t border-neutral-100 text-left">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-4">Submission Route Status</span>
                 <div className="relative pl-6 space-y-5">
@@ -280,22 +323,28 @@ export default function DocumentsHub({
                   {activeRouteStops.map((stop, i) => {
                     const currentOfficeIdx = activeRouteStops.indexOf(activeDetailsDoc?.current_office);
                     const isCompletedAll = activeDetailsDoc?.status?.toLowerCase() === 'completed';
+                    const isHalted = activeDetailsDoc?.status?.toLowerCase() === 'action required';
+                    
                     const isCurrent = stop === activeDetailsDoc?.current_office && !isCompletedAll;
                     const isPast = isCompletedAll || (currentOfficeIdx !== -1 && i <= currentOfficeIdx);
 
                     return (
                       <div key={i} className="relative flex flex-col">
                         <div className={`absolute -left-[23px] top-0.5 w-3.5 h-3.5 rounded-full border-2 bg-white flex items-center justify-center transition-all z-10 ${
+                          isCurrent && isHalted ? 'border-red-600 bg-red-600 shadow-sm' :
                           isCurrent ? 'border-red-700 bg-red-700 ring-4 ring-red-100' :
                           isPast ? 'border-red-800 bg-red-800' : 'border-neutral-300'
                         }`}>
-                          {isPast && <div className="w-1 h-1 bg-white rounded-full"></div>}
+                          {isCurrent && isHalted ? '✕' : isPast && <div className="w-1 h-1 bg-white rounded-full"></div>}
                         </div>
-                        <p className={`text-xs font-bold leading-none ${isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'}`}>
+                        <p className={`text-xs font-bold leading-none ${
+                          isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'
+                        }`}>
                           {stop}
                         </p>
                         <span className="text-[10px] text-gray-400 mt-1 font-medium">
-                          {isCurrent ? 'Under Active Review' : isPast ? 'Completed signature verification step' : 'Awaiting structural arrival queue'}
+                          {isCurrent && isHalted ? '🛑 Route Halted Here for Revision Notes' : 
+                           isCurrent ? 'Under Active Review' : isPast ? 'Completed signature verification step' : 'Awaiting structural arrival queue'}
                         </span>
                       </div>
                     );
@@ -322,7 +371,6 @@ export default function DocumentsHub({
         </div>
       )}
 
-      {/* TIMELINE QR OVERLAY */}
       {showQrOverlay && selectedDoc && (
         <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-100">
           <div className="bg-white rounded-2xl p-6 text-center max-w-sm w-full border shadow-2xl space-y-4">

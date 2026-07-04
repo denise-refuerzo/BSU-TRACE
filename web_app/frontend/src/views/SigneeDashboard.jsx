@@ -28,18 +28,16 @@ export default function SigneeDashboard() {
   const userId = localStorage.getItem('userId');
   const userName = localStorage.getItem('user') || 'Office Signee';
   
-  // Tab States: 'dashboard' | 'documents' | 'history' | 'profile'
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
-  // Domain Data States
   const [pipelineDocs, setPipelineDocs] = useState([]);  
   const [processTypes, setProcessTypes] = useState([]);
   const [officesList, setOfficesList] = useState([]);
   const [actionHistory, setActionHistory] = useState([]);
+  const [isHistoryDetails, setIsHistoryDetails] = useState(false);
   
-  // Profile Editable State Fields
   const [profileName, setProfileName] = useState('');
   const [profileEmail, setProfileEmail] = useState('');
   const [facultyId, setFacultyId] = useState('N/A');
@@ -47,12 +45,10 @@ export default function SigneeDashboard() {
   const [twoFaEnabled, setTwoFaEnabled] = useState(false);
   const [twoFaCode, setTwoFaCode] = useState('');
   
-  // Password Input Fields
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  // Interactive Modal Triggers
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showAdHocForm, setShowAdHocForm] = useState(false);
@@ -62,14 +58,12 @@ export default function SigneeDashboard() {
   const [selectedAdHocOffice, setSelectedAdHocOffice] = useState('');
   const [isActionProcessing, setIsActionProcessing] = useState(false);
 
-  // Search & Filter Hooks
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All'); 
   const [historyFilter, setHistoryFilter] = useState('All');
   const [signeeOfficeName, setSigneeOfficeName] = useState('Loading Office...');
   const [signeeOfficeId, setSigneeOfficeId] = useState(null);
 
-  // Independent Pagination Slices
   const [dashboardPage, setDashboardPage] = useState(1);
   const [pipelinePage, setPipelinePage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
@@ -95,6 +89,25 @@ export default function SigneeDashboard() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const fetchLiveNotificationFeeds = async () => {
+    if (!signeeOfficeId) return;
+    try {
+      // roleId = 3 signifies a Signee account
+      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/3/${signeeOfficeId}`);
+      const data = await res.json();
+      if (res.ok) {
+        setNotifications(data.map(n => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          time: new Date(n.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+        })));
+      }
+    } catch (err) { 
+      console.error(err); 
+    }
+  };
 
   const fetchSigneeMeta = async () => {
     try {
@@ -253,8 +266,9 @@ export default function SigneeDashboard() {
     } catch (err) { Swal.fire('Error', 'Failed to update credentials security PIN.', 'error'); }
   };
 
-  const handleOpenDetails = (doc) => {
+  const handleOpenDetails = (doc, fromHistory = false) => {
     setSelectedDoc(doc);
+    setIsHistoryDetails(fromHistory);
     setShowSendBackForm(false);
     setShowAdHocForm(false);
     setReturnReason('');
@@ -291,8 +305,7 @@ export default function SigneeDashboard() {
           if (res.ok) {
             Swal.fire('Successfully Signed!', 'The document identity seal has been committed. Processors can now check it out.', 'success');
             setShowDetailsModal(false);
-            fetchPipelineDocs(signeeOfficeId);
-            fetchOfficeActionHistory(signeeOfficeId);
+            fetchSigneeMeta();
           }
         } catch (err) {
           Swal.fire('Error', 'Failed sequence commitment tracking link.', 'error');
@@ -323,8 +336,7 @@ export default function SigneeDashboard() {
       if (res.ok) {
         Swal.fire('Document Sent Back', 'The file has been frozen with Action Required status flags.', 'success');
         setShowDetailsModal(false);
-        fetchPipelineDocs(signeeOfficeId);
-        fetchOfficeActionHistory(signeeOfficeId);
+        fetchSigneeMeta();
       }
     } catch (err) {
       Swal.fire('Error', 'Failed to commit document updates.', 'error');
@@ -352,8 +364,7 @@ export default function SigneeDashboard() {
       if (res.ok) {
         Swal.fire('Detour Routed', 'Ad-hoc validation checkpoint successfully injected.', 'success');
         setShowDetailsModal(false);
-        fetchPipelineDocs(signeeOfficeId);
-        fetchOfficeActionHistory(signeeOfficeId);
+        fetchSigneeMeta();
       }
     } catch (err) { 
       Swal.fire('Error', 'Ad-hoc communication assignment breakdown.', 'error'); 
@@ -362,14 +373,18 @@ export default function SigneeDashboard() {
     }
   };
 
-  const formatTimestamp = (rawTimestamp) => {
-    if (!rawTimestamp) return null;
-    const localizedString = String(rawTimestamp).replace(/(\+00:00|\+00|Z)$/i, '');
-    const d = new Date(localizedString);
-    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const getRouteStopsArray = (doc) => {
+    const match = processTypes.find(p => p.process_name === doc.process_name);
+    if (match) {
+      const stops = [];
+      for (let i = 1; i <= 7; i++) {
+        if (match[`stop_${i}_name`]) stops.push(match[`stop_${i}_name`]);
+      }
+      return stops;
+    }
+    return [doc.current_office || 'Active Office'];
   };
 
-  // Filters & Slices
   const pendingDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'pending' && !d.time_out);
   const signedDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'signed' || d.status?.toLowerCase() === 'completed');
   const verificationDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'in verification' || d.current_step_is_adhoc);
@@ -403,14 +418,12 @@ export default function SigneeDashboard() {
   const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
   const isInVerification = selectedDoc?.status?.toLowerCase() === 'in verification' || selectedDoc?.current_step_is_adhoc || selectedDoc?.is_adhoc;
-  
-  // 🔮 VALIDATION GUARD: Evaluates if a document does not possess a time_in timestamp inside your office
   const isAwaitingScanIn = selectedDoc && !selectedDoc.time_in;
+  const isActionAltered = selectedDoc && (selectedDoc.status?.toLowerCase() === 'signed' || selectedDoc.status?.toLowerCase() === 'completed' || selectedDoc.status?.toLowerCase() === 'action required');
 
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
-      {/* SIDEBAR NAVIGATION PANEL */}
       <div className="w-64 bg-[#2D1F1E] text-neutral-300 flex flex-col justify-between p-4 flex-shrink-0 text-left">
         <div>
           <div className="flex items-center gap-3 border-b border-neutral-700 pb-4 mb-6">
@@ -444,10 +457,8 @@ export default function SigneeDashboard() {
         </div>
       </div>
 
-      {/* MAIN CONTAINER WORKSPACE */}
       <div className="flex-1 flex flex-col overflow-hidden">
         
-        {/* INTERACTIVE TOP BAR HEADER */}
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
           <div className="text-left">
             <h2 className="text-lg font-black text-neutral-900 capitalize">
@@ -486,10 +497,8 @@ export default function SigneeDashboard() {
 
         <div className="flex-1 overflow-y-auto p-8 space-y-6">
 
-          {/* TAB 1: OPERATIONAL SIGNATURE CHECKLIST */}
           {activeTab === 'dashboard' && (
             <>
-              {/* KPI COUNTER ROW */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-left">
                 <div className="bg-white p-4 rounded-xl border border-neutral-200 border-l-4 border-l-red-600 shadow-sm">
                   <span className="text-[10px] uppercase font-black text-neutral-400 tracking-wider block">Pending Documents</span>
@@ -541,7 +550,7 @@ export default function SigneeDashboard() {
                           <td className="p-4"><span className="px-2 py-0.5 bg-red-50 text-red-700 border border-red-100 rounded font-black text-[9px] uppercase tracking-wider">• {doc.status || 'Pending'}</span></td>
                           <td className="p-4 font-semibold text-neutral-600">{doc.originating_office || 'University Unit'}</td>
                           <td className="p-4 text-center">
-                            <button onClick={() => handleOpenDetails(doc)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
+                            <button onClick={() => handleOpenDetails(doc, false)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
                           </td>
                         </tr>
                       ))}
@@ -563,7 +572,6 @@ export default function SigneeDashboard() {
             </>
           )}
 
-          {/* TAB 2: GLOBAL PIPELINE MATRIX */}
           {activeTab === 'documents' && (
             <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left">
               <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
@@ -611,7 +619,7 @@ export default function SigneeDashboard() {
                         </td>
                         <td className="p-4 font-semibold text-neutral-500">{doc.next_office || 'Final Stop'}</td>
                         <td className="p-4 text-center">
-                          <button onClick={() => handleOpenDetails(doc)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
+                          <button onClick={() => handleOpenDetails(doc, false)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
                         </td>
                       </tr>
                     ))}
@@ -632,7 +640,6 @@ export default function SigneeDashboard() {
             </div>
           )}
 
-          {/* TAB 3: OFFICE HISTORY AUDIT TRAIL */}
           {activeTab === 'history' && (
             <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left">
               <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -689,7 +696,7 @@ export default function SigneeDashboard() {
                           <td className="p-4 text-neutral-900 font-bold">{log.full_name}</td>
                           <td className="p-4 text-neutral-700 font-semibold">{log.title}</td>
                           <td className="p-4 text-center">
-                            <button onClick={() => handleOpenDetails(log)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
+                            <button onClick={() => handleOpenDetails(log, true)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
                           </td>
                         </tr>
                       );
@@ -711,7 +718,6 @@ export default function SigneeDashboard() {
             </div>
           )}
 
-          {/* TAB 4: PROFILE SETTINGS */}
           {activeTab === 'profile' && (
             <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 text-left animate-in fade-in duration-200">
               <div className="lg:col-span-3 bg-white border border-neutral-200 p-6 rounded-2xl flex items-center gap-6 shadow-sm">
@@ -817,7 +823,6 @@ export default function SigneeDashboard() {
         </div>
       </div>
 
-      {/* DOCUMENT ROUTING IDENTIFICATION VERIFICATION CLEAN OVERLAY MODAL */}
       {showDetailsModal && selectedDoc && (() => {
         const docTitle = selectedDoc.title || selectedDoc.document_title || 'N/A';
         const docProcess = selectedDoc.process_name || 'Administrative Request';
@@ -836,11 +841,9 @@ export default function SigneeDashboard() {
                 <button onClick={() => setShowDetailsModal(false)} className="hover:opacity-80"><X size={18} /></button>
               </div>
 
-              {/* CLEAN SPACED CONTAINER GRID */}
               <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto leading-relaxed">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
                   
-                  {/* LEFT TEXT FIELD METRICS GRID */}
                   <div className="space-y-4 text-xs">
                     <div>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block mb-1">Document Title</span>
@@ -898,7 +901,6 @@ export default function SigneeDashboard() {
                     </div>
                   </div>
 
-                  {/* RIGHT PANEL SECURITY STATIONS */}
                   <div className="border border-neutral-200/80 p-5 rounded-xl bg-white flex flex-col items-center justify-center text-center shadow-xs">
                     <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wide mb-3">Security QR Identity Token</span>
                     <div className="bg-white p-3 border border-neutral-200 rounded-xl shadow-xs">
@@ -911,13 +913,21 @@ export default function SigneeDashboard() {
                   </div>
                 </div>
 
-                {/* VERIFICATION STATE CHECKPOINT FLAGS */}
-                {isAwaitingScanIn ? (
-                  /* ⚠️ TIMEOUT LOCKOUT ACCORDION: Locks structural triggers out if time_in equals null */
+                {isHistoryDetails || selectedDoc.time_out ? (
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3.5 items-start">
+                    <span className="text-xl mt-0.5">ℹ️</span>
+                    <div className="text-xs text-left">
+                      <p className="font-black text-blue-900 uppercase tracking-wide">Vault History View Only</p>
+                      <p className="text-blue-700 font-medium mt-1 leading-normal">
+                        This document step has been locked into the history vault. Active signatures or workflow re-routing permissions are disabled.
+                      </p>
+                    </div>
+                  </div>
+                ) : isAwaitingScanIn ? (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3.5 items-start animate-in fade-in duration-150">
                     <span className="text-xl mt-0.5">🛑</span>
                     <div className="text-xs text-left">
-                      <p className="font-black text-red-900 uppercase tracking-wide">Processing Unvavailable: Not yet Scanned in</p>
+                      <p className="font-black text-red-900 uppercase tracking-wide">Processing Unavailable: Not yet Scanned in</p>
                       <p className="text-red-700 font-medium mt-1 leading-normal">
                         This administrative document cannot be signed or sent back yet. The office Processor must physically scan the file barcode tracking token to confirm its official safe arrival inside your department workspace branch first.
                       </p>
@@ -930,6 +940,16 @@ export default function SigneeDashboard() {
                       <p className="font-black text-amber-900 uppercase tracking-wide">Document In Verification Checkpoint</p>
                       <p className="text-amber-700 font-medium mt-1 leading-normal">
                         This administrative request is currently routing through an active external ad-hoc detour verification branch step. Action workflow options are suspended until it completes its path loop back to your campus terminal office sector.
+                      </p>
+                    </div>
+                  </div>
+                ) : isActionAltered ? (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex gap-3.5 items-start">
+                    <span className="text-xl mt-0.5">🛡️</span>
+                    <div className="text-xs text-left">
+                      <p className="font-black text-green-900 uppercase tracking-wide">Action Completed Securely</p>
+                      <p className="text-green-700 font-medium mt-1 leading-normal">
+                        Your official action signature seal has been submitted successfully for this station. Double modifications are restricted. Processors can now complete the Time-Out clearance sequence.
                       </p>
                     </div>
                   </div>
@@ -973,19 +993,18 @@ export default function SigneeDashboard() {
                 )}
               </div>
 
-              {/* FOOTER ACTIONS LAYER */}
               <div className="p-4 border-t bg-neutral-50/80 flex justify-end gap-2 px-6">
                 <button 
                   type="button" 
                   onClick={() => { setShowSendBackForm(!showSendBackForm); setShowAdHocForm(false); }} 
-                  disabled={isInVerification || isAwaitingScanIn}
+                  disabled={isHistoryDetails || isInVerification || isAwaitingScanIn || isActionAltered || selectedDoc.time_out}
                   className="px-5 py-2 border border-neutral-300 bg-white hover:bg-neutral-100 disabled:opacity-30 rounded-xl font-bold text-xs text-neutral-600 shadow-xs transition-all"
                 >
                   {showSendBackForm ? 'Cancel Revision' : 'Send Back'}
                 </button>
                 <button 
                   type="button" 
-                  disabled={isActionProcessing || selectedDoc.time_out || isInVerification || isAwaitingScanIn} 
+                  disabled={isActionProcessing || isHistoryDetails || isActionAltered || isInVerification || isAwaitingScanIn || selectedDoc.time_out} 
                   onClick={handleSignDocument} 
                   className="px-6 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-md uppercase tracking-wider transition-all disabled:opacity-30"
                 >
@@ -996,36 +1015,6 @@ export default function SigneeDashboard() {
           </div>
         );
       })()}
-
-      {/* SECURE CONDITIONAL PASSWORD UPDATER DIALOG POPUP */}
-      {showPassModal && (
-        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
-          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl border overflow-hidden flex flex-col text-left">
-            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
-              <h3 className="font-bold text-neutral-900 text-sm flex items-center gap-2"><KeyRound size={16} className="text-red-800" /> Change Password</h3>
-              <button onClick={() => setShowPassModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
-            </div>
-            <form onSubmit={handleUpdatePassword} className="p-5 space-y-4 text-xs">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Current Password</label>
-                <input type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-800 outline-none bg-neutral-50 font-medium" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">New Password</label>
-                <input type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-800 outline-none bg-neutral-50 font-medium" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Confirm New Password</label>
-                <input type="password" required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-800 outline-none bg-neutral-50 font-medium" />
-              </div>
-              <div className="flex justify-end gap-2 pt-2 border-t">
-                <button type="button" onClick={() => setShowPassModal(false)} className="px-4 py-2 border rounded-xl font-bold text-gray-500 hover:bg-neutral-50">Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-red-800 text-white font-bold rounded-xl shadow-xs uppercase tracking-wide">Update Passcode</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
     </div>
   );
