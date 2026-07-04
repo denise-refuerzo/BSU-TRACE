@@ -34,45 +34,55 @@ const pool = new Pool({
 // ==========================================
 const OAuth2 = google.auth.OAuth2;
 
-const createTransporter = async () => {
-  const oauth2Client = new OAuth2(
+// ==========================================
+// GOOGLE API HTTPS EMAIL SETUP (Bypasses Render SMTP Block)
+// ==========================================
+const { google } = require('googleapis');
+
+const sendSystemEmail = async (to, subject, text) => {
+  // 1. Authenticate using OAuth2
+  const oauth2Client = new google.auth.OAuth2(
     process.env.CLIENT_ID,
     process.env.CLIENT_SECRET,
-    "https://developers.google.com/oauthplayground" // Standard OAuth playground redirect URL
+    "https://developers.google.com/oauthplayground"
   );
 
   oauth2Client.setCredentials({
     refresh_token: process.env.REFRESH_TOKEN
   });
 
-  const accessToken = await new Promise((resolve, reject) => {
-    oauth2Client.getAccessToken((err, token) => {
-      if (err) {
-        console.error("Failed to create access token:", err);
-        reject("Failed to create access token");
-      }
-      resolve(token);
-    });
-  });
+  // 2. Initialize the Gmail API service
+  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
-    auth: {
-      type: "OAuth2",
-      user: process.env.EMAIL_USER,
-      accessToken: accessToken,
-      clientId: process.env.CLIENT_ID,
-      clientSecret: process.env.CLIENT_SECRET,
-      refreshToken: process.env.REFRESH_TOKEN
+  // 3. Format the email as a standard RFC 2822 message
+  const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const messageParts = [
+    // Change EMAIL_USER to your dummy email here if you verified one!
+    `From: "BSU-Trace Security" <${process.env.EMAIL_USER}>`, 
+    `To: ${to}`,
+    'Content-Type: text/plain; charset=utf-8',
+    'MIME-Version: 1.0',
+    `Subject: ${utf8Subject}`,
+    '',
+    text,
+  ];
+  
+  const message = messageParts.join('\n');
+
+  // 4. Encode the message in base64url format (required by Gmail API)
+  const encodedMessage = Buffer.from(message)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  // 5. Send via Google's HTTPS API (Port 443 - Never blocked by Render)
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: encodedMessage,
     },
-    tls: {
-      rejectUnauthorized: false
-    }
   });
-
-  return transporter;
 };
 
 // Helper function to send emails cleanly from any route
