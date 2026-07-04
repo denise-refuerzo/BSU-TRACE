@@ -56,7 +56,7 @@ const sendSystemEmail = async (to, subject, text) => {
   const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
   const messageParts = [
     // Change EMAIL_USER to your dummy email here if you verified one!
-    `From: "BSU-Trace Security" <${process.env.EMAIL_USER}>`, 
+    `From: "BSU-Trace Security" <bsutrace@gmail.com>`, 
     `To: ${to}`,
     'Content-Type: text/plain; charset=utf-8',
     'MIME-Version: 1.0',
