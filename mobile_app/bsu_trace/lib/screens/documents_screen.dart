@@ -1,0 +1,334 @@
+// lib/screens/documents_screen.dart
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import '../theme/app_theme.dart';
+import '../widgets/app_bar_helper.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/modals/document_scanner_modal.dart';
+import '../widgets/modals/processor_document_details_modal.dart';
+import '../services/session_manager.dart';
+import '../models/user_role.dart';
+import '../config.dart';
+
+class DocumentsScreen extends StatefulWidget {
+  const DocumentsScreen({super.key});
+
+  @override
+  State<DocumentsScreen> createState() => _DocumentsScreenState();
+}
+
+class _DocumentsScreenState extends State<DocumentsScreen> {
+  List<dynamic> documents = [];
+  bool isLoading = true;
+  String errorMessage = '';
+  Timer? _timer;
+  bool _isAscending = false;
+  
+  String _selectedStatus = 'All Status';
+  String _searchQuery = '';
+
+// EXACT BUSINESS RULE STATUS LOGIC
+  String _resolveStatus(Map<String, dynamic> doc) {
+    String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
+    
+    bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
+    
+    // Safely check for ad-hoc either via the explicit boolean or text fallback
+    bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true' || 
+                   dbStatus == 'in verification' || dbStatus.contains('ad hoc');
+
+    // 1. If it's globally completed or this processor has already scanned it out
+    if (dbStatus == 'completed' || isCompletedByMe) {
+      return 'completed';
+    }
+
+    // Role isolated fallback -> Uses exact rules if the endpoint provided "is_at_current_office"
+    if (doc.containsKey('is_at_current_office')) {
+      bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
+      if (isAtCurrentOffice) {
+        // Awaiting scan-in at this office
+        if (doc['time_in'] == null) return 'awaiting scan in'; 
+        
+        // Scanned in but waiting for processing or scan-out
+        if (dbStatus == 'signed') return 'pending'; 
+        if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
+        if (doc['time_out'] == null) return 'pending'; 
+        
+        return 'verified'; 
+      } else {
+        // Currently at another office
+        if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
+        return 'incoming'; 
+      }
+    } 
+    
+    // Global fallback for Admins/Originators who see all system documents
+    if (dbStatus == 'signed') return 'pending';
+    if (doc['time_out'] != null) return 'verified';
+    if (isAdHoc) return 'in verification';
+    if (doc['time_in'] == null) return 'incoming';
+    return 'pending';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    fetchDocuments();
+    _timer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) fetchDocuments();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchDocuments() async {
+    final userId = SessionManager().userId;
+    final role = SessionManager().currentRole;
+    if (userId == null) return;
+    
+    // If the user is a Processor, fetch isolated routing queue. Otherwise, fallback to global queue.
+    String url = '${AppConfig.baseUrl}/documents';
+    if (role == UserRole.processor) {
+      url = '${AppConfig.baseUrl}/processors/$userId/documents';
+    }
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          List<dynamic> fetchedDocs = json.decode(response.body);
+
+          fetchedDocs.sort((a, b) {
+            String dateAStr = a['created_at'] ?? a['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+            String dateBStr = b['created_at'] ?? b['updated_at'] ?? '1970-01-01T00:00:00+08:00';
+            dateAStr = dateAStr.replaceAll(' ', 'T');
+            if (!dateAStr.endsWith('Z') && !dateAStr.contains('+')) dateAStr += '+08:00';
+            dateBStr = dateBStr.replaceAll(' ', 'T');
+            if (!dateBStr.endsWith('Z') && !dateBStr.contains('+')) dateBStr += '+08:00';
+
+            DateTime dateA = DateTime.tryParse(dateAStr) ?? DateTime.utc(1970);
+            DateTime dateB = DateTime.tryParse(dateBStr) ?? DateTime.utc(1970);
+            return _isAscending ? dateA.compareTo(dateB) : dateB.compareTo(dateA);
+          });
+
+          setState(() {
+            documents = fetchedDocs;
+            isLoading = false;
+            errorMessage = '';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Error fetching documents: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    List<dynamic> filteredDocuments = documents.where((doc) {
+      String docStatus = _resolveStatus(doc);
+      
+      if (_selectedStatus != 'All Status') {
+        if (docStatus != _selectedStatus.toLowerCase()) return false;
+      }
+      
+      if (_searchQuery.isNotEmpty) {
+        String query = _searchQuery.toLowerCase();
+        String title = (doc['title'] ?? '').toString().toLowerCase();
+        String trackingId = (doc['qr_code'] ?? doc['tracking_id'] ?? '').toString().toLowerCase();
+        String origin = (doc['origin_office'] ?? '').toString().toLowerCase();
+        
+        if (!title.contains(query) && !trackingId.contains(query) && !origin.contains(query)) {
+          return false;
+        }
+      }
+
+      return true;
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: AppTheme.scaffoldBg,
+      appBar: AppBar(title: const Text('Documents'), actions: buildAppBarActions(context)),
+      drawer: const AppDrawer(),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+          : RefreshIndicator(
+              onRefresh: fetchDocuments,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    _buildSearchBar(),
+                    const SizedBox(height: 16),
+                    _buildFilterRow(),
+                    const SizedBox(height: 24),
+                    if (filteredDocuments.isEmpty)
+                      const Padding(padding: EdgeInsets.only(top: 40), child: Text("No documents found.", style: TextStyle(color: Colors.grey)))
+                    else
+                      ...filteredDocuments.map((doc) => _buildDocumentCard(context, doc)),
+                    const SizedBox(height: 80),
+                  ],
+                ),
+              ),
+            ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => showDialog(context: context, builder: (context) => const DocumentScannerModal()),
+        backgroundColor: AppTheme.primaryRed,
+        child: const Icon(Icons.qr_code_scanner, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() => TextField(
+        onChanged: (value) { setState(() { _searchQuery = value; }); },
+        decoration: InputDecoration(
+          hintText: 'Search Documents...',
+          prefixIcon: const Icon(Icons.search, color: Colors.grey),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+        ),
+      );
+
+  Widget _buildFilterRow() => Row(
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: _selectedStatus,
+                  items: [
+                    'All Status', 'Incoming', 'Awaiting Scan In', 'Pending', 'In Verification', 'Verified', 'Completed'
+                  ].map((String value) {
+                    return DropdownMenuItem<String>(
+                      value: value, 
+                      child: Text(value, style: const TextStyle(fontSize: 14)),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue) {
+                    if (newValue != null) {
+                      setState(() { _selectedStatus = newValue; });
+                    }
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _isAscending ? 'Oldest' : 'Newest', 
+                items: ['Newest', 'Oldest'].map((String value) {
+                  return DropdownMenuItem<String>(value: value, child: Text(value, style: const TextStyle(fontSize: 14)));
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _isAscending = (newValue == 'Oldest');
+                    fetchDocuments();
+                  });
+                },
+              ),
+            ),
+          ),
+        ],
+      );
+
+  Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
+    final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
+    final String title = document['title'] ?? 'No Title';
+    final String form = document['form_type'] ?? 'N/A';
+    final String origin = document['origin_office'] ?? 'N/A';
+    
+    final String rawStatus = _resolveStatus(document);
+    final String status = rawStatus.isEmpty ? 'Unknown' : rawStatus.split(' ').map((str) => str.isNotEmpty ? str[0].toUpperCase() + str.substring(1) : '').join(' ');
+
+    String time = 'N/A';
+    String? dbTime = document['created_at'] ?? document['updated_at'];
+
+    if (dbTime != null) {
+      String normalizedTime = dbTime.replaceAll(' ', 'T');
+      if (!normalizedTime.endsWith('Z') && !normalizedTime.contains('+')) normalizedTime += '+08:00';
+      DateTime? parsedDate = DateTime.tryParse(normalizedTime);
+      if (parsedDate != null) {
+        Duration diff = DateTime.now().difference(parsedDate);
+        if (diff.isNegative) time = 'Just now'; 
+        else if (diff.inDays >= 365) time = '${(diff.inDays/365).floor()} years ago';
+        else if (diff.inDays >= 30) time = '${(diff.inDays/30).floor()} months ago';
+        else if (diff.inDays > 0) time = '${diff.inDays} days ago';
+        else if (diff.inHours > 0) time = '${diff.inHours} hours ago';
+        else if (diff.inMinutes > 0) time = '${diff.inMinutes} minutes ago';
+        else time = 'Just now';
+      }
+    }
+
+    Color statusColor;
+    switch (rawStatus.toLowerCase()) {
+      case 'awaiting scan in': statusColor = Colors.purple.shade100; break;
+      case 'pending': statusColor = Colors.orange.shade100; break;
+      case 'in verification': statusColor = Colors.blue.shade100; break;
+      case 'verified': 
+      case 'completed': statusColor = Colors.green.shade100; break;
+      default: statusColor = Colors.grey.shade100;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade50)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(trackingId, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
+                decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(4)), 
+                child: Text(status, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          Text('Form: $form', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          Text('Origin: $origin', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              GestureDetector(
+                onTap: () => showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => ProcessorDocumentDetailsModal(
+                      document: document,
+                      onAdHocVerification: () => Navigator.pop(context),
+                      onDownloadDigitalCopy: () {},
+                    )),
+                child: const Text('View Details >', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              Text(time, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
