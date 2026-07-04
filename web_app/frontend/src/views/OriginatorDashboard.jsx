@@ -311,36 +311,48 @@ export default function OriginatorDashboard() {
 
               {/* DYNAMIC PATCH APPLIED HERE: Renders all real stops from database templates */}
               {mostRecentDoc && (
-                <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm text-left">
-                  <h4 className="text-sm font-bold tracking-tight text-neutral-500 uppercase mb-4">
-                    Recent Document: <span className="text-neutral-900 font-extrabold uppercase">{mostRecentDoc.title}</span>
-                  </h4>
-                  <div className="relative flex items-center justify-between mt-6 px-4">
-                    <div className="absolute left-4 right-4 h-1 bg-neutral-200 top-3 -z-10"></div>
-                    <div className="absolute left-4 w-1/2 h-1 bg-red-700 top-3 -z-10"></div>
-                    
-                    {recentDocStops.map((stop, index) => {
-                      const idxCurrent = recentDocStops.indexOf(mostRecentDoc.current_office);
-                      const isCurrent = stop === mostRecentDoc.current_office;
-                      const isPast = idxCurrent === -1 || index <= idxCurrent;
+              <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm text-left">
+                <h4 className="text-sm font-bold tracking-tight text-neutral-500 uppercase mb-4">
+                  Recent Document: <span className="text-neutral-900 font-extrabold uppercase">{mostRecentDoc.title}</span>
+                </h4>
+                <div className="relative flex items-center justify-between mt-6 px-4">
+                  {/* Dynamic Connector Background Track Lines */}
+                  <div className="absolute left-4 right-4 h-1 bg-neutral-200 top-3 -z-10"></div>
+                  <div 
+                    className="absolute left-4 h-1 bg-red-700 top-3 -z-10 transition-all duration-500 ease-in-out"
+                    style={{
+                      width: (() => {
+                        if (mostRecentDoc.status?.toLowerCase() === 'completed') return 'calc(100% - 32px)';
+                        const idx = recentDocStops.indexOf(mostRecentDoc.current_office);
+                        if (idx === -1 || recentDocStops.length <= 1) return '0%';
+                        return `calc(${(idx / (recentDocStops.length - 1)) * 100}% - 12px)`;
+                      })()
+                    }}
+                  ></div>
+                  
+                  {recentDocStops.map((stop, index) => {
+                    const currentOfficeIdx = recentDocStops.indexOf(mostRecentDoc.current_office);
+                    const isCompletedAll = mostRecentDoc.status?.toLowerCase() === 'completed';
+                    const isCurrent = stop === mostRecentDoc.current_office && !isCompletedAll;
+                    const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
 
-                      return (
-                        <div key={index} className="text-center flex flex-col items-center flex-1">
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
-                            isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
-                            isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
-                          }`}>
-                            {isPast && !isCurrent ? '✓' : index + 1}
-                          </div>
-                          <p className={`text-[11px] font-bold mt-2 truncate max-w-[130px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
-                            {stop}
-                          </p>
+                    return (
+                      <div key={index} className="text-center flex flex-col items-center flex-1">
+                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                          isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
+                          isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
+                        }`}>
+                          {isPast && !isCurrent ? '✓' : index + 1}
                         </div>
-                      );
-                    })}
-                  </div>
+                        <p className={`text-[11px] font-bold mt-2 truncate max-w-[130px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
+                          {stop}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
+            )}
 
               <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left">
                 <div className="p-6 border-b border-neutral-100 flex items-center justify-between">

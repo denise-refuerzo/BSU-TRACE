@@ -10,24 +10,24 @@ export default function DocumentsHub({
 }) {
   const userName = localStorage.getItem('user') || 'Faculty User';
   const [selectedDoc, setSelectedDoc] = useState(null);
-  const [activeDetailsDoc, setActiveDetailsDoc] = useState(null); // Explicit pop-up tracking state
+  const [activeDetailsDoc, setActiveDetailsDoc] = useState(null); 
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showQrOverlay, setShowQrOverlay] = useState(false);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [activeRouteStops, setActiveRouteStops] = useState([]);
 
-  // Auto-select the first document on load to populate the top live tracker dashboard card
   useEffect(() => {
     if (documents.length > 0 && !selectedDoc) {
       handleSelectDocument(documents[0]);
+    } else if (selectedDoc) {
+      const updatedDoc = documents.find(d => d.ini_id === selectedDoc.ini_id);
+      if (updatedDoc) handleSelectDocument(updatedDoc);
     }
   }, [documents]);
 
   const handleSelectDocument = (doc) => {
     setSelectedDoc(doc);
-    
-    // Parse route stops based on the process type configuration template
     const match = processTypes.find(p => p.process_name === doc.process_name);
     if (match) {
       const stops = [];
@@ -42,21 +42,9 @@ export default function DocumentsHub({
 
   const handleOpenDetails = (e, doc) => {
     e.preventDefault();
-    e.stopPropagation(); // 🛑 CRITICAL FIX: Stops the click from bubbling up and crashing into a white screen
+    e.stopPropagation(); 
     setActiveDetailsDoc(doc);
     setShowDetailsModal(true);
-  };
-
-  const getVerticalStopsForDetails = (doc) => {
-    const match = processTypes.find(p => p.process_name === doc.process_name);
-    if (match) {
-      const stops = [];
-      for (let i = 1; i <= 7; i++) {
-        if (match[`stop_${i}_name`]) stops.push(match[`stop_${i}_name`]);
-      }
-      return stops;
-    }
-    return [doc.current_office || 'Origin Office', doc.next_office || 'Next Unit'].filter(Boolean);
   };
 
   const filteredDocs = documents.filter(doc => {
@@ -66,12 +54,19 @@ export default function DocumentsHub({
     return matchesSearch && matchesStatus;
   });
 
+  // Calculate dynamic line progress percentages
+  const getCurrentProgressPercent = (doc, stops) => {
+    if (!doc || stops.length <= 1) return 0;
+    if (doc.status?.toLowerCase() === 'completed') return 100;
+    const currentIndex = stops.indexOf(doc.current_office);
+    if (currentIndex === -1) return 0;
+    return (currentIndex / (stops.length - 1)) * 100;
+  };
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-150">
       
-      {/* ==========================================
-          TOP TRACKER BAR SECTION
-          ========================================== */}
+      {/* TOP TRACKER BAR SECTION */}
       {selectedDoc ? (
         <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm relative">
           <div className="flex justify-between items-start mb-6">
@@ -89,27 +84,35 @@ export default function DocumentsHub({
           </div>
 
           <div className="relative flex items-center justify-between mt-8 mb-6 px-6">
+            {/* Background Tracks */}
             <div className="absolute left-6 right-6 h-1 bg-neutral-100 top-3 -z-10"></div>
-            <div className="absolute left-6 w-1/2 h-1 bg-red-700 top-3 -z-10"></div>
+            <div 
+              className="absolute left-6 h-1 bg-red-700 top-3 -z-10 transition-all duration-500 ease-in-out"
+              style={{ width: `calc(${getCurrentProgressPercent(selectedDoc, activeRouteStops)}% - 12px)` }}
+            ></div>
 
-            {activeRouteStops.map((stop, index) => {
-              const isCurrent = stop === selectedDoc.current_office;
-              const isPast = !selectedDoc.next_office || index < activeRouteStops.indexOf(selectedDoc.current_office);
-              
-              return (
-                <div key={index} className="text-center flex flex-col items-center flex-1">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
-                    isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
-                    isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
-                  }`}>
-                    {isPast && !isCurrent ? '✓' : index + 1}
+              {activeRouteStops.map((stop, index) => {
+                const currentOfficeIdx = activeRouteStops.indexOf(selectedDoc.current_office);
+                const isCompletedAll = selectedDoc.status?.toLowerCase() === 'completed';
+                
+                // An active pulse should only occur if the tracking process is ongoing
+                const isCurrent = stop === selectedDoc.current_office && !isCompletedAll;
+                const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
+                
+                return (
+                  <div key={index} className="text-center flex flex-col items-center flex-1">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                      isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
+                      isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
+                    }`}>
+                      {isPast && !isCurrent ? '✓' : index + 1}
+                    </div>
+                    <p className={`text-[11px] font-bold mt-2 truncate max-w-[120px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
+                      {stop}
+                    </p>
                   </div>
-                  <p className={`text-[11px] font-bold mt-2 truncate max-w-[120px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
-                    {stop}
-                  </p>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
 
           <div className="flex justify-end pt-4 border-t border-neutral-100">
@@ -124,9 +127,7 @@ export default function DocumentsHub({
         </div>
       )}
 
-      {/* ==========================================
-          MASTER SUBMISSIONS TABLE LEDGER
-          ========================================== */}
+      {/* MASTER SUBMISSIONS TABLE LEDGER */}
       <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <h3 className="text-base font-bold text-neutral-950">Recent Submissions</h3>
@@ -210,14 +211,11 @@ export default function DocumentsHub({
         </div>
       </div>
 
-      {/* ==========================================
-          MODAL DIALOG POPUP: DOCUMENT TRACKING DETAILS (image_355265.png)
-          ========================================== */}
+      {/* DOCUMENT DETAILS MODAL FRAME */}
       {showDetailsModal && activeDetailsDoc && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
           <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col">
             
-            {/* Header Title block */}
             <div className="p-5 border-b border-neutral-100 flex items-center justify-between bg-[#FDFBF9]">
               <h3 className="font-bold text-neutral-950 text-base">Document Tracking Details</h3>
               <button onClick={() => setShowDetailsModal(false)} className="text-neutral-400 hover:text-neutral-600 transition-colors">
@@ -225,7 +223,6 @@ export default function DocumentsHub({
               </button>
             </div>
             
-            {/* Document Attributes Layout */}
             <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
               <div className="flex justify-between items-start gap-4">
                 <div className="space-y-4 flex-1">
@@ -268,23 +265,23 @@ export default function DocumentsHub({
                   </div>
                 </div>
 
-                {/* Sub-QR View Side Block */}
                 <div className="bg-neutral-50 p-3 border border-neutral-200 rounded-xl flex flex-col items-center flex-shrink-0">
                   <QrCode size={80} className="text-neutral-800" />
                   <span className="text-[8px] font-black text-neutral-400 mt-1.5 uppercase tracking-widest">Tracking QR</span>
                 </div>
               </div>
 
-              {/* Vertical Linear Submission Step Mapping Tracker */}
+              {/* Submission Route Status */}
               <div className="pt-4 border-t border-neutral-100 text-left">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-4">Submission Route Status</span>
                 <div className="relative pl-6 space-y-5">
                   <div className="absolute left-[6px] top-1.5 bottom-1.5 w-0.5 bg-neutral-200"></div>
                   
                   {activeRouteStops.map((stop, i) => {
-                    const idxCurrent = activeRouteStops.indexOf(selectedDoc?.current_office);
-                    const isCurrent = stop === selectedDoc?.current_office;
-                    const isPast = idxCurrent === -1 || i <= idxCurrent;
+                    const currentOfficeIdx = activeRouteStops.indexOf(activeDetailsDoc?.current_office);
+                    const isCompletedAll = activeDetailsDoc?.status?.toLowerCase() === 'completed';
+                    const isCurrent = stop === activeDetailsDoc?.current_office && !isCompletedAll;
+                    const isPast = isCompletedAll || (currentOfficeIdx !== -1 && i <= currentOfficeIdx);
 
                     return (
                       <div key={i} className="relative flex flex-col">
@@ -307,7 +304,6 @@ export default function DocumentsHub({
               </div>
             </div>
 
-            {/* Footer Form Operations Navigation Actions */}
             <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex justify-between items-center">
               <div className="flex gap-2">
                 <button type="button" className="px-4 py-2 border border-neutral-200 bg-white hover:bg-neutral-50 rounded-xl font-bold text-xs text-neutral-700 flex items-center gap-1.5 transition-colors">
@@ -326,7 +322,7 @@ export default function DocumentsHub({
         </div>
       )}
 
-      {/* DETACHED TIMELINE QR VIEWER */}
+      {/* TIMELINE QR OVERLAY */}
       {showQrOverlay && selectedDoc && (
         <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-100">
           <div className="bg-white rounded-2xl p-6 text-center max-w-sm w-full border shadow-2xl space-y-4">

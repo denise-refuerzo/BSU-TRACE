@@ -242,18 +242,30 @@ app.get('/api/process-types', async (req, res) => {
 app.get('/api/documents/:userId', async (req, res) => {
   try {
     const query = `
-      SELECT idoc.ini_id, idoc.title, idoc.edc, idoc.qr_code, pt.process_name,
-             curr_o.office_name as current_office, next_o.office_name as next_office, st.current_status as status
+      SELECT DISTINCT ON (idoc.ini_id)
+             idoc.ini_id, 
+             idoc.title, 
+             idoc.edc, 
+             idoc.qr_code, 
+             pt.process_name,
+             curr_o.office_name as current_office, 
+             next_o.office_name as next_office, 
+             st.current_status as status
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       LEFT JOIN public.processed_document pdoc ON idoc.ini_id = pdoc.ini_id
       LEFT JOIN public.offices curr_o ON pdoc.current_office_id = curr_o.o_id
       LEFT JOIN public.offices next_o ON pdoc.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON pdoc.s_id = st.s_id
-      WHERE idoc.u_id = $1 ORDER BY pdoc.time_in DESC NULLS LAST;`;
+      WHERE idoc.u_id = $1 
+      ORDER BY idoc.ini_id DESC, pdoc.pd_id DESC;
+    `;
     const result = await pool.query(query, [req.params.userId]);
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: 'Failed mapping logs' }); }
+  } catch (err) { 
+    console.error(err);
+    res.status(500).json({ error: 'Failed mapping logs' }); 
+  }
 });
 
 app.post('/api/documents', async (req, res) => {
@@ -517,6 +529,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
       });
     }
 
+    // Record the checkout timestamp for the current station
     await pool.query(`
       UPDATE public.processed_document 
       SET time_out = TIMEZONE('Asia/Manila', NOW()) 
@@ -532,6 +545,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
     const adhocData = adhocCheckRes.rows[0];
 
     if (adhocData && adhocData.is_adhoc) {
+      // Return route execution from ad-hoc detour sub-loops
       await pool.query(`
         INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, is_returned_from_adhoc, time_in)
         VALUES ($1, 1, $2, NULL, true, NULL)
@@ -550,14 +564,22 @@ app.post('/api/documents/scan-out', async (req, res) => {
       let targetCurrentOffice = currentActiveStep.next_office_id || adhocData.current_office_id;
 
       if (r) {
-        const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7];
+        const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
         const currentIndex = sequence.indexOf(targetCurrentOffice);
         if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
           foundNextStop = sequence[currentIndex + 1];
         }
       }
 
-      if (targetCurrentOffice) {
+      if (!foundNextStop) {
+        // 🏁 PIPELINE ROUTE COMPLETION
+        // No further stops remaining in sequence: allocate finalized confirmation step log (s_id = 5)
+        await pool.query(`
+          INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in, time_out)
+          VALUES ($1, 5, $2, NULL, TIMEZONE('Asia/Manila', NOW()), TIMEZONE('Asia/Manila', NOW()))
+        `, [currentActiveStep.ini_id, targetCurrentOffice]);
+      } else {
+        // Dispatch document forward to next standard sequence office lane block
         await pool.query(`
           INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
           VALUES ($1, 1, $2, $3, NULL)

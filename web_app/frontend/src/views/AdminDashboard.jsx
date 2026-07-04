@@ -119,7 +119,13 @@ export default function AdminDashboard() {
                       <p className="text-[10px] text-gray-400 font-mono font-normal">🏬 Location Block: {log.office_name || 'Global Core Node'}</p>
                     </div>
                     <span className="text-[10px] text-gray-400 font-mono font-normal whitespace-nowrap">
-                      {new Date(log.action_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                      {log.action_timestamp
+                        ? new Date(String(log.action_timestamp).replace(/(\+00:00|\+00|Z)$/i, '')).toLocaleTimeString('en-US', { 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            hour12: true // Kept true to match your working block's format
+                          })
+                        : 'N/A'}
                     </span>
                   </div>
                 ))}
