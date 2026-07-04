@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
-import '../widgets/app_drawer.dart';
+// Removed app_drawer.dart import since we are using a back button now
 import '../services/session_manager.dart';
 import '../config.dart';
 import '../widgets/modals/change_password_modal.dart';
@@ -72,6 +72,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _onInputChanged() {
     setState(() {}); // Triggers a rebuild so PopScope knows if changes exist
+  }
+
+  // Dialog Helper to replace Snackbars
+  void _showAlertDialog(String title, String message, {bool isError = true}) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          title, 
+          style: TextStyle(
+            color: isError ? Colors.red : Colors.green, 
+            fontWeight: FontWeight.bold
+          )
+        ),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchUserProfile() async {
@@ -153,7 +178,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
             onPressed: () {
               if (pinController.text.length < 4) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN must be at least 4 digits.')));
+                // Showing validation error in a dialog over the existing modal
+                _showAlertDialog('Invalid PIN', 'PIN must be at least 4 digits.', isError: true);
                 return;
               }
               Navigator.pop(context, true);
@@ -201,19 +227,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _new2faCode = null; // Clear the temporary code flag so unsaved changes = false
           _forcePop = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile updated successfully!'), backgroundColor: Colors.green),
-        );
+        _showAlertDialog('Success', 'Profile updated successfully!', isError: false);
         _fetchUserProfile(); 
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update profile.'), backgroundColor: Colors.red),
-        );
+        _showAlertDialog('Error', 'Failed to update profile.');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection error. Please try again.'), backgroundColor: Colors.red),
-      );
+      _showAlertDialog('Error', 'Connection error. Please try again.');
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -261,17 +281,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         }
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('My Profile'), actions: buildAppBarActions(context)),
-        drawer: AppDrawer(
-          onBeforeNavigate: () async {
-            // Check if there are unsaved changes
-            if (_hasUnsavedChanges) {
-              // Trigger the existing discard dialog
-              final shouldDiscard = await _showDiscardDialog();
-              return shouldDiscard; // Return true to proceed, false to halt and stay on screen
-            }
-            return true; // If no changes, proceed without asking
-          },
+        appBar: AppBar(
+          leading: const BackButton(), // Replaced AppDrawer with the BackButton here
+          title: const Text('My Profile'), 
+          actions: buildAppBarActions(context)
         ),
         body: _isLoading 
             ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))

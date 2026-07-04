@@ -11,7 +11,7 @@ class ForgotPasswordScreen extends StatefulWidget {
 }
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  int _currentStep = 0; // 0: Email, 1: Code/New Password[cite: 1]
+  int _currentStep = 0; // 0: Email, 1: Code/New Password
   bool _isLoading = false;
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _codeController = TextEditingController();
@@ -20,23 +20,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _sendCode() async {
     setState(() => _isLoading = true);
     try {
-      // FIX: Removed the duplicate '/api' since AppConfig.baseUrl already includes it[cite: 1]
       final url = Uri.parse('${AppConfig.baseUrl}/auth/forgot-password');
       
       debugPrint('Sending request to: $url');
 
-      // Inside _sendCode()
-      final eurl = Uri.parse('${AppConfig.baseUrl}/auth/forgot-password');
-      debugPrint('Sending request to: $eurl');
       final response = await http.post(
-        eurl,
+        url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'email': _emailController.text.trim()}),
       ).timeout(
-        const Duration(seconds: 60), // Increased from 30 to allow the Render server to wake up
+        const Duration(seconds: 60), 
       );
 
-      // Diagnostic logging to reveal any HTML error bodies safely
       debugPrint('HTTP Status Code: ${response.statusCode}');
       debugPrint('HTTP Response Body: ${response.body}');
 
@@ -45,15 +40,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         setState(() => _currentStep = 1);
         _showMessage(data['message'] ?? 'Reset code sent successfully!');
       } else {
-              // If the response starts with '<', it's an HTML page, not JSON!
-              if (response.body.trim().startsWith('<')) {
-                _showMessage('Server returned HTML instead of JSON. Status: ${response.statusCode}', isError: true);
-                debugPrint('RAW HTML: ${response.body}'); // Look at your Debug Console to read the HTML!
-              } else {
-                final data = jsonDecode(response.body);
-                _showMessage(data['message'] ?? 'Error sending code', isError: true);
-              }
-            }
+        if (response.body.trim().startsWith('<')) {
+          _showMessage('Server returned HTML instead of JSON. Status: ${response.statusCode}', isError: true);
+          debugPrint('RAW HTML: ${response.body}'); 
+        } else {
+          final data = jsonDecode(response.body);
+          _showMessage(data['message'] ?? 'Error sending code', isError: true);
+        }
+      }
     } catch (e) {
       debugPrint('Send Code Error Exception: $e');
       _showMessage('Connection error or timeout. Please check your network.', isError: true);
@@ -68,14 +62,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       return;
     }
     
-setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
     try {
-      
-      // CHANGE THIS LINE: 
-      // Replace '/auth/forgot-password' with '/auth/reset-password'
       final url = Uri.parse('${AppConfig.baseUrl}/auth/reset-password');
 
-      // Inside _resetPassword()
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
@@ -85,15 +75,17 @@ setState(() => _isLoading = true);
           'newPassword': _newPasswordController.text, 
         }),
       ).timeout(
-        const Duration(seconds: 60), // Increased from 30
+        const Duration(seconds: 60),
       );
 
       debugPrint('HTTP Status Code: ${response.statusCode}');
       debugPrint('HTTP Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
-        _showMessage('Password successfully reset! Please login.');
-        Navigator.pop(context); // Navigates back to AuthScreen login layout[cite: 1]
+        // Provide a callback to pop the screen AFTER the dialog closes
+        _showMessage('Password successfully reset! Please login.', onClose: () {
+          Navigator.pop(context);
+        });
       } else {
         try {
           final data = jsonDecode(response.body);
@@ -110,13 +102,33 @@ setState(() => _isLoading = true);
     }
   }
 
-  void _showMessage(String msg, {bool isError = false}) {
+  // Refactored to show AlertDialog instead of SnackBar
+  void _showMessage(String msg, {bool isError = false, VoidCallback? onClose}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Force them to press OK
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          isError ? 'Error' : 'Success', 
+          style: TextStyle(
+            color: isError ? Colors.red : Colors.green, 
+            fontWeight: FontWeight.bold
+          )
+        ),
         content: Text(msg),
-        backgroundColor: isError ? Colors.red : Colors.green,
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop(); // Close dialog
+              if (onClose != null) {
+                onClose(); // Trigger navigation callback if provided
+              }
+            },
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

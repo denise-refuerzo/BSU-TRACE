@@ -30,6 +30,25 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  // Dialog Helper to replace Snackbars
+  void _showAlertDialog(String title, String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Separated dashboard navigation logic so we can call it after 2FA
   void _proceedToDashboard(UserRole role, int userId) {
     SessionManager().login(role, userId);
@@ -38,7 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
       case UserRole.admin: 
         Navigator.pushReplacementNamed(context, '/dashboard_admin'); 
         break;
-      case UserRole.ictAdmin: // <-- ADD THIS CASE
+      case UserRole.ictAdmin: 
         Navigator.pushReplacementNamed(context, '/dashboard_ict_admin'); 
         break;
       case UserRole.processor: 
@@ -54,7 +73,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   // Displays the 2FA input modal and verifies it with the backend
-Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
+  Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
     final TextEditingController pinController = TextEditingController();
     bool isVerifying = false;
     int failedAttempts = 0; // Tracks failed attempts locally
@@ -95,16 +114,12 @@ Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
                  // If backend sent the new PIN email (10 limits hit)
                  if (data['error'].contains('A NEW PIN has been sent')) {
                      Navigator.pop(context);
-                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                       content: Text(data['error']), 
-                       backgroundColor: Colors.orange.shade800, 
-                       duration: const Duration(seconds: 5)
-                     ));
+                     _showAlertDialog('Notice', data['error']);
                  }
               }
             } catch (e) {
                setModalState(() => isVerifying = false);
-               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error')));
+               _showAlertDialog('Error', 'Connection error. Please check your network.');
             }
           }
 
@@ -165,7 +180,7 @@ Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
     );
   }
 
-Future<void> _handleLogin() async {
+  Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     
     setState(() => _isLoading = true);
@@ -199,23 +214,14 @@ Future<void> _handleLogin() async {
       } else if (response.statusCode == 403) {
         // CATCH RESTRICTED ACCOUNTS HERE
         final errorMsg = json.decode(response.body)['error'];
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMsg), backgroundColor: Colors.orange.shade800, duration: const Duration(seconds: 4)),
-        );
+        _showAlertDialog('Access Denied', errorMsg);
       } else {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid credentials.'), backgroundColor: Colors.red),
-        );
+        _showAlertDialog('Login Failed', 'Invalid credentials.');
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection error. Please check your network.'), backgroundColor: Colors.red),
-      );
+      _showAlertDialog('Error', 'Connection error. Please check your network.');
     }
   }
 
