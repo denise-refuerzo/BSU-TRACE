@@ -1,10 +1,8 @@
-// lib/widgets/app_drawer.dart
 import 'package:flutter/material.dart';
 import '../models/user_role.dart';
 import '../services/session_manager.dart';
 
 class AppDrawer extends StatelessWidget {
-  // NEW: An optional callback to check for unsaved changes before navigating away
   final Future<bool> Function()? onBeforeNavigate;
 
   const AppDrawer({super.key, this.onBeforeNavigate});
@@ -20,14 +18,12 @@ class AppDrawer extends StatelessWidget {
 
       return InkWell(
         onTap: () async {
-          // Close the drawer immediately so the dialog shows on the main screen
-          Navigator.pop(context);
+          Navigator.pop(context); // Close the drawer immediately
 
           if (!isPlaceholder) {
             if (route.isNotEmpty && currentRoute != route) {
               
               bool shouldProceed = true;
-              // NEW: Trigger the interceptor if one was provided
               if (onBeforeNavigate != null) {
                 shouldProceed = await onBeforeNavigate!();
               }
@@ -86,6 +82,7 @@ class AppDrawer extends StatelessWidget {
       );
     }
 
+    // Dynamic Header Info Based on Role
     String roleTitle = 'USER PORTAL';
     String userInitials = 'U';
     String userName = 'John Doe';
@@ -96,6 +93,11 @@ class AppDrawer extends StatelessWidget {
       userInitials = 'GA';
       userName = 'Admin User';
       roleSubtitle = 'GSO ADMINISTRATOR';
+    } else if (currentRole == UserRole.ictAdmin) {
+      roleTitle = 'SYSTEM ADMINISTRATION';
+      userInitials = 'IA';
+      userName = 'System Admin';
+      roleSubtitle = 'ICT ADMINISTRATOR';
     } else if (currentRole == UserRole.processor) {
       roleTitle = 'PROCESSOR PORTAL';
       userInitials = 'P';
@@ -135,6 +137,10 @@ class AppDrawer extends StatelessWidget {
                     buildNavItem(title: 'School Resources', icon: Icons.school_outlined, route: '/scheduler'),
                     buildNavItem(title: 'Procurement', icon: Icons.shopping_cart_outlined, route: '/procurement'),
                     buildNavItem(title: 'Operational Analytics', icon: Icons.insert_chart_outlined, route: '/analytics'),
+                  ] else if (currentRole == UserRole.ictAdmin) ...[
+                    buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_ict_admin'),
+                    buildNavItem(title: 'Accounts', icon: Icons.people_outline, route: '/ict_admin_accounts'),
+                    buildNavItem(title: 'Roles', icon: Icons.security, route: '/ict_admin_roles'),
                   ] else if (currentRole == UserRole.user) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_user'),
                     buildNavItem(title: 'Live Tracking', icon: Icons.track_changes, route: '/tracking'),

@@ -1,11 +1,19 @@
+require('dotenv').config();
 const express = require('express');
 const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 const crypto = require('crypto');
 const cors = require('cors');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 
 const app = express();
+
+// ==========================================
+// IN-MEMORY TRACKER (No Database Column Required)
+// ==========================================
+// This stores failed attempts like: { "user_id_1": 4, "user_id_2": 9 }
+const failed2FAAttempts = new Map();
 
 // ==========================================
 // MIDDLEWARE & CONFIGURATION
@@ -21,30 +29,70 @@ const pool = new Pool({
   }
 });
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,         // Explicitly use the secure SMTP port
-  secure: true,      // true for 465, false for other ports
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  },
-  // Add timeouts so it fails fast instead of freezing for 60 seconds
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000,
-  socketTimeout: 10000
-});
+// ==========================================
+// GOOGLE API OAUTH2 EMAIL SETUP
+// ==========================================
+const OAuth2 = google.auth.OAuth2;
+
+const createTransporter = async () => {
+  const oauth2Client = new OAuth2(
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    "https://developers.google.com/oauthplayground" // Standard OAuth playground redirect URL
+  );
+
+  oauth2Client.setCredentials({
+    refresh_token: process.env.REFRESH_TOKEN
+  });
+
+  const accessToken = await new Promise((resolve, reject) => {
+    oauth2Client.getAccessToken((err, token) => {
+      if (err) {
+        console.error("Failed to create access token:", err);
+        reject("Failed to create access token");
+      }
+      resolve(token);
+    });
+  });
+
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      type: "OAuth2",
+      user: process.env.EMAIL_USER,
+      accessToken: accessToken,
+      clientId: process.env.CLIENT_ID,
+      clientSecret: process.env.CLIENT_SECRET,
+      refreshToken: process.env.REFRESH_TOKEN
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  return transporter;
+};
+
+// Helper function to send emails cleanly from any route
+const sendSystemEmail = async (to, subject, text) => {
+  const emailTransporter = await createTransporter();
+  await emailTransporter.sendMail({
+    from: '"BSU-Trace Security" bsutrace@gmail.com', 
+    to: to,
+    subject: subject,
+    text: text
+  });
+};
 
 // ==========================================
-// 1. LOGIN ENDPOINT (Updated to return two_fa_enabled)
+// 1. LOGIN ENDPOINT (Enforces is_active restriction)
 // ==========================================
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    // Added two_fa_enabled to the SELECT query
     const result = await pool.query(
-      'SELECT u_id, password, a_id, two_fa_enabled FROM public."User" WHERE username = $1',
+      'SELECT u_id, password, a_id, two_fa_enabled, is_active FROM public."User" WHERE username = $1',
       [username]
     );
 
@@ -54,6 +102,11 @@ app.post('/api/login', async (req, res) => {
 
     const user = result.rows[0];
 
+    // RESTRICTION CHECK: Block login if the account is explicitly deactivated
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'Account disabled. Please contact the ICT Administrator.' });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -62,7 +115,7 @@ app.post('/api/login', async (req, res) => {
     res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id,
-      two_fa_enabled: user.two_fa_enabled // Tell the app if we need to ask for a PIN
+      two_fa_enabled: user.two_fa_enabled 
     });
 
   } catch (error) {
@@ -72,59 +125,101 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ==========================================
-// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated to save PIN)
-// ==========================================
-app.put('/api/users/:id', async (req, res) => {
-  const userId = req.params.id;
-  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
-
-  try {
-    // COALESCE ensures we don't overwrite an existing code with NULL if it isn't passed
-    const query = `
-      UPDATE public."User"
-      SET full_name = $1, 
-          uni_email = $2, 
-          two_fa_enabled = $3,
-          two_fa_code = COALESCE($4, two_fa_code) 
-      WHERE u_id = $5
-      RETURNING u_id
-    `;
-    
-    const values = [full_name, uni_email, two_fa_enabled, two_fa_code, userId];
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.status(200).json({ message: 'Profile updated successfully' });
-
-  } catch (error) {
-    console.error('Update Profile Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// ==========================================
-// 1.5 NEW: VERIFY 2FA ENDPOINT
+// 1.5 VERIFY 2FA ENDPOINT (With Auto-Reset)
 // ==========================================
 app.post('/api/verify-2fa', async (req, res) => {
   const { u_id, code } = req.body;
 
   try {
-    const result = await pool.query('SELECT two_fa_code FROM public."User" WHERE u_id = $1', [u_id]);
-    
+    const result = await pool.query(
+      'SELECT uni_email, two_fa_code FROM public."User" WHERE u_id = $1',
+      [u_id]
+    );
+
     if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
-    if (result.rows[0].two_fa_code === code) {
-      res.status(200).json({ success: true });
+    const user = result.rows[0];
+
+    if (user.two_fa_code === code) {
+      failed2FAAttempts.delete(u_id);
+      return res.status(200).json({ success: true });
     } else {
-      res.status(401).json({ error: 'Invalid PIN' });
+      const currentAttempts = (failed2FAAttempts.get(u_id) || 0) + 1;
+
+      if (currentAttempts >= 10) {
+        const newPin = crypto.randomInt(100000, 999999).toString();
+
+        await pool.query(
+          'UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2',
+          [newPin, u_id]
+        );
+
+        // USING THE NEW GOOGLE API HELPER
+        await sendSystemEmail(
+          user.uni_email,
+          'BSU-Trace Security Alert: New 2FA PIN',
+          `There were 10 failed attempts to enter your 2FA PIN.\n\nFor your security, your PIN has been automatically reset.\n\nYour NEW 2FA PIN is: ${newPin}\n\nPlease use this new PIN to log in.`
+        );
+
+        failed2FAAttempts.delete(u_id); 
+        return res.status(401).json({ error: 'Too many failed attempts. A NEW PIN has been sent to your email.' });
+      } else {
+        failed2FAAttempts.set(u_id, currentAttempts);
+        return res.status(401).json({ error: `Invalid PIN. ${10 - currentAttempts} attempts remaining.` });
+      }
     }
   } catch (error) {
     console.error('2FA Verification Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// ==========================================
+// Verify Code & Reset 2FA PIN (Manual Screen)
+// ==========================================
+app.post('/api/auth/reset-2fa', async (req, res) => {
+    const { uni_email, code } = req.body;
+    try {
+        const result = await pool.query(
+          'SELECT u_id, reset_token, reset_token_expires FROM public."User" WHERE uni_email = $1', 
+          [uni_email]
+        );
+
+        if (result.rows.length === 0) return res.status(400).json({ message: "No request found." });
+
+        const user = result.rows[0];
+
+        if (!user.reset_token) return res.status(400).json({ message: "No request found." });
+        if (new Date() > new Date(user.reset_token_expires)) {
+            await pool.query('UPDATE public."User" SET reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $1', [uni_email]);
+            return res.status(400).json({ message: "Code has expired." });
+        }
+        if (user.reset_token !== code) return res.status(400).json({ message: "Invalid code." });
+
+        // TRIGGER: Generate a NEW 2FA PIN instead of disabling it entirely
+        const newPin = crypto.randomInt(100000, 999999).toString();
+
+        await pool.query(
+          'UPDATE public."User" SET two_fa_code = $1, reset_token = NULL, reset_token_expires = NULL WHERE uni_email = $2', 
+          [newPin, uni_email]
+        );
+        
+        // Also clear any tracked failed attempts from memory for this user
+        failed2FAAttempts.delete(user.u_id);
+
+        // Email the brand new 2FA PIN
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: uni_email,
+          subject: 'BSU-Trace: Your New 2FA PIN',
+          text: `Your 2FA recovery was successful.\n\nYour NEW 2FA PIN is: ${newPin}\n\nPlease use this new PIN to log in.`
+        });
+
+        res.status(200).json({ message: "Success! Your new 2FA PIN has been sent to your email." });
+    } catch (error) {
+        console.error("Reset 2FA Error:", error);
+        res.status(500).json({ message: "Error resetting 2FA." });
+    }
 });
 
 // ==========================================
@@ -163,25 +258,172 @@ app.get('/api/users/:id', async (req, res) => {
   }
 });
 
+// ==========================================
+// 2.5 FETCH ALL USERS (ICT ADMIN) - LEFT JOIN FIX
+// ==========================================
+app.get('/api/users', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        u.u_id, 
+        u.full_name, 
+        u.uni_email,
+        u.is_active,
+        u.two_fa_enabled,
+        a.account_type AS role,
+        d.department_name AS department
+      FROM public."User" u
+      JOIN public.account a ON u.a_id = a.a_id
+      LEFT JOIN public.department d ON u.d_id = d.d_id
+      ORDER BY u.full_name ASC;
+    `;
+
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+
+  } catch (error) {
+    console.error('Fetch All Users Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ==========================================
-// 3. UPDATE USER PROFILE DETAILS ENDPOINT
+// 2.6 ADD NEW USER (ICT ADMIN)
+// ==========================================
+app.post('/api/users', async (req, res) => {
+  const { username, password, full_name, uni_email, a_id, d_id, o_id } = req.body;
+
+  // 1. Basic validation (Removed d_id since it's optional)
+  if (!username || !password || !full_name || !uni_email || !a_id) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  // 2. Conditional Office Validation
+  // If the account type is 2 (Processor) or 3 (Signee), an office ID is strictly required
+  if ((a_id === 2 || a_id === 3) && !o_id) {
+    return res.status(400).json({ error: 'Office assignment is required for Processors and Signees' });
+  }
+
+  try {
+    // 3. Check if username or email already exists
+    const checkQuery = `SELECT u_id FROM public."User" WHERE username = $1 OR uni_email = $2`;
+    const checkResult = await pool.query(checkQuery, [username, uni_email]);
+    
+    if (checkResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Username or Email is already registered.' });
+    }
+
+    // 4. Hash the password securely before saving
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // 5. Insert the new user (d_id and o_id are handled securely with COALESCE/fallback to null)
+    const insertQuery = `
+      INSERT INTO public."User" 
+      (username, password, full_name, uni_email, a_id, d_id, o_id, is_active)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+      RETURNING u_id
+    `;
+    const values = [
+      username, 
+      hashedPassword, 
+      full_name, 
+      uni_email, 
+      a_id, 
+      d_id || null, 
+      o_id || null
+    ];
+    
+    await pool.query(insertQuery, values);
+
+    res.status(201).json({ message: 'User created successfully' });
+
+  } catch (error) {
+    console.error('Add User Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 2.7 ADMIN UPDATE USER ACCOUNT
+// ==========================================
+app.put('/api/users/:id/admin-update', async (req, res) => {
+  const userId = req.params.id;
+  const { full_name, uni_email, a_id, d_id, is_active, two_fa_enabled, two_fa_code } = req.body;
+
+  try {
+    const checkQuery = `SELECT u_id FROM public."User" WHERE uni_email = $1 AND u_id != $2`;
+    const checkResult = await pool.query(checkQuery, [uni_email, userId]);
+    if (checkResult.rows.length > 0) return res.status(400).json({ error: 'Email is already registered.' });
+
+    // FIX: Fetch the current PIN so we don't accidentally erase it if the admin only updates the name/role
+    const currentRes = await pool.query('SELECT two_fa_code FROM public."User" WHERE u_id = $1', [userId]);
+    let codeToSave = currentRes.rows[0]?.two_fa_code || null;
+
+    if (two_fa_enabled) {
+      if (two_fa_code) codeToSave = two_fa_code; // Apply new PIN if provided
+    } else {
+      codeToSave = null; // Wipe PIN if 2FA is toggled off
+    }
+
+    const updateQuery = `
+      UPDATE public."User"
+      SET full_name = $1, uni_email = $2, a_id = $3, d_id = $4, is_active = $5, two_fa_enabled = $6, two_fa_code = $7
+      WHERE u_id = $8
+    `;
+    
+    await pool.query(updateQuery, [full_name, uni_email, a_id, d_id, is_active, two_fa_enabled, codeToSave, userId]);
+    res.status(200).json({ message: 'Account updated successfully' });
+
+  } catch (error) {
+    console.error('Admin Update Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 2.8 DELETE USER ACCOUNT
+// ==========================================
+app.delete('/api/users/:id', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const deleteQuery = `DELETE FROM public."User" WHERE u_id = $1 RETURNING u_id`;
+    const result = await pool.query(deleteQuery, [userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.status(200).json({ message: 'User deleted successfully' });
+  } catch (error) {
+    console.error('Delete User Error:', error);
+    // Note: If they have tied documents or bookings, this might fail due to foreign key constraints.
+    // If so, PostgreSQL will throw an error, which we catch here.
+    res.status(500).json({ error: 'Cannot delete user because they have existing documents or bookings tied to their account.' });
+  }
+});
+
+// ==========================================
+// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated to save PIN)
 // ==========================================
 app.put('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
-  const { full_name, uni_email, two_fa_enabled } = req.body;
+  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
 
   try {
+    // COALESCE ensures we don't overwrite an existing code with NULL if it isn't passed
     const query = `
       UPDATE public."User"
       SET full_name = $1, 
           uni_email = $2, 
-          two_fa_enabled = $3
-      WHERE u_id = $4
+          two_fa_enabled = $3,
+          two_fa_code = COALESCE($4, two_fa_code) 
+      WHERE u_id = $5
       RETURNING u_id
     `;
     
-    const values = [full_name, uni_email, two_fa_enabled, userId];
+    const values = [full_name, uni_email, two_fa_enabled, two_fa_code, userId];
     const result = await pool.query(query, values);
 
     if (result.rows.length === 0) {
@@ -195,7 +437,6 @@ app.put('/api/users/:id', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 // ==========================================
 // 4. CHANGE PASSWORD ENDPOINT
@@ -1063,13 +1304,13 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       [resetCode, expiresAt, email]
     );
 
-    console.log("4. Token updated. Attempting to connect to Gmail and send email...");
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER, 
-      to: email,
-      subject: "Your BSU-Trace Password Reset Code",
-      text: `Your password reset code is: ${resetCode}\n\nThis code will expire in 15 minutes.`
-    });
+    console.log("4. Token updated. Attempting to connect to Gmail APIs and send email...");
+    // USING THE NEW GOOGLE API HELPER
+    await sendSystemEmail(
+      email,
+      "Your BSU-Trace Password Reset Code",
+      `Your password reset code is: ${resetCode}\n\nThis code will expire in 15 minutes.`
+    );
 
     console.log("5. Email sent successfully!");
     res.status(200).json({ message: "Reset code sent successfully!" });
@@ -1151,6 +1392,14 @@ app.post('/api/auth/forgot-2fa', async (req, res) => {
           [code, expiresAt, uni_email]
         );
 
+        await sendSystemEmail(
+            uni_email,
+            'BSU-Trace 2FA Recovery',
+            `Your 2FA recovery code is: ${code}\n\nThis expires in 15 minutes.`
+        );
+        
+        res.status(200).json({ message: "2FA Recovery code sent." });
+
         await transporter.sendMail({
             from: process.env.EMAIL_USER, 
             to: uni_email, 
@@ -1190,6 +1439,17 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
           [uni_email]
         );
         
+        failed2FAAttempts.delete(user.u_id);
+
+        // USING THE NEW GOOGLE API HELPER
+        await sendSystemEmail(
+          uni_email,
+          'BSU-Trace: Your New 2FA PIN',
+          `Your 2FA recovery was successful.\n\nYour NEW 2FA PIN is: ${newPin}\n\nPlease use this new PIN to log in.`
+        );
+
+        res.status(200).json({ message: "Success! Your new 2FA PIN has been sent to your email." });
+
         res.status(200).json({ message: "2FA has been disabled." });
     } catch (error) {
         console.error("Reset 2FA Error:", error);
