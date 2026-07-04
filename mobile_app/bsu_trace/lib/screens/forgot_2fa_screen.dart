@@ -4,7 +4,7 @@ import 'dart:convert';
 import '../config.dart';
 
 class Forgot2FAScreen extends StatefulWidget {
-  final String? initialEmail; // Pass the email if they already typed it in login
+  final String? initialEmail;
 
   const Forgot2FAScreen({Key? key, this.initialEmail}) : super(key: key);
 
@@ -15,6 +15,9 @@ class Forgot2FAScreen extends StatefulWidget {
 class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
   int _currentStep = 0; // 0: Email, 1: Code
   bool _isLoading = false;
+  
+  // ADDED: Track failed attempts locally
+  int _failedAttempts = 0;
 
   late TextEditingController _emailController;
   final TextEditingController _codeController = TextEditingController();
@@ -34,14 +37,17 @@ class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/api/auth/forgot-password'),
+        Uri.parse('${AppConfig.baseUrl}/auth/forgot-2fa'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'uni_email': _emailController.text.trim()}),
       );
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
-        setState(() => _currentStep = 1);
+        setState(() {
+          _currentStep = 1;
+          _failedAttempts = 0; // Reset attempts when new code is sent
+        });
         _showMessage(data['message']);
       } else {
         _showMessage(data['message'] ?? 'Error sending code', isError: true);
@@ -52,7 +58,7 @@ class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
     setState(() => _isLoading = false);
   }
 
-  Future<void> _verifyAndDisable2FA() async {
+  Future<void> _verifyAndReset2FA() async {
     if (_codeController.text.length != 6) {
       _showMessage('Please enter the 6-digit code', isError: true);
       return;
@@ -61,7 +67,7 @@ class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
     setState(() => _isLoading = true);
     try {
       final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/api/auth/forgot-password'),
+        Uri.parse('${AppConfig.baseUrl}/auth/reset-2fa'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'uni_email': _emailController.text.trim(),
@@ -71,11 +77,22 @@ class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 200) {
-        _showMessage('2FA Disabled Successfully! Please log in again.');
-        // Pop back to the main login screen (pops both this screen and the 2FA modal)
+        _showMessage(data['message'] ?? 'Success! Check your email for your new PIN.', isError: false);
         Navigator.of(context).popUntil((route) => route.isFirst);
       } else {
-        _showMessage(data['message'] ?? 'Error verifying code', isError: true);
+        // ADDED: Increment failed attempts
+        setState(() => _failedAttempts++);
+
+        if (_failedAttempts >= 10) {
+           _showMessage('Too many failed attempts. Please request a new recovery code.', isError: true);
+           setState(() {
+             _currentStep = 0; // Kick back to email step
+             _failedAttempts = 0;
+             _codeController.clear();
+           });
+        } else {
+           _showMessage(data['message'] ?? 'Error verifying code', isError: true);
+        }
       }
     } catch (e) {
       _showMessage('Network error. Check your connection.', isError: true);
@@ -115,67 +132,52 @@ class _Forgot2FAScreenState extends State<Forgot2FAScreen> {
               const SizedBox(height: 24),
               
               if (_currentStep == 0) ...[
-                const Text(
-                  'Lost access to 2FA?',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
+                const Text('Lost access to 2FA?', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                 const SizedBox(height: 8),
-                const Text(
-                  'Enter your email to receive a recovery code. This will temporarily disable 2FA on your account.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey),
-                ),
+                const Text('Enter your email to receive a recovery code. This will allow you to securely generate a new 2FA PIN.', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
                 const SizedBox(height: 32),
                 TextField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'University Email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: 'University Email', prefixIcon: Icon(Icons.email_outlined), border: OutlineInputBorder()),
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
                   onPressed: _isLoading ? null : _sendRecoveryCode,
-                  child: _isLoading 
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Send Recovery Code', style: TextStyle(fontSize: 16)),
+                  child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Send Recovery Code', style: TextStyle(fontSize: 16)),
                 ),
               ],
 
               if (_currentStep == 1) ...[
-                const Text(
-                  'Enter Recovery Code',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
+                const Text('Enter Recovery Code', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                 const SizedBox(height: 8),
-                Text(
-                  'We sent a recovery code to ${_emailController.text}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey),
-                ),
+                Text('We sent a recovery code to ${_emailController.text}', textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
                 const SizedBox(height: 32),
+                
                 TextField(
                   controller: _codeController,
                   keyboardType: TextInputType.number,
                   maxLength: 6,
-                  decoration: const InputDecoration(
-                    labelText: '6-digit Code',
-                    prefixIcon: Icon(Icons.password),
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: '6-digit Code', prefixIcon: Icon(Icons.password), border: OutlineInputBorder()),
                 ),
+                
+                // ADDED: The dynamic countdown text below the field
+                if (_failedAttempts >= 5 && _failedAttempts < 10)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: Text(
+                      'You have ${10 - _failedAttempts} attempts left',
+                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+
                 const SizedBox(height: 24),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                  onPressed: _isLoading ? null : _verifyAndDisable2FA,
-                  child: _isLoading 
-                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Disable 2FA & Recover Account', style: TextStyle(fontSize: 16)),
+                  onPressed: _isLoading ? null : _verifyAndReset2FA,
+                  child: _isLoading ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Recover Account & Send New PIN', style: TextStyle(fontSize: 16)),
                 ),
               ],
             ],

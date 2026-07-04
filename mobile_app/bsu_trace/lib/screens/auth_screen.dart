@@ -39,6 +39,9 @@ class _AuthScreenState extends State<AuthScreen> {
       case UserRole.admin: 
         Navigator.pushReplacementNamed(context, '/dashboard_admin'); 
         break;
+      case UserRole.ictAdmin: // <-- ADD THIS CASE
+        Navigator.pushReplacementNamed(context, '/dashboard_ict_admin'); 
+        break;
       case UserRole.processor: 
         Navigator.pushReplacementNamed(context, '/dashboard_processor'); 
         break;
@@ -52,112 +55,134 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   // Displays the 2FA input modal and verifies it with the backend
-  Future<void> _showVerify2FAModal(UserRole role, int userId) async {
+Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
     final TextEditingController pinController = TextEditingController();
     bool isVerifying = false;
+    int failedAttempts = 0; // Tracks failed attempts locally
 
-    await showDialog(
+    return showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
+          
+          Future<void> verifyPin() async {
+            if (pinController.text.length != 6) return;
+            
+            setModalState(() => isVerifying = true);
+            
+            try {
+              final response = await http.post(
+                Uri.parse('${AppConfig.baseUrl}/verify-2fa'),
+                headers: {'Content-Type': 'application/json'},
+                body: json.encode({
+                  'u_id': userId,
+                  'code': pinController.text,
+                }),
+              );
+
+              if (response.statusCode == 200) {
+                 Navigator.pop(context); // Close modal
+                 _proceedToDashboard(actualRole, userId);
+              } else if (response.statusCode == 401) {
+                 final data = json.decode(response.body);
+                 
+                 setModalState(() {
+                   isVerifying = false;
+                   failedAttempts++; // Increment attempt
+                   pinController.clear();
+                 });
+                 
+                 // If backend sent the new PIN email (10 limits hit)
+                 if (data['error'].contains('A NEW PIN has been sent')) {
+                     Navigator.pop(context);
+                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                       content: Text(data['error']), 
+                       backgroundColor: Colors.orange.shade800, 
+                       duration: const Duration(seconds: 5)
+                     ));
+                 }
+              }
+            } catch (e) {
+               setModalState(() => isVerifying = false);
+               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error')));
+            }
+          }
+
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Text('2-Step Verification', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
+            title: const Text('Two-Factor Authentication', style: TextStyle(fontWeight: FontWeight.bold)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Enter the 6-digit PIN you configured in your profile.'),
+                const Text('Please enter your 6-digit PIN to continue.'),
                 const SizedBox(height: 16),
                 TextField(
                   controller: pinController,
                   keyboardType: TextInputType.number,
                   obscureText: true,
                   maxLength: 6,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 24, letterSpacing: 8.0),
                   decoration: InputDecoration(
-                    hintText: 'Enter PIN',
                     filled: true,
-                    fillColor: Colors.red.shade50,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    fillColor: Colors.grey.shade100,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    counterText: '',
                   ),
                 ),
+                
+                // ADDED: The dynamic countdown text below the field
+                if (failedAttempts >= 5 && failedAttempts < 10)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      'You have ${10 - failedAttempts} attempts left',
+                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
             actions: [
               TextButton(
                 onPressed: () {
-                  // Close the 2FA modal first
-                  Navigator.pop(context); 
-
-                  // Navigate to the recovery screen
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => Forgot2FAScreen(
-                        // Pass the email controller's text from your login form so they don't have to type it again
-                        initialEmail: _emailController.text, 
-                      ),
-                    ),
-                  );
-                },
-                child: const Text('Lost access to 2FA?'),
+                  Navigator.pop(context); // Cancel
+                  SessionManager().logout();
+                }, 
+                child: const Text('Cancel')
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                onPressed: isVerifying ? null : () async {
-                  setModalState(() => isVerifying = true);
-                  
-                  try {
-                    final res = await http.post(
-                      Uri.parse('${AppConfig.baseUrl}/verify-2fa'),
-                      headers: {'Content-Type': 'application/json'},
-                      body: json.encode({'u_id': userId, 'code': pinController.text})
-                    );
-                    
-                    if (!mounted) return;
-
-                    if (res.statusCode == 200) {
-                      Navigator.pop(context); // Close modal
-                      _proceedToDashboard(role, userId); // Proceed to dashboard
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid PIN. Access Denied.'), backgroundColor: Colors.red));
-                      setModalState(() => isVerifying = false);
-                    }
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection error.'), backgroundColor: Colors.red));
-                    setModalState(() => isVerifying = false);
-                  }
-                },
+                onPressed: isVerifying ? null : verifyPin,
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB01A22)),
                 child: isVerifying 
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
-                  : const Text('Verify', style: TextStyle(color: Colors.white))
-              )
-            ]
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Verify', style: TextStyle(color: Colors.white)),
+              ),
+            ],
           );
         }
       )
     );
   }
 
-  Future<void> _handleLogin() async {
+Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
     
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
     
     try {
       final response = await http.post(
         Uri.parse('${AppConfig.baseUrl}/login'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'username': _emailController.text,
           'password': _passwordController.text,
         }),
       );
+
+      if (!mounted) return;
+      setState(() => _isLoading = false); 
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -165,38 +190,33 @@ class _AuthScreenState extends State<AuthScreen> {
         final int userId = data['u_id'];
         final bool is2faEnabled = data['two_fa_enabled'] ?? false; 
         
-        // Automatically determine the role based on the backend's account ID (a_id)
         final UserRole actualRole = accountId.toRole();
 
-        if (!mounted) return;
-        setState(() => _isLoading = false); 
-
-        // INTERCEPT NAVIGATION FOR 2FA
         if (is2faEnabled) {
           _showVerify2FAModal(actualRole, userId);
         } else {
           _proceedToDashboard(actualRole, userId);
         }
-
-      } else {
-        if (!mounted) return;
+      } else if (response.statusCode == 403) {
+        // CATCH RESTRICTED ACCOUNTS HERE
+        final errorMsg = json.decode(response.body)['error'];
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid credentials.')),
+          SnackBar(content: Text(errorMsg), backgroundColor: Colors.orange.shade800, duration: const Duration(seconds: 4)),
         );
-        setState(() {
-          _isLoading = false;
-        });
+      } else {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid credentials.'), backgroundColor: Colors.red),
+        );
       }
     } catch (e) {
       if (!mounted) return;
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection error. Please check your network.')),
+        const SnackBar(content: Text('Connection error. Please check your network.'), backgroundColor: Colors.red),
       );
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 

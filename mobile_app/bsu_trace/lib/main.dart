@@ -21,6 +21,9 @@ import 'screens/documents_screen.dart';
 import 'screens/processing_history_screen.dart' as processor_history;
 import 'screens/signee_pending_approvals_screen.dart';
 import 'screens/signee_signature_history_screen.dart';
+import 'screens/dashboard/ict_admin_dashboard.dart';
+import 'screens/ict_admin_accounts_screen.dart';
+import 'screens/ict_admin_roles_screen.dart';
 
 void main() {
   runApp(const BsuPortalApp());
@@ -59,6 +62,13 @@ class BsuPortalApp extends StatelessWidget {
             '/history': (context) => const processor_history.ProcessingHistoryScreen(),
             '/signee_approvals': (context) => const SigneePendingApprovalsScreen(),
             '/signee_history': (context) => const SigneeSignatureHistoryScreen(),
+            // NEW: ICT Admin Routes
+            '/dashboard_ict_admin': (context) => const RouteGuard(
+              allowedRoles: [UserRole.ictAdmin], child: IctAdminDashboardScreen()),
+            '/ict_admin_accounts': (context) => const RouteGuard(
+              allowedRoles: [UserRole.ictAdmin], child: IctAdminAccountsScreen()),
+            '/ict_admin_roles': (context) => const RouteGuard(
+              allowedRoles: [UserRole.ictAdmin], child: IctAdminRolesScreen()),
           },
         );
       },
