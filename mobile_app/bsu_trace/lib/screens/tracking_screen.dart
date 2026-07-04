@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async'; 
 import 'package:http/http.dart' as http;
 
+import '../screens/ai_chat_screen.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
 import '../theme/app_theme.dart';
@@ -220,13 +221,39 @@ class _TrackingScreenState extends State<TrackingScreen> {
               ),
             ),
           ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          showDialog(context: context, builder: (context) => const NewDocumentModal());
-        },
-        backgroundColor: const Color(0xFFB01A22),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+        floatingActionButton: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            // 1. The New AI Chat Button
+            FloatingActionButton.extended(
+              heroTag: 'ai_chat_btn', // Required when using multiple FABs
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AiChatScreen()),
+                );
+              },
+              backgroundColor: Colors.blue.shade800,
+              icon: const Icon(Icons.auto_awesome, color: Colors.white),
+              label: const Text('Ask AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            
+            const SizedBox(width: 16), // Spacing between the buttons
+            
+            // 2. Your Existing Add Document Button
+            FloatingActionButton.extended(
+                      onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => const NewDocumentModal(),
+                  );
+                },
+              backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
+              icon: const Icon(Icons.post_add, color: Colors.white),
+              label: const Text('Add Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
     );
   }
 

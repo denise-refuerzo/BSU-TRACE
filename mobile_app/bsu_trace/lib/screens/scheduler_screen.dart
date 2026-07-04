@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 
+import '../screens/ai_chat_screen.dart';
 import '../theme/app_theme.dart'; 
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
@@ -107,17 +108,40 @@ class _SchedulerScreenState extends State<SchedulerScreen> {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            showDialog(
-              context: context, 
-              builder: (context) => const NewRequestModal(),
-            );
-          },
-          backgroundColor: AppTheme.primaryRed,
-          child: const Icon(Icons.add, color: Colors.white),
+        floatingActionButton: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            // 1. The New AI Chat Button
+            FloatingActionButton.extended(
+              heroTag: 'ai_chat_btn', // Required when using multiple FABs
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AiChatScreen()),
+                );
+              },
+              backgroundColor: Colors.blue.shade800,
+              icon: const Icon(Icons.auto_awesome, color: Colors.white),
+              label: const Text('Ask AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            
+            const SizedBox(width: 16), // Spacing between the buttons
+            
+            // 2. Your Existing Add Document Button
+            FloatingActionButton.extended(
+                  onPressed: () {
+                    showDialog(
+                      context: context, 
+                      builder: (context) => const NewRequestModal(),
+                    );
+                  },
+              backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
+              icon: const Icon(Icons.post_add, color: Colors.white),
+              label: const Text('New Schedule', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
         ),
-      ),
+      )
     );
   }
 }

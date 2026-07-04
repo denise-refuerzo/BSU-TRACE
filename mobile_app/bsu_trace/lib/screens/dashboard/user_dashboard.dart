@@ -253,37 +253,39 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               ),
             ),
           ),
-floatingActionButton: Row(
-  mainAxisAlignment: MainAxisAlignment.end,
-  children: [
-    // 1. The New AI Chat Button
-    FloatingActionButton.extended(
-      heroTag: 'ai_chat_btn', // Required when using multiple FABs
-      onPressed: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const AiChatScreen()),
-        );
-      },
-      backgroundColor: Colors.blue.shade800,
-      icon: const Icon(Icons.auto_awesome, color: Colors.white),
-      label: const Text('Ask AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-    ),
-    
-    const SizedBox(width: 16), // Spacing between the buttons
-    
-    // 2. Your Existing Add Document Button
-    FloatingActionButton.extended(
-      heroTag: 'add_doc_btn',
-      onPressed: () {
-        // Your existing logic to open the Add Document Modal goes here
-      },
-      backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
-      icon: const Icon(Icons.post_add, color: Colors.white),
-      label: const Text('Add Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-    ),
-  ],
-),
+        floatingActionButton: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            // 1. The New AI Chat Button
+            FloatingActionButton.extended(
+              heroTag: 'ai_chat_btn', // Required when using multiple FABs
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AiChatScreen()),
+                );
+              },
+              backgroundColor: Colors.blue.shade800,
+              icon: const Icon(Icons.auto_awesome, color: Colors.white),
+              label: const Text('Ask AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            
+            const SizedBox(width: 16), // Spacing between the buttons
+            
+            // 2. Your Existing Add Document Button
+            FloatingActionButton.extended(
+                      onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => const NewDocumentModal(),
+                  );
+                },
+              backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
+              icon: const Icon(Icons.post_add, color: Colors.white),
+              label: const Text('Add Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
     );
   }
 

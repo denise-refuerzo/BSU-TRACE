@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config.dart';
 import 'package:bsu_trace/screens/forgot_password_screen.dart';
-import 'forgot_2fa_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
