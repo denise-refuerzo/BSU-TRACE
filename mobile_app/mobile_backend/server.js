@@ -101,7 +101,7 @@ app.post('/api/chat', async (req, res) => {
 
   try {
     // We use gemini-1.5-flash because it is the fastest and most cost-effective
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // SYSTEM PROMPT: This tells Gemini who it is and how to behave. 
     // You can customize this to fit BSU-Trace perfectly.

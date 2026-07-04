@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 
+import '../ai_chat_screen.dart'; // Import the AI Chat Screen
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/new_document_modal.dart';
@@ -47,6 +48,25 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
     _syncTimer?.cancel();
     super.dispose();
   }
+
+  Future<String> sendMessageToGemini(String message) async {
+  try {
+    final response = await http.post(
+      Uri.parse('${AppConfig.baseUrl}/chat'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userMessage': message}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['reply']; 
+    } else {
+      return 'Sorry, I am having trouble connecting to the server right now.';
+    }
+  } catch (e) {
+    return 'Network error. Please check your internet connection.';
+  }
+}
 
   Future<void> _fetchDashboardData({bool isBackground = false}) async {
     final userId = SessionManager().userId;
@@ -233,16 +253,37 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
               ),
             ),
           ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          showDialog(
-            context: context,
-            builder: (context) => const NewDocumentModal(),
-          );
-        },
-        backgroundColor: const Color(0xFFB01A22),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+floatingActionButton: Row(
+  mainAxisAlignment: MainAxisAlignment.end,
+  children: [
+    // 1. The New AI Chat Button
+    FloatingActionButton.extended(
+      heroTag: 'ai_chat_btn', // Required when using multiple FABs
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const AiChatScreen()),
+        );
+      },
+      backgroundColor: Colors.blue.shade800,
+      icon: const Icon(Icons.auto_awesome, color: Colors.white),
+      label: const Text('Ask AI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+    ),
+    
+    const SizedBox(width: 16), // Spacing between the buttons
+    
+    // 2. Your Existing Add Document Button
+    FloatingActionButton.extended(
+      heroTag: 'add_doc_btn',
+      onPressed: () {
+        // Your existing logic to open the Add Document Modal goes here
+      },
+      backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
+      icon: const Icon(Icons.post_add, color: Colors.white),
+      label: const Text('Add Document', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+    ),
+  ],
+),
     );
   }
 
