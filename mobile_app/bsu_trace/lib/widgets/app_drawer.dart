@@ -140,7 +140,7 @@ class AppDrawer extends StatelessWidget {
                   ] else if (currentRole == UserRole.ictAdmin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_ict_admin'),
                     buildNavItem(title: 'Accounts', icon: Icons.people_outline, route: '/ict_admin_accounts'),
-                    buildNavItem(title: 'Roles', icon: Icons.security, route: '/ict_admin_roles'),
+                    buildNavItem(title: 'Roles & Matrix', icon: Icons.security, route: '/ict_admin_roles'),
                   ] else if (currentRole == UserRole.user) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_user'),
                     buildNavItem(title: 'Live Tracking', icon: Icons.track_changes, route: '/tracking'),
