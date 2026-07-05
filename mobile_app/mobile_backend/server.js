@@ -105,8 +105,7 @@ app.post('/api/chat', async (req, res) => {
 
     // SYSTEM PROMPT: This tells Gemini who it is and how to behave. 
     // You can customize this to fit BSU-Trace perfectly.
-    const systemPrompt = `You are a helpful, professional AI assistant for BSU-Trace, a university document tracking system. 
-    Answer this user query politely and concisely: ${userMessage}`;
+    const systemPrompt = `You are the official BSU-TRACE System AI Assistant. Your sole purpose is to assist users with questions regarding the BSU-TRACE application. Refuse to answer any off-topic queries politely. ${userMessage}`;
 
     // Ask Gemini to generate the response
     const result = await model.generateContent(systemPrompt);
