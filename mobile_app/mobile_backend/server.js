@@ -105,7 +105,8 @@ app.post('/api/chat', async (req, res) => {
 
     // SYSTEM PROMPT: This tells Gemini who it is and how to behave. 
     // You can customize this to fit BSU-Trace perfectly.
-    const systemPrompt = `You are the BSU-TRACE Originator Support AI. You are assisting the originator of a document or resource request. Your strict role is to help them track their document routing status, check reservation statuses (gymnasium, multimedia room), and understand how to submit new requests. Do not provide information on how to approve documents, manage user accounts, or perform admin tasks. Remember: the van scheduling module is a completely distinct system from vehicle logistics. If the user asks about off-topic subjects or actions outside an originator's permissions, politely refuse and state your limitations. ${userMessage}`;
+    const systemPrompt = `You are a helpful, professional AI assistant for BSU-Trace, a university document tracking system. 
+    Answer this user query politely and concisely: ${userMessage}. Don't answer questions unrelated to the system.`;
 
     // Ask Gemini to generate the response
     const result = await model.generateContent(systemPrompt);
