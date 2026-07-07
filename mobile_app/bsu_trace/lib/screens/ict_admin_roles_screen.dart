@@ -1,3 +1,4 @@
+import 'dart:async'; // Added for Timer
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -23,46 +24,67 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   // State Variables
   bool isLoading = true;
   List<Map<String, dynamic>> officesList = [];
+  List<Map<String, dynamic>> departmentsList = [];
   List<Map<String, dynamic>> processBlueprints = [];
+  
+  bool showOffices = true;
 
-  // Controllers (Moved to State level to prevent them from being destroyed on UI rebuild)
+  // Controllers
   TextEditingController processNameController = TextEditingController();
   TextEditingController departmentController = TextEditingController();
   TextEditingController officeController = TextEditingController();
   
-  List<int?> selectedStops = [null, null]; // Start with 2 default stops
+  List<int?> selectedStops = [null, null];
+
+  // Auto-reload timer
+  Timer? _autoRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchDashboardData();
+    
+    // Auto-reload data in the background every 30 seconds
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _fetchDashboardData(isBackground: true);
+    });
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel(); // Cancel timer to prevent memory leaks
     processNameController.dispose();
     departmentController.dispose();
     officeController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchDashboardData() async {
-    setState(() => isLoading = true);
+  // Added isBackground flag to prevent full-screen spinner flicker during auto-reloads
+  Future<void> _fetchDashboardData({bool isBackground = false}) async {
+    if (!isBackground && mounted) {
+      setState(() => isLoading = true);
+    }
     try {
-      // 1. Fetch all offices for dropdowns and monitors
+      // 1. Fetch Offices
       final officeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/offices'));
       if (officeRes.statusCode == 200) {
         final List<dynamic> officeData = json.decode(officeRes.body);
         officesList = officeData.map((e) => e as Map<String, dynamic>).toList();
       }
 
-      // 2. Fetch Process Types (Workflows)
+      // 2. Fetch Departments
+      final deptRes = await http.get(Uri.parse('${AppConfig.baseUrl}/departments'));
+      if (deptRes.statusCode == 200) {
+        final List<dynamic> deptData = json.decode(deptRes.body);
+        departmentsList = deptData.map((e) => e as Map<String, dynamic>).toList();
+      }
+
+      // 3. Fetch Process Types (Workflows)
       final processRes = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types'));
       if (processRes.statusCode == 200) {
         final List<dynamic> processData = json.decode(processRes.body);
         List<Map<String, dynamic>> enrichedProcesses = [];
 
-        // Fetch route details for each process
         for (var p in processData) {
           final routeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types/${p['p_id']}/route'));
           String routeString = "Route path unassigned or empty";
@@ -71,7 +93,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             final routeData = json.decode(routeRes.body);
             List<dynamic> stops = routeData['stops'] ?? [];
             
-            // Map stop IDs to Office Names
             List<String> stopNames = [];
             for (var stopId in stops) {
               final office = officesList.firstWhere(
@@ -93,11 +114,15 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         processBlueprints = enrichedProcesses;
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 
@@ -125,7 +150,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Workflow deployed successfully!'), backgroundColor: Colors.green));
         processNameController.clear();
         setState(() => selectedStops = [null, null]);
-        _fetchDashboardData(); 
+        _fetchDashboardData(isBackground: true); 
       } else {
         throw Exception('Failed to deploy');
       }
@@ -145,6 +170,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
         departmentController.clear();
+        _fetchDashboardData(isBackground: true); 
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add department'), backgroundColor: Colors.red));
       }
@@ -164,7 +190,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office added successfully!'), backgroundColor: Colors.green));
         officeController.clear();
-        _fetchDashboardData(); // Refresh the list immediately
+        _fetchDashboardData(isBackground: true); 
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add office'), backgroundColor: Colors.red));
       }
@@ -239,249 +265,327 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   }
 
   Widget _buildInteractiveVisualizerTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: cardOutlineColor), borderRadius: BorderRadius.circular(8)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('COMPILE NEW WORKFLOW TEMPLATE', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                Text('Design linear multi-stop routing pipelines mapping across campus destinations.', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
-                const SizedBox(height: 20),
-                Text('PROCESS ACTION NAME', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: processNameController,
-                  decoration: InputDecoration(
-                    hintText: 'e.g. Equipment Borrowing Request',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    border: OutlineInputBorder(borderSide: BorderSide(color: cardOutlineColor), borderRadius: BorderRadius.circular(4)),
-                    enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: cardOutlineColor)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    // Wrapped with RefreshIndicator
+    return RefreshIndicator(
+      color: primaryRed,
+      onRefresh: () => _fetchDashboardData(isBackground: true),
+      child: SingleChildScrollView(
+        // AlwaysScrollableScrollPhysics ensures pull-to-refresh works even if content isn't tall enough to scroll natively
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: cardOutlineColor), borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('COMPILE NEW WORKFLOW TEMPLATE', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  Text('Design linear multi-stop routing pipelines mapping across campus destinations.', style: TextStyle(color: Colors.grey[700], fontSize: 13)),
+                  const SizedBox(height: 20),
+                  Text('PROCESS ACTION NAME', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: processNameController,
+                    decoration: InputDecoration(
+                      hintText: 'e.g. Equipment Borrowing Request',
+                      hintStyle: TextStyle(color: Colors.grey[400]),
+                      border: OutlineInputBorder(borderSide: BorderSide(color: cardOutlineColor), borderRadius: BorderRadius.circular(4)),
+                      enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: cardOutlineColor)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 20),
-                Text('PIPELINE TRACKING SEQUENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
-                const SizedBox(height: 8),
-                
-                ...List.generate(selectedStops.length, (index) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildSequenceStop(index),
-                  );
-                }),
-                
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: selectedStops.length < 7 ? () {
-                          setState(() => selectedStops.add(null));
-                        } : null, 
-                        style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
-                        child: Text('+ Add Step', style: TextStyle(color: primaryRed, fontSize: 12)),
+                  const SizedBox(height: 20),
+                  Text('PIPELINE TRACKING SEQUENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+                  const SizedBox(height: 8),
+                  
+                  ...List.generate(selectedStops.length, (index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _buildSequenceStop(index),
+                    );
+                  }),
+                  
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: selectedStops.length < 7 ? () {
+                            setState(() => selectedStops.add(null));
+                          } : null, 
+                          style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
+                          child: Text('+ Add Step', style: TextStyle(color: primaryRed, fontSize: 12)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: selectedStops.length > 2 ? () {
-                          setState(() => selectedStops.removeLast());
-                        } : null, 
-                        style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
-                        child: Text('× Delete Last', style: TextStyle(color: primaryRed, fontSize: 12)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: selectedStops.length > 2 ? () {
+                            setState(() => selectedStops.removeLast());
+                          } : null, 
+                          style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
+                          child: Text('× Delete Last', style: TextStyle(color: primaryRed, fontSize: 12)),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _deployNewTemplate,
-                    style: ElevatedButton.styleFrom(backgroundColor: primaryRed, padding: const EdgeInsets.symmetric(vertical: 16)),
-                    child: const Text('DEPLOY TRACKING TEMPLATE', style: TextStyle(color: Colors.white)),
+                    ],
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: darkCardColor, borderRadius: BorderRadius.circular(8)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.description, color: Colors.white, size: 18),
-                    const SizedBox(width: 8),
-                    Text('PIPELINE BLUEPRINTS (${processBlueprints.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                ...processBlueprints.map((process) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildBlueprintItem(
-                      title: process['process_name'],
-                      path: process['path'],
-                      isActive: process['is_active'],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _deployNewTemplate,
+                      style: ElevatedButton.styleFrom(backgroundColor: primaryRed, padding: const EdgeInsets.symmetric(vertical: 16)),
+                      child: const Text('DEPLOY TRACKING TEMPLATE', style: TextStyle(color: Colors.white)),
                     ),
-                  );
-                }).toList(),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(color: darkCardColor, borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.description, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      Text('PIPELINE BLUEPRINTS (${processBlueprints.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  ...processBlueprints.map((process) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _buildBlueprintItem(
+                        title: process['process_name'],
+                        path: process['path'],
+                        isActive: process['is_active'],
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildCampusInfrastructureTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        children: [
-          // Register New Department Structure
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: cardOutlineColor),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'REGISTER NEW CAMPUS DEPARTMENT',
-                  style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Expands available lookups inside user account creation forms option blocks.',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 11),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: departmentController,
-                        decoration: InputDecoration(
-                          hintText: 'e.g. CICS, CABEIHM',
-                          filled: true,
-                          fillColor: lightRedBg,
-                          border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+    // Wrapped with RefreshIndicator
+    return RefreshIndicator(
+      color: primaryRed,
+      onRefresh: () => _fetchDashboardData(isBackground: true),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            // Register New Department Structure
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: cardOutlineColor),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'REGISTER NEW CAMPUS DEPARTMENT',
+                    style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Expands available lookups inside user account creation forms option blocks.',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 11),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: departmentController,
+                          decoration: InputDecoration(
+                            hintText: 'e.g. CICS, CABEIHM',
+                            filled: true,
+                            fillColor: lightRedBg,
+                            border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    ElevatedButton(
-                      onPressed: _addDepartment,
-                      style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
-                      child: const Text('ADD DEPT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                    )
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        onPressed: _addDepartment,
+                        style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
+                        child: const Text('ADD DEPT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      )
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          
-          const SizedBox(height: 16),
+            
+            const SizedBox(height: 16),
 
-          // Register Branch Office
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: cardOutlineColor),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'REGISTER NEW CAMPUS BRANCH OFFICE NODE',
-                  style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Populates available nodes inside both user assignment forms and step visuals.',
-                  style: TextStyle(color: Colors.grey[700], fontSize: 11),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: officeController,
-                        decoration: InputDecoration(
-                          hintText: 'e.g. Guidance Office',
-                          filled: true,
-                          fillColor: lightRedBg,
-                          border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            // Register Branch Office
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: cardOutlineColor),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'REGISTER NEW CAMPUS BRANCH OFFICE NODE',
+                    style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Populates available nodes inside both user assignment forms and step visuals.',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 11),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: officeController,
+                          decoration: InputDecoration(
+                            hintText: 'e.g. Guidance Office',
+                            filled: true,
+                            fillColor: lightRedBg,
+                            border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        onPressed: _addOffice,
+                        style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
+                        child: const Text('ADD OFFICE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      )
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // List View with Segmented Toggle Control Below Title
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: darkCardColor,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Title Row
+                  Row(
+                    children: [
+                      Icon(showOffices ? Icons.hub : Icons.business, color: Colors.white, size: 18),
+                      const SizedBox(width: 8),
+                      const Text('ACTIVE INFRASTRUCTURE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 16),
+                  
+                  // The Toggle Switches
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(6),
                     ),
-                    const SizedBox(width: 10),
-                    ElevatedButton(
-                      onPressed: _addOffice,
-                      style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
-                      child: const Text('ADD OFFICE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                    )
-                  ],
-                ),
-              ],
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setState(() => showOffices = true),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: showOffices ? primaryRed : Colors.transparent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('OFFICES', style: TextStyle(color: showOffices ? Colors.white : Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setState(() => showOffices = false),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: !showOffices ? primaryRed : Colors.transparent,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text('DEPARTMENTS', style: TextStyle(color: !showOffices ? Colors.white : Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 20),
+                  
+                  // Conditionally render based on the toggle
+                  if (showOffices) ...[
+                    if (officesList.isEmpty)
+                      const Text('No offices registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
+                    else
+                      ...officesList.map((office) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildStationMonitor(
+                            office['office_name'] ?? 'Unknown Node', 
+                            office['staff_count'] ?? 0,
+                            Colors.grey
+                          ),
+                        );
+                      }).toList(),
+                  ] else ...[
+                    if (departmentsList.isEmpty)
+                      const Text('No departments registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
+                    else
+                      ...departmentsList.map((dept) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildStationMonitor(
+                            dept['department_name'] ?? 'Unknown Dept', 
+                            dept['staff_count'] ?? 0,
+                            Colors.blueGrey
+                          ),
+                        );
+                      }).toList(),
+                  ]
+                ],
+              ),
             ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: darkCardColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.hub, color: Colors.white, size: 18),
-                    const SizedBox(width: 8),
-                    Text('ACTIVE INFRASTRUCTURE NODES (${officesList.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (officesList.isEmpty)
-                  const Text('No nodes registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
-                else
-                ...officesList.map((office) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _buildStationMonitor(
-                        office['office_name'] ?? 'Unknown Node', 
-                        office['staff_count'] ?? 0, // Now dynamic!
-                        Colors.grey
-                      ),
-                    );
-                  }).toList(),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

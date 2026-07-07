@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:intl/intl.dart';
 import '../../../config.dart';
 import '../../../theme/app_theme.dart';
 import '../../../widgets/app_bar_helper.dart';
@@ -71,7 +70,8 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
           _activeDocumentTracks = statsData['active_documents'] ?? 0;
           _registeredPersonnel = statsData['total_users'] ?? 0;
           _workflowBlueprints = statsData['total_workflows'] ?? 0;
-          _auditLogs = logsData['logs'] ?? [];
+          
+          _auditLogs = (logsData['logs'] as List<dynamic>? ?? []).take(5).toList();
           _isLoading = false;
         });
       } else {
@@ -95,7 +95,9 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    const bgColor = Color(0xFFFFF9F9); 
+    // Aligned variables to match the Accounts and Roles screens
+    const Color bgColor = Color(0xFFFDF7F6); 
+    const Color cardOutlineColor = Color(0xFFE5D5D5);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -106,16 +108,18 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
         iconTheme: const IconThemeData(color: Colors.black87),
         toolbarHeight: 80,
         title: const Text(
-          'Operations Control\nCenter',
+          'Operations Control',
           style: TextStyle(
-            fontFamily: 'Georgia', 
             color: Colors.black87,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.bold,
             fontSize: 20,
-            height: 1.2,
           ),
         ),
         actions: buildAppBarActions(context),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1.0),
+          child: Container(color: cardOutlineColor, height: 1.0),
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: _fetchDashboardData,
@@ -124,13 +128,19 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
             ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
             : SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Standardized Top Page Header Layout
+                    const Text(
+                      'System Telemetry & Audits', 
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87, height: 1.2)
+                    ),
+                    const SizedBox(height: 10),
                     Text(
                       'Real-time telemetry monitoring background data pipelines, traffic flows, and operational backlogs across campus infrastructure.',
-                      style: TextStyle(color: Colors.grey.shade700, fontSize: 13, height: 1.5),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[700], height: 1.4),
                     ),
                     const SizedBox(height: 24),
                     
@@ -243,17 +253,9 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
                       final bool isLast = index == _auditLogs.length - 1;
                       
                       final String message = log['message'] ?? 'Unknown action';
-                      final String rawTime = log['timestamp'] ?? DateTime.now().toIso8601String();
-                      
-                      String formattedTime = '';
-                      try {
-                        final dateTime = DateTime.parse(rawTime).toLocal();
-                        formattedTime = DateFormat('hh:mm\na').format(dateTime); 
-                      } catch (e) {
-                        formattedTime = rawTime;
-                      }
+                      final String rawTime = log['timestamp']?.toString() ?? 'Unknown time';
 
-                      return _buildTimelineItem(message, formattedTime, isLast);
+                      return _buildTimelineItem(message, rawTime, isLast);
                     },
                   ),
           ),

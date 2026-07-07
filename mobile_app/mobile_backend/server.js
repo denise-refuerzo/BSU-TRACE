@@ -1476,14 +1476,14 @@ app.get('/api/dashboard/ict/logs', async (req, res) => {
     const query = `
       SELECT 
         'Document "' || i.title || '" marked as "' || s.current_status || '" at ' || o.office_name AS message,
-        pd.time_in AS timestamp
+        TO_CHAR(pd.time_in, 'HH12:MI AM') AS timestamp
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.status s ON pd.s_id = s.s_id
       JOIN public.offices o ON pd.current_office_id = o.o_id
       WHERE pd.time_in IS NOT NULL
       ORDER BY pd.time_in DESC
-      LIMIT 15;
+      LIMIT 5;
     `;
     const result = await pool.query(query);
     
@@ -1559,6 +1559,29 @@ app.post('/api/departments', async (req, res) => {
     res.status(201).json({ message: 'Department added successfully' });
   } catch (error) {
     console.error('Add Department Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 25.5 FETCH ALL DEPARTMENTS (WITH STAFF COUNT)
+// ==========================================
+app.get('/api/departments', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        d.d_id, 
+        d.department_name,
+        COUNT(u.u_id)::int AS staff_count
+      FROM public.department d
+      LEFT JOIN public."User" u ON d.d_id = u.d_id
+      GROUP BY d.d_id, d.department_name
+      ORDER BY d.department_name ASC
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Fetch Departments Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
