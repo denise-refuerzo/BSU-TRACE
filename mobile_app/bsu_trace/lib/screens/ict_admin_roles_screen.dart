@@ -116,7 +116,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     }
   }
 
-  // --- CRUD HELPERS ---
+  // --- CRUD HELPERS WITH MOUNTED CHECKS ---
 
   Future<void> _updateItem(String endpoint, int id, String fieldKey, String newValue) async {
     if (newValue.trim().isEmpty) return;
@@ -126,6 +126,9 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({fieldKey: newValue.trim()}),
       );
+      
+      if (!mounted) return; // FIX: Ensure widget is still mounted
+      
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully!'), backgroundColor: Colors.green));
         _fetchDashboardData(isBackground: true);
@@ -133,6 +136,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update item'), backgroundColor: Colors.red));
       }
     } catch (e) {
+      if (!mounted) return; // FIX
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
@@ -140,6 +144,9 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   Future<void> _deleteItem(String endpoint, int id) async {
     try {
       final response = await http.delete(Uri.parse('${AppConfig.baseUrl}/$endpoint/$id'));
+      
+      if (!mounted) return; // FIX: Ensure widget is still mounted
+      
       if (response.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted successfully!'), backgroundColor: Colors.green));
         _fetchDashboardData(isBackground: true);
@@ -148,6 +155,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorData['error'] ?? 'Failed to delete'), backgroundColor: Colors.red));
       }
     } catch (e) {
+      if (!mounted) return; // FIX
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
@@ -211,7 +219,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  // --- DETAILS BOTTOM SHEETS (THE "ONE BUTTON" MODALS) ---
+  // --- DETAILS BOTTOM SHEETS ---
   
   void _showWorkflowDetailsModal(Map<String, dynamic> process) {
     showModalBottomSheet(
@@ -346,7 +354,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  // --- ROUTE EDITOR MODAL ---
+  // --- ROUTE EDITOR MODAL WITH MOUNTED CHECKS ---
   void _showEditRouteDialog(int processId, String processName, List<dynamic> rawStops) {
     List<int?> editingStops = rawStops.map((s) => s as int?).toList();
     if (editingStops.length < 2) {
@@ -463,6 +471,9 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                         headers: {'Content-Type': 'application/json'},
                         body: json.encode({'stops': editingStops}),
                       );
+                      
+                      if (!mounted) return; // FIX: Check if still mounted after await
+                      
                       if (response.statusCode == 200) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Route updated successfully!'), backgroundColor: Colors.green));
                         _fetchDashboardData(isBackground: true); 
@@ -470,6 +481,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update route'), backgroundColor: Colors.red));
                       }
                     } catch (e) {
+                      if (!mounted) return; // FIX
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
                     }
                   },
@@ -484,7 +496,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  // --- ACTIONS ---
+  // --- ACTIONS WITH MOUNTED CHECKS ---
 
   Future<void> _deployNewTemplate() async {
     if (processNameController.text.trim().isEmpty) {
@@ -505,6 +517,8 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
           'stops': selectedStops, 
         }),
       );
+      
+      if (!mounted) return; // FIX
 
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Workflow deployed successfully!'), backgroundColor: Colors.green));
@@ -515,6 +529,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         throw Exception('Failed to deploy');
       }
     } catch (e) {
+      if (!mounted) return; // FIX
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deployment failed: $e')));
     }
   }
@@ -527,12 +542,16 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'department_name': departmentController.text.trim()}),
       );
+      
+      if (!mounted) return; // FIX
+      
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
         departmentController.clear();
         _fetchDashboardData(isBackground: true); 
       }
     } catch (e) {
+      if (!mounted) return; // FIX
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
@@ -545,12 +564,16 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'office_name': officeController.text.trim()}),
       );
+      
+      if (!mounted) return; // FIX
+      
       if (response.statusCode == 201) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office added successfully!'), backgroundColor: Colors.green));
         officeController.clear();
         _fetchDashboardData(isBackground: true); 
       }
     } catch (e) {
+      if (!mounted) return; // FIX
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
