@@ -101,7 +101,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             'p_id': p['p_id'],
             'process_name': p['process_name'],
             'path': routeString,
-            'raw_stops': rawStops, // Keep raw IDs for editing
+            'raw_stops': rawStops, 
             'is_active': true, 
           });
         }
@@ -211,18 +211,151 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
+  // --- DETAILS BOTTOM SHEETS (THE "ONE BUTTON" MODALS) ---
+  
+  void _showWorkflowDetailsModal(Map<String, dynamic> process) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).padding.bottom + 20,
+            top: 24, left: 24, right: 24
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Workflow Details', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 24),
+              Text('NAME', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(process['process_name'], style: const TextStyle(fontSize: 16, color: Colors.black87, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+              Text('ROUTING SEQUENCE', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(process['path'], style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.4)),
+              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildModalAction(Icons.edit, 'Edit Name', Colors.blue, () {
+                    Navigator.pop(context);
+                    _showEditNameDialog('Workflow Name', process['process_name'], (newName) {
+                      _updateItem('process-types', process['p_id'], 'process_name', newName);
+                    });
+                  }),
+                  _buildModalAction(Icons.alt_route, 'Edit Route', Colors.orange, () {
+                    Navigator.pop(context);
+                    _showEditRouteDialog(process['p_id'], process['process_name'], process['raw_stops']);
+                  }),
+                  _buildModalAction(Icons.delete_outline, 'Delete', Colors.red, () {
+                    Navigator.pop(context);
+                    _showDeleteConfirmation(process['process_name'], () {
+                      _deleteItem('process-types', process['p_id']);
+                    });
+                  }),
+                ],
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showInfrastructureDetailsModal(Map<String, dynamic> item, bool isOffice) {
+    final title = isOffice ? 'Office Details' : 'Department Details';
+    final nameKey = isOffice ? 'office_name' : 'department_name';
+    final idKey = isOffice ? 'o_id' : 'd_id';
+    final endpoint = isOffice ? 'offices' : 'departments';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).padding.bottom + 20,
+            top: 24, left: 24, right: 24
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 24),
+              Text('NAME', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(item[nameKey], style: const TextStyle(fontSize: 16, color: Colors.black87, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+              Text('STAFF ASSIGNED', style: TextStyle(fontSize: 10, color: Colors.grey[600], fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('${item['staff_count'] ?? 0} Personnel', style: const TextStyle(fontSize: 14, color: Colors.black87)),
+              const SizedBox(height: 32),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildModalAction(Icons.edit, 'Edit Name', Colors.blue, () {
+                    Navigator.pop(context);
+                    _showEditNameDialog('Name', item[nameKey], (newName) {
+                      _updateItem(endpoint, item[idKey], nameKey, newName);
+                    });
+                  }),
+                  _buildModalAction(Icons.delete_outline, 'Delete', Colors.red, () {
+                    Navigator.pop(context);
+                    _showDeleteConfirmation(item[nameKey], () {
+                      _deleteItem(endpoint, item[idKey]);
+                    });
+                  }),
+                ],
+              )
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildModalAction(IconData icon, String label, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black87)),
+          ],
+        ),
+      ),
+    );
+  }
+
   // --- ROUTE EDITOR MODAL ---
   void _showEditRouteDialog(int processId, String processName, List<dynamic> rawStops) {
-    // Convert dynamic list to List<int?>
     List<int?> editingStops = rawStops.map((s) => s as int?).toList();
     if (editingStops.length < 2) {
-      editingStops = [null, null]; // Safety fallback
+      editingStops = [null, null];
     }
 
     showDialog(
       context: context,
       builder: (context) {
-        // Use StatefulBuilder so the modal can rebuild its own internal dropdowns
         return StatefulBuilder(
           builder: (context, setStateModal) {
             return AlertDialog(
@@ -322,7 +455,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select an office for all stops')));
                       return;
                     }
-                    Navigator.pop(context); // Close modal
+                    Navigator.pop(context); 
                     
                     try {
                       final response = await http.put(
@@ -351,7 +484,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  // --- EXISTING ACTIONS ---
+  // --- ACTIONS ---
 
   Future<void> _deployNewTemplate() async {
     if (processNameController.text.trim().isEmpty) {
@@ -584,24 +717,8 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _buildBlueprintItem(
-                        id: process['p_id'],
-                        title: process['process_name'],
-                        path: process['path'],
-                        isActive: process['is_active'],
-                        onEditName: () {
-                          _showEditNameDialog('Workflow Name', process['process_name'], (newName) {
-                            _updateItem('process-types', process['p_id'], 'process_name', newName);
-                          });
-                        },
-                        onEditRoute: () {
-                          // Opens the route sequence editor modal
-                          _showEditRouteDialog(process['p_id'], process['process_name'], process['raw_stops']);
-                        },
-                        onDelete: () {
-                          _showDeleteConfirmation(process['process_name'], () {
-                            _deleteItem('process-types', process['p_id']);
-                          });
-                        },
+                        process: process,
+                        onTap: () => _showWorkflowDetailsModal(process),
                       ),
                     );
                   }).toList(),
@@ -721,7 +838,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             
             const SizedBox(height: 24),
             
-            // List View with Segmented Toggle Control Below Title
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -795,16 +911,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                             name: office['office_name'] ?? 'Unknown Node', 
                             staffCount: office['staff_count'] ?? 0,
                             badgeColor: Colors.grey,
-                            onEdit: () {
-                              _showEditNameDialog('Office Name', office['office_name'], (newName) {
-                                _updateItem('offices', office['o_id'], 'office_name', newName);
-                              });
-                            },
-                            onDelete: () {
-                              _showDeleteConfirmation(office['office_name'], () {
-                                _deleteItem('offices', office['o_id']);
-                              });
-                            }
+                            onTap: () => _showInfrastructureDetailsModal(office, true),
                           ),
                         );
                       }).toList(),
@@ -819,16 +926,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                             name: dept['department_name'] ?? 'Unknown Dept', 
                             staffCount: dept['staff_count'] ?? 0,
                             badgeColor: Colors.blueGrey,
-                            onEdit: () {
-                              _showEditNameDialog('Department Name', dept['department_name'], (newName) {
-                                _updateItem('departments', dept['d_id'], 'department_name', newName);
-                              });
-                            },
-                            onDelete: () {
-                              _showDeleteConfirmation(dept['department_name'], () {
-                                _deleteItem('departments', dept['d_id']);
-                              });
-                            }
+                            onTap: () => _showInfrastructureDetailsModal(dept, false),
                           ),
                         );
                       }).toList(),
@@ -884,14 +982,10 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   }
 
   Widget _buildBlueprintItem({
-    required int id,
-    required String title, 
-    required String path, 
-    required bool isActive,
-    required VoidCallback onEditName,
-    required VoidCallback onEditRoute,
-    required VoidCallback onDelete,
+    required Map<String, dynamic> process,
+    required VoidCallback onTap,
   }) {
+    final bool isActive = process['is_active'] ?? false;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -905,36 +999,22 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
-              Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.edit, size: 16, color: Colors.white70),
-                    tooltip: 'Edit Process Name',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    onPressed: onEditName,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.alt_route, size: 16, color: Colors.white70),
-                    tooltip: 'Edit Route Sequence',
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    onPressed: onEditRoute,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
-                    tooltip: 'Delete Workflow',
-                    constraints: const BoxConstraints(),
-                    padding: EdgeInsets.zero,
-                    onPressed: onDelete,
-                  ),
-                ],
-              )
+              Expanded(
+                child: Text(
+                  process['process_name'], 
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)
+                )
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_vert, size: 20, color: Colors.white70),
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+                onPressed: onTap,
+              ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(path, style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.5)),
+          Text(process['path'], style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.5)),
         ],
       ),
     );
@@ -944,8 +1024,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     required String name, 
     required int staffCount, 
     required MaterialColor badgeColor,
-    required VoidCallback onEdit,
-    required VoidCallback onDelete,
+    required VoidCallback onTap,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -972,22 +1051,12 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             decoration: BoxDecoration(color: badgeColor.shade50, borderRadius: BorderRadius.circular(2)),
             child: Text('$staffCount STAFF', style: TextStyle(color: badgeColor.shade700, fontSize: 10, fontWeight: FontWeight.bold)),
           ),
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.edit, size: 18, color: Colors.black54),
-                constraints: const BoxConstraints(),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                onPressed: onEdit,
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                constraints: const BoxConstraints(),
-                padding: EdgeInsets.zero,
-                onPressed: onDelete,
-              ),
-            ],
-          )
+          IconButton(
+            icon: const Icon(Icons.more_vert, size: 20, color: Colors.black54),
+            constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+            onPressed: onTap,
+          ),
         ],
       ),
     );

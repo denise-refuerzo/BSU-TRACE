@@ -1623,7 +1623,7 @@ app.delete('/api/offices/:id', async (req, res) => {
 });
 
 // ==========================================
-// 28. EDIT & DELETE PROCESS TYPES (WORKFLOWS)
+// 28. EDIT & DELETE PROCESS TYPES
 // ==========================================
 app.put('/api/process-types/:id', async (req, res) => {
   const { process_name } = req.body;
@@ -1635,8 +1635,6 @@ app.put('/api/process-types/:id', async (req, res) => {
 
 app.delete('/api/process-types/:id', async (req, res) => {
   try {
-    // Note: If you want to delete the route stops too, you would delete from public.route where r_id matches.
-    // For now, deleting the process type removes it from the UI.
     await pool.query('DELETE FROM public.process_type WHERE p_id = $1', [req.params.id]);
     res.status(200).json({ message: 'Workflow deleted successfully' });
   } catch (error) { res.status(500).json({ error: 'Cannot delete: There are active documents currently using this workflow.' }); }
@@ -1647,13 +1645,11 @@ app.delete('/api/process-types/:id', async (req, res) => {
 // ==========================================
 app.put('/api/process-types/:id/route', async (req, res) => {
   const processId = req.params.id;
-  const { stops } = req.body; // Expecting an array of office IDs (o_id)
+  const { stops } = req.body;
 
   if (!Array.isArray(stops) || stops.length < 2) {
     return res.status(400).json({ error: 'A route must have at least 2 stops.' });
   }
-
-  // Check for nulls or invalid data
   if (stops.includes(null) || stops.includes(undefined)) {
     return res.status(400).json({ error: 'All stops must be valid offices.' });
   }
@@ -1661,12 +1657,20 @@ app.put('/api/process-types/:id/route', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    
+    // Find the routing ID linked to this process
+    const processResult = await client.query('SELECT r_id FROM public.process_type WHERE p_id = $1', [processId]);
+    if (processResult.rows.length === 0) throw new Error("Process not found");
+    const r_id = processResult.rows[0].r_id;
 
-    // 1. Delete existing route for this process
-    await client.query('DELETE FROM public.route WHERE p_id = $1', [processId]);
+    // Pad the sequence to match the 7-stop column structure in DB
+    const paddedStops = [...stops, ...Array(7 - stops.length).fill(null)];
+
     await client.query(
-      'INSERT INTO public.route (p_id, stops) VALUES ($1, $2)',
-      [processId, JSON.stringify(stops)] // Try JSON stringify or direct array based on your postgres setup
+      `UPDATE public.route 
+       SET stop_1=$1, stop_2=$2, stop_3=$3, stop_4=$4, stop_5=$5, stop_6=$6, stop_7=$7 
+       WHERE r_id = $8`,
+      [...paddedStops, r_id]
     );
 
     await client.query('COMMIT');
@@ -1674,7 +1678,7 @@ app.put('/api/process-types/:id/route', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Update Route Error:', error);
-    res.status(500).json({ error: 'Server error while updating route.' });
+    res.status(500).json({ error: 'Server error' });
   } finally {
     client.release();
   }
