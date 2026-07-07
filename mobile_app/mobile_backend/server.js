@@ -1461,6 +1461,53 @@ app.get('/api/dashboard/ict/logs', async (req, res) => {
   }
 });
 
+// ==========================================
+// 24. CREATE NEW WORKFLOW TEMPLATE
+// ==========================================
+app.post('/api/process-types', async (req, res) => {
+  const { process_name, stops } = req.body;
+
+  if (!process_name || !stops || !Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'Process name and at least 2 stops are required.' });
+  }
+
+  try {
+    // 1. Ensure we don't exceed the database schema (stop_1 to stop_7)
+    if (stops.length > 7) {
+      return res.status(400).json({ error: 'Maximum of 7 stops allowed per route.' });
+    }
+
+    // 2. Insert the new route sequence
+    // We pad the array to 7 items with null to match table structure
+    const paddedStops = [...stops, ...Array(7 - stops.length).fill(null)];
+    
+    const routeInsert = await pool.query(
+      `INSERT INTO public.route (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING r_id`,
+      paddedStops
+    );
+    const newRouteId = routeInsert.rows[0].r_id;
+
+    // 3. Insert the new process type linked to the route
+    const processInsert = await pool.query(
+      `INSERT INTO public.process_type (r_id, process_name, is_active) 
+       VALUES ($1, $2, true) 
+       RETURNING p_id`,
+      [newRouteId, process_name]
+    );
+
+    res.status(201).json({ 
+      message: 'Workflow template deployed successfully', 
+      p_id: processInsert.rows[0].p_id 
+    });
+
+  } catch (error) {
+    console.error('Deploy Workflow Error:', error);
+    res.status(500).json({ error: 'Internal server error while deploying workflow.' });
+  }
+});
+
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
     const { uni_email } = req.body;
