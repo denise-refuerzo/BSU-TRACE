@@ -1411,6 +1411,55 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 });
 
+// ==========================================
+// 22. FETCH ICT ADMIN DASHBOARD STATS
+// ==========================================
+app.get('/api/dashboard/ict/stats', async (req, res) => {
+  try {
+    // Count total documents
+    const activeDocsRes = await pool.query(`SELECT COUNT(*) FROM public.initial_document`);
+    // Count total users
+    const usersRes = await pool.query(`SELECT COUNT(*) FROM public."User"`);
+    // Count total process types/workflows
+    const workflowsRes = await pool.query(`SELECT COUNT(*) FROM public.process_type`);
+
+    res.status(200).json({
+      active_documents: parseInt(activeDocsRes.rows[0].count) || 0,
+      total_users: parseInt(usersRes.rows[0].count) || 0,
+      total_workflows: parseInt(workflowsRes.rows[0].count) || 0
+    });
+  } catch (error) {
+    console.error('ICT Stats Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 23. FETCH ICT ADMIN AUDIT LOGS
+// ==========================================
+app.get('/api/dashboard/ict/logs', async (req, res) => {
+  try {
+    // Dynamically generates a log sentence by joining the document, status, and office tables
+    const query = `
+      SELECT 
+        'Document "' || i.title || '" marked as "' || s.current_status || '" at ' || o.office_name AS message,
+        pd.time_in AS timestamp
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public.offices o ON pd.current_office_id = o.o_id
+      WHERE pd.time_in IS NOT NULL
+      ORDER BY pd.time_in DESC
+      LIMIT 15;
+    `;
+    const result = await pool.query(query);
+    
+    res.status(200).json({ logs: result.rows });
+  } catch (error) {
+    console.error('ICT Logs Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
