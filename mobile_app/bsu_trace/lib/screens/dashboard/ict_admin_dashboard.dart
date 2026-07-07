@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import '../../config.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/app_drawer.dart';
+import '../../../config.dart';
+import '../../../theme/app_theme.dart';
+import '../../../widgets/app_bar_helper.dart';
+import '../../../widgets/app_drawer.dart';
+import '../../services/session_manager.dart';
+import '../../models/user_role.dart';
 
 class IctAdminDashboardScreen extends StatefulWidget {
   const IctAdminDashboardScreen({super.key});
@@ -28,7 +31,6 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
     _fetchDashboardData();
   }
 
-  // Consistent Alert Dialog for errors
   void _showAlertDialog(String title, String message) {
     if (!mounted) return;
     showDialog(
@@ -51,14 +53,11 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // NOTE: Adjust these endpoints to match your exact backend routes for the ICT metrics.
-      // Fetching Statistics
       final statsResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/dashboard/ict/stats'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(const Duration(seconds: 15));
 
-      // Fetching Audit Logs
       final logsResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/dashboard/ict/logs'),
         headers: {'Content-Type': 'application/json'},
@@ -87,7 +86,16 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const bgColor = Color(0xFFFFF9F9); // Very pale red/white background
+    // GATEKEEPER
+    final role = SessionManager().currentRole;
+    if (role != UserRole.ictAdmin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    const bgColor = Color(0xFFFFF9F9); 
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -100,24 +108,14 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
         title: const Text(
           'Operations Control\nCenter',
           style: TextStyle(
-            fontFamily: 'Georgia', // Using a serif font to match the image
+            fontFamily: 'Georgia', 
             color: Colors.black87,
             fontWeight: FontWeight.w900,
             fontSize: 20,
             height: 1.2,
           ),
         ),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(
-              radius: 20,
-              backgroundColor: Colors.grey,
-              backgroundImage: AssetImage('assets/images/bg.jpg'), // Fallback profile image
-              child: Icon(Icons.person, color: Colors.white),
-            ),
-          )
-        ],
+        actions: buildAppBarActions(context),
       ),
       body: RefreshIndicator(
         onRefresh: _fetchDashboardData,
@@ -132,15 +130,10 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
                   children: [
                     Text(
                       'Real-time telemetry monitoring background data pipelines, traffic flows, and operational backlogs across campus infrastructure.',
-                      style: TextStyle(
-                        color: Colors.grey.shade700,
-                        fontSize: 13,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(color: Colors.grey.shade700, fontSize: 13, height: 1.5),
                     ),
                     const SizedBox(height: 24),
                     
-                    // Metric Cards
                     _buildStatCard(
                       title: 'ACTIVE DOCUMENT TRACKS',
                       value: _activeDocumentTracks.toString(),
@@ -156,11 +149,10 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
                     _buildStatCard(
                       title: 'WORKFLOW BLUEPRINTS',
                       value: _workflowBlueprints.toString(),
-                      icon: Icons.architecture, // Closest to the compass/blueprint icon
+                      icon: Icons.architecture, 
                     ),
                     const SizedBox(height: 24),
 
-                    // Audit Stream Feed
                     _buildAuditFeedSection(),
                     const SizedBox(height: 30),
                   ],
@@ -188,40 +180,17 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: Colors.black54,
-              letterSpacing: 1.0,
-            ),
-          ),
+          Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.black54, letterSpacing: 1.0)),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontFamily: 'Georgia', // Serif font for numbers
-                  fontSize: 42,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
+              Text(value, style: const TextStyle(fontFamily: 'Georgia', fontSize: 42, fontWeight: FontWeight.bold, color: Colors.black87)),
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  icon,
-                  color: AppTheme.primaryRed,
-                  size: 28,
-                ),
+                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, color: AppTheme.primaryRed, size: 28),
               ),
             ],
           ),
@@ -240,44 +209,19 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 6, right: 12),
-                  width: 6,
-                  height: 16,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryRed,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
+                Container(margin: const EdgeInsets.only(top: 6, right: 12), width: 6, height: 16, decoration: BoxDecoration(color: AppTheme.primaryRed, borderRadius: BorderRadius.circular(4))),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'LIVE SYSTEM-WIDE AUDIT\nSTREAM FEED',
-                        style: TextStyle(
-                          fontFamily: 'Georgia',
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.black87,
-                          height: 1.3,
-                        ),
-                      ),
+                      const Text('LIVE SYSTEM-WIDE AUDIT\nSTREAM FEED', style: TextStyle(fontFamily: 'Georgia', fontSize: 16, fontWeight: FontWeight.w900, color: Colors.black87, height: 1.3)),
                       const SizedBox(height: 8),
-                      Text(
-                        'Real-time rolling ledger tracing pipeline checkpoints and structural user actions campus-wide.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade700,
-                          height: 1.4,
-                        ),
-                      ),
+                      Text('Real-time rolling ledger tracing pipeline checkpoints and structural user actions campus-wide.', style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.4)),
                     ],
                   ),
                 ),
@@ -286,16 +230,10 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
           ),
           Divider(color: Colors.red.shade100, height: 1, thickness: 1.5),
           
-          // Timeline List
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
             child: _auditLogs.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(20.0),
-                    child: Center(
-                      child: Text('No recent audit logs available.', style: TextStyle(color: Colors.black54)),
-                    ),
-                  )
+                ? const Padding(padding: EdgeInsets.all(20.0), child: Center(child: Text('No recent audit logs available.', style: TextStyle(color: Colors.black54))))
                 : ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -304,14 +242,13 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
                       final log = _auditLogs[index];
                       final bool isLast = index == _auditLogs.length - 1;
                       
-                      // Assuming backend sends { "message": "Mikee applied...", "timestamp": "2026-07-07T03:25:00Z" }
                       final String message = log['message'] ?? 'Unknown action';
                       final String rawTime = log['timestamp'] ?? DateTime.now().toIso8601String();
                       
                       String formattedTime = '';
                       try {
                         final dateTime = DateTime.parse(rawTime).toLocal();
-                        formattedTime = DateFormat('hh:mm\na').format(dateTime); // e.g., "03:25\nAM"
+                        formattedTime = DateFormat('hh:mm\na').format(dateTime); 
                       } catch (e) {
                         formattedTime = rawTime;
                       }
@@ -330,84 +267,39 @@ class _IctAdminDashboardScreenState extends State<IctAdminDashboardScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Timeline Icon & Line
           Column(
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: const BoxDecoration(
-                  color: AppTheme.primaryRed,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.history,
-                  color: Colors.white,
-                  size: 14,
-                ),
-              ),
-              if (!isLast)
-                Expanded(
-                  child: Container(
-                    width: 2,
-                    color: Colors.red.shade100,
-                    margin: const EdgeInsets.only(top: 4, bottom: 4),
-                  ),
-                ),
+              Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: AppTheme.primaryRed, shape: BoxShape.circle), child: const Icon(Icons.history, color: Colors.white, size: 14)),
+              if (!isLast) Expanded(child: Container(width: 2, color: Colors.red.shade100, margin: const EdgeInsets.only(top: 4, bottom: 4))),
             ],
           ),
           const SizedBox(width: 16),
-          // Action Text
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(bottom: 24.0),
               child: RichText(
                 text: TextSpan(
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
+                  style: const TextStyle(fontSize: 14, color: Colors.black87, fontWeight: FontWeight.w500, height: 1.4),
                   children: _formatLogMessage(message),
                 ),
               ),
             ),
           ),
-          // Timestamp
-          Text(
-            time,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 11,
-              color: Colors.black54,
-              height: 1.3,
-            ),
-          ),
+          Text(time, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.black54, height: 1.3)),
         ],
       ),
     );
   }
 
-  // Helper to colorize specific parts of the message (like "Scanned Out (Halted - Revision)")
   List<TextSpan> _formatLogMessage(String message) {
-    // If your backend sends the exact string: Mikee applied "Scanned Out (Halted - Revision"
-    // We can parse the quotes to make the inner text red.
     final parts = message.split('"');
-    
-    if (parts.length < 3) {
-      return [TextSpan(text: message)];
-    }
+    if (parts.length < 3) return [TextSpan(text: message)];
 
     List<TextSpan> spans = [];
     for (int i = 0; i < parts.length; i++) {
       if (i % 2 != 0) {
-        // Text inside quotes
-        spans.add(TextSpan(
-          text: '"${parts[i]}"',
-          style: const TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold),
-        ));
+        spans.add(TextSpan(text: '"${parts[i]}"', style: const TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)));
       } else {
-        // Normal text
         spans.add(TextSpan(text: parts[i]));
       }
     }
