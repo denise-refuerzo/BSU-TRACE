@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../config.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/app_bar_helper.dart';
 
 class IctAdminRolesScreen extends StatefulWidget {
   const IctAdminRolesScreen({Key? key}) : super(key: key);
@@ -23,14 +25,25 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   List<Map<String, dynamic>> officesList = [];
   List<Map<String, dynamic>> processBlueprints = [];
 
-  // New Workflow State
+  // Controllers (Moved to State level to prevent them from being destroyed on UI rebuild)
   TextEditingController processNameController = TextEditingController();
+  TextEditingController departmentController = TextEditingController();
+  TextEditingController officeController = TextEditingController();
+  
   List<int?> selectedStops = [null, null]; // Start with 2 default stops
 
   @override
   void initState() {
     super.initState();
     _fetchDashboardData();
+  }
+
+  @override
+  void dispose() {
+    processNameController.dispose();
+    departmentController.dispose();
+    officeController.dispose();
+    super.dispose();
   }
 
   Future<void> _fetchDashboardData() async {
@@ -74,7 +87,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             'p_id': p['p_id'],
             'process_name': p['process_name'],
             'path': routeString,
-            'is_active': true, // Mocking active state since DB currently lacks an is_active for process
+            'is_active': true, 
           });
         }
         processBlueprints = enrichedProcesses;
@@ -88,7 +101,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     }
   }
 
-Future<void> _deployNewTemplate() async {
+  Future<void> _deployNewTemplate() async {
     if (processNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a process name')));
       return;
@@ -104,7 +117,7 @@ Future<void> _deployNewTemplate() async {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'process_name': processNameController.text.trim(),
-          'stops': selectedStops, // List of IDs
+          'stops': selectedStops, 
         }),
       );
 
@@ -112,12 +125,51 @@ Future<void> _deployNewTemplate() async {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Workflow deployed successfully!'), backgroundColor: Colors.green));
         processNameController.clear();
         setState(() => selectedStops = [null, null]);
-        _fetchDashboardData(); // Refresh the list
+        _fetchDashboardData(); 
       } else {
         throw Exception('Failed to deploy');
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deployment failed: $e')));
+    }
+  }
+
+  Future<void> _addDepartment() async {
+    if (departmentController.text.trim().isEmpty) return;
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/departments'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'department_name': departmentController.text.trim()}),
+      );
+      if (response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
+        departmentController.clear();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add department'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  Future<void> _addOffice() async {
+    if (officeController.text.trim().isEmpty) return;
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/offices'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'office_name': officeController.text.trim()}),
+      );
+      if (response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office added successfully!'), backgroundColor: Colors.green));
+        officeController.clear();
+        _fetchDashboardData(); // Refresh the list immediately
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add office'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -127,24 +179,21 @@ Future<void> _deployNewTemplate() async {
       length: 2,
       child: Scaffold(
         backgroundColor: bgColor,
+        drawer: const AppDrawer(),
         appBar: AppBar(
           backgroundColor: bgColor,
           elevation: 0,
-          leading: Icon(Icons.menu, color: primaryRed),
-          title: Row(
-            children: [
-              const Text(
-                'Operations Control',
-                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: darkCardColor, borderRadius: BorderRadius.circular(4)),
-                child: const Text('ICT ROOT', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-              ),
-            ],
+          iconTheme: const IconThemeData(color: Colors.black87),
+          toolbarHeight: 80,
+          title: const Text(
+            'Roles & Matrix',
+            style: TextStyle(
+              color: Colors.black87,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
           ),
+          actions: buildAppBarActions(context),
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1.0),
             child: Container(color: cardOutlineColor, height: 1.0),
@@ -220,7 +269,6 @@ Future<void> _deployNewTemplate() async {
                 Text('PIPELINE TRACKING SEQUENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[600])),
                 const SizedBox(height: 8),
                 
-                // Dynamically build dropdowns based on state list
                 ...List.generate(selectedStops.length, (index) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 10),
@@ -235,7 +283,7 @@ Future<void> _deployNewTemplate() async {
                       child: OutlinedButton(
                         onPressed: selectedStops.length < 7 ? () {
                           setState(() => selectedStops.add(null));
-                        } : null, // Max 7 stops per DB schema
+                        } : null, 
                         style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
                         child: Text('+ Add Step', style: TextStyle(color: primaryRed, fontSize: 12)),
                       ),
@@ -245,7 +293,7 @@ Future<void> _deployNewTemplate() async {
                       child: OutlinedButton(
                         onPressed: selectedStops.length > 2 ? () {
                           setState(() => selectedStops.removeLast());
-                        } : null, // Min 2 stops
+                        } : null, 
                         style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 12)),
                         child: Text('× Delete Last', style: TextStyle(color: primaryRed, fontSize: 12)),
                       ),
@@ -279,7 +327,6 @@ Future<void> _deployNewTemplate() async {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Render dynamically fetched processes
                 ...processBlueprints.map((process) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -298,9 +345,7 @@ Future<void> _deployNewTemplate() async {
     );
   }
 
-Widget _buildCampusInfrastructureTab() {
-    TextEditingController deptController = TextEditingController();
-
+  Widget _buildCampusInfrastructureTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
@@ -330,7 +375,7 @@ Widget _buildCampusInfrastructureTab() {
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: deptController,
+                        controller: departmentController,
                         decoration: InputDecoration(
                           hintText: 'e.g. CICS, CABEIHM',
                           filled: true,
@@ -342,22 +387,7 @@ Widget _buildCampusInfrastructureTab() {
                     ),
                     const SizedBox(width: 10),
                     ElevatedButton(
-                      onPressed: () async {
-                        if (deptController.text.trim().isEmpty) return;
-                        try {
-                          final response = await http.post(
-                            Uri.parse('${AppConfig.baseUrl}/departments'),
-                            headers: {'Content-Type': 'application/json'},
-                            body: json.encode({'department_name': deptController.text.trim()}),
-                          );
-                          if (response.statusCode == 201) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
-                            deptController.clear();
-                          }
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add department')));
-                        }
-                      },
+                      onPressed: _addDepartment,
                       style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
                       child: const Text('ADD DEPT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                     )
@@ -369,7 +399,7 @@ Widget _buildCampusInfrastructureTab() {
           
           const SizedBox(height: 16),
 
-          // Register Branch Office (Existing code)
+          // Register Branch Office
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -393,31 +423,61 @@ Widget _buildCampusInfrastructureTab() {
                 Row(
                   children: [
                     Expanded(
-                      child: Container(
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: lightRedBg,
-                          border: Border.all(color: cardOutlineColor),
-                          borderRadius: BorderRadius.circular(4),
+                      child: TextField(
+                        controller: officeController,
+                        decoration: InputDecoration(
+                          hintText: 'e.g. Guidance Office',
+                          filled: true,
+                          fillColor: lightRedBg,
+                          border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                         ),
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('e.g. Guidance Office', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Container(
-                      height: 48,
-                      width: 100,
-                      decoration: BoxDecoration(
-                        color: darkCardColor,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      alignment: Alignment.center,
+                    ElevatedButton(
+                      onPressed: _addOffice,
+                      style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
                       child: const Text('ADD OFFICE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                     )
                   ],
                 ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 24),
+          
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: darkCardColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.hub, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text('ACTIVE INFRASTRUCTURE NODES (${officesList.length})', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (officesList.isEmpty)
+                  const Text('No nodes registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
+                else
+                  ...officesList.map((office) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _buildStationMonitor(
+                        office['office_name'] ?? 'Unknown Node', 
+                        0,
+                        Colors.grey
+                      ),
+                    );
+                  }).toList(),
               ],
             ),
           ),

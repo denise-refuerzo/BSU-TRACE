@@ -1246,6 +1246,29 @@ app.get('/api/offices', async (req, res) => {
 });
 
 // ==========================================
+// 18.5 REGISTER NEW BRANCH OFFICE NODE
+// ==========================================
+app.post('/api/offices', async (req, res) => {
+  const { office_name } = req.body;
+
+  if (!office_name) {
+    return res.status(400).json({ error: 'Office name is required' });
+  }
+
+  try {
+    // Insert into the public.offices table
+    await pool.query(
+      'INSERT INTO public.offices (office_name) VALUES ($1)',
+      [office_name]
+    );
+    res.status(201).json({ message: 'Office added successfully' });
+  } catch (error) {
+    console.error('Add Office Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // 19. AD-HOC ROUTING ENDPOINT
 // ==========================================
 app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
