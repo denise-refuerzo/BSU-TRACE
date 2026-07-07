@@ -298,28 +298,41 @@ Future<void> _deployNewTemplate() async {
     );
   }
 
-  Widget _buildCampusInfrastructureTab() {
+Widget _buildCampusInfrastructureTab() {
+    TextEditingController deptController = TextEditingController();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20.0),
       child: Column(
         children: [
-          // Registration Card (Static for now as there's no POST /api/offices yet)
+          // Register New Department Structure
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: cardOutlineColor), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: cardOutlineColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('REGISTER NEW CAMPUS BRANCH OFFICE', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14)),
+                Text(
+                  'REGISTER NEW CAMPUS DEPARTMENT',
+                  style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
                 const SizedBox(height: 6),
-                Text('Populates available nodes inside both user assignment forms and step visuals.', style: TextStyle(color: Colors.grey[700], fontSize: 11)),
+                Text(
+                  'Expands available lookups inside user account creation forms option blocks.',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 11),
+                ),
                 const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
+                        controller: deptController,
                         decoration: InputDecoration(
-                          hintText: 'e.g. Guidance Office',
+                          hintText: 'e.g. CICS, CABEIHM',
                           filled: true,
                           fillColor: lightRedBg,
                           border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(4)),
@@ -329,38 +342,82 @@ Future<void> _deployNewTemplate() async {
                     ),
                     const SizedBox(width: 10),
                     ElevatedButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endpoint required in server.js to add Office.')));
+                      onPressed: () async {
+                        if (deptController.text.trim().isEmpty) return;
+                        try {
+                          final response = await http.post(
+                            Uri.parse('${AppConfig.baseUrl}/departments'),
+                            headers: {'Content-Type': 'application/json'},
+                            body: json.encode({'department_name': deptController.text.trim()}),
+                          );
+                          if (response.statusCode == 201) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
+                            deptController.clear();
+                          }
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add department')));
+                        }
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: darkCardColor, minimumSize: const Size(100, 48)),
-                      child: const Text('ADD OFFICE', style: TextStyle(color: Colors.white, fontSize: 12)),
+                      child: const Text('ADD DEPT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                     )
                   ],
                 ),
               ],
             ),
           ),
+          
           const SizedBox(height: 16),
+
+          // Register Branch Office (Existing code)
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: cardOutlineColor), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: cardOutlineColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('ACTIVE STATION CAPACITY MONITORS', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 12),
-                Text('Live index count detailing personnel distribution.', style: TextStyle(color: Colors.grey[700], fontSize: 13, height: 1.4)),
-                const SizedBox(height: 20),
-                
-                // Dynamically display all fetched offices
-                ...officesList.map((office) {
-                  // Currently mocking staff count visually. server.js needs a count query attached to the office route to display real personnel counts.
-                  int mockStaffCount = (office['o_id'] % 3) + 1; 
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildStationMonitor(office['office_name'], mockStaffCount, mockStaffCount > 0 ? Colors.green : Colors.red),
-                  );
-                }).toList(),
+                Text(
+                  'REGISTER NEW CAMPUS BRANCH OFFICE NODE',
+                  style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Populates available nodes inside both user assignment forms and step visuals.',
+                  style: TextStyle(color: Colors.grey[700], fontSize: 11),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: lightRedBg,
+                          border: Border.all(color: cardOutlineColor),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        alignment: Alignment.centerLeft,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text('e.g. Guidance Office', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Container(
+                      height: 48,
+                      width: 100,
+                      decoration: BoxDecoration(
+                        color: darkCardColor,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text('ADD OFFICE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    )
+                  ],
+                ),
               ],
             ),
           ),

@@ -1508,6 +1508,28 @@ app.post('/api/process-types', async (req, res) => {
   }
 });
 
+// ==========================================
+// 25. REGISTER NEW DEPARTMENT
+// ==========================================
+app.post('/api/departments', async (req, res) => {
+  const { department_name } = req.body;
+
+  if (!department_name) {
+    return res.status(400).json({ error: 'Department name is required' });
+  }
+
+  try {
+    await pool.query(
+      'INSERT INTO public.department (department_name) VALUES ($1)',
+      [department_name]
+    );
+    res.status(201).json({ message: 'Department added successfully' });
+  } catch (error) {
+    console.error('Add Department Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
     const { uni_email } = req.body;
