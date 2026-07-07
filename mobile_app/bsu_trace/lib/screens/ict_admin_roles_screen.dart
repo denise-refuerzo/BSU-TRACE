@@ -468,12 +468,12 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                 if (officesList.isEmpty)
                   const Text('No nodes registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
                 else
-                  ...officesList.map((office) {
+                ...officesList.map((office) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _buildStationMonitor(
                         office['office_name'] ?? 'Unknown Node', 
-                        0,
+                        office['staff_count'] ?? 0, // Now dynamic!
                         Colors.grey
                       ),
                     );

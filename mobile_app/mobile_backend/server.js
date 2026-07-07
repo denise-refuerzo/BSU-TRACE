@@ -1233,11 +1233,21 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
 });
 
 // ==========================================
-// 18. FETCH ALL OFFICES (For Dropdowns)
+// 18. FETCH ALL OFFICES (For Dropdowns & UI)
 // ==========================================
 app.get('/api/offices', async (req, res) => {
   try {
-    const result = await pool.query('SELECT o_id, office_name FROM public.offices ORDER BY office_name ASC');
+    const query = `
+      SELECT 
+        o.o_id, 
+        o.office_name,
+        COUNT(u.u_id)::int AS staff_count
+      FROM public.offices o
+      LEFT JOIN public."User" u ON o.o_id = u.o_id
+      GROUP BY o.o_id, o.office_name
+      ORDER BY o.office_name ASC
+    `;
+    const result = await pool.query(query);
     res.status(200).json(result.rows);
   } catch (error) {
     console.error('Fetch Offices Error:', error);
