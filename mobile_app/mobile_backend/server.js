@@ -1586,6 +1586,100 @@ app.get('/api/departments', async (req, res) => {
   }
 });
 
+// ==========================================
+// 26. EDIT & DELETE DEPARTMENTS
+// ==========================================
+app.put('/api/departments/:id', async (req, res) => {
+  const { department_name } = req.body;
+  try {
+    await pool.query('UPDATE public.department SET department_name = $1 WHERE d_id = $2', [department_name, req.params.id]);
+    res.status(200).json({ message: 'Department updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/departments/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM public.department WHERE d_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Department deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: This department is currently assigned to active users.' }); }
+});
+
+// ==========================================
+// 27. EDIT & DELETE OFFICES
+// ==========================================
+app.put('/api/offices/:id', async (req, res) => {
+  const { office_name } = req.body;
+  try {
+    await pool.query('UPDATE public.offices SET office_name = $1 WHERE o_id = $2', [office_name, req.params.id]);
+    res.status(200).json({ message: 'Office updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/offices/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM public.offices WHERE o_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Office deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: This office is tied to active users or document routes.' }); }
+});
+
+// ==========================================
+// 28. EDIT & DELETE PROCESS TYPES (WORKFLOWS)
+// ==========================================
+app.put('/api/process-types/:id', async (req, res) => {
+  const { process_name } = req.body;
+  try {
+    await pool.query('UPDATE public.process_type SET process_name = $1 WHERE p_id = $2', [process_name, req.params.id]);
+    res.status(200).json({ message: 'Workflow updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/process-types/:id', async (req, res) => {
+  try {
+    // Note: If you want to delete the route stops too, you would delete from public.route where r_id matches.
+    // For now, deleting the process type removes it from the UI.
+    await pool.query('DELETE FROM public.process_type WHERE p_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Workflow deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: There are active documents currently using this workflow.' }); }
+});
+
+// ==========================================
+// 28.5 EDIT ROUTE SEQUENCE FOR WORKFLOW
+// ==========================================
+app.put('/api/process-types/:id/route', async (req, res) => {
+  const processId = req.params.id;
+  const { stops } = req.body; // Expecting an array of office IDs (o_id)
+
+  if (!Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'A route must have at least 2 stops.' });
+  }
+
+  // Check for nulls or invalid data
+  if (stops.includes(null) || stops.includes(undefined)) {
+    return res.status(400).json({ error: 'All stops must be valid offices.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Delete existing route for this process
+    await client.query('DELETE FROM public.route WHERE p_id = $1', [processId]);
+    await client.query(
+      'INSERT INTO public.route (p_id, stops) VALUES ($1, $2)',
+      [processId, JSON.stringify(stops)] // Try JSON stringify or direct array based on your postgres setup
+    );
+
+    await client.query('COMMIT');
+    res.status(200).json({ message: 'Route updated successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Update Route Error:', error);
+    res.status(500).json({ error: 'Server error while updating route.' });
+  } finally {
+    client.release();
+  }
+});
+
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
     const { uni_email } = req.body;

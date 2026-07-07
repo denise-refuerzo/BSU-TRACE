@@ -1,4 +1,4 @@
-import 'dart:async'; // Added for Timer
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -36,15 +36,12 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   
   List<int?> selectedStops = [null, null];
 
-  // Auto-reload timer
   Timer? _autoRefreshTimer;
 
   @override
   void initState() {
     super.initState();
     _fetchDashboardData();
-    
-    // Auto-reload data in the background every 30 seconds
     _autoRefreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _fetchDashboardData(isBackground: true);
     });
@@ -52,34 +49,29 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
 
   @override
   void dispose() {
-    _autoRefreshTimer?.cancel(); // Cancel timer to prevent memory leaks
+    _autoRefreshTimer?.cancel();
     processNameController.dispose();
     departmentController.dispose();
     officeController.dispose();
     super.dispose();
   }
 
-  // Added isBackground flag to prevent full-screen spinner flicker during auto-reloads
   Future<void> _fetchDashboardData({bool isBackground = false}) async {
-    if (!isBackground && mounted) {
-      setState(() => isLoading = true);
-    }
+    if (!isBackground && mounted) setState(() => isLoading = true);
+    
     try {
-      // 1. Fetch Offices
       final officeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/offices'));
       if (officeRes.statusCode == 200) {
         final List<dynamic> officeData = json.decode(officeRes.body);
         officesList = officeData.map((e) => e as Map<String, dynamic>).toList();
       }
 
-      // 2. Fetch Departments
       final deptRes = await http.get(Uri.parse('${AppConfig.baseUrl}/departments'));
       if (deptRes.statusCode == 200) {
         final List<dynamic> deptData = json.decode(deptRes.body);
         departmentsList = deptData.map((e) => e as Map<String, dynamic>).toList();
       }
 
-      // 3. Fetch Process Types (Workflows)
       final processRes = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types'));
       if (processRes.statusCode == 200) {
         final List<dynamic> processData = json.decode(processRes.body);
@@ -88,13 +80,14 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         for (var p in processData) {
           final routeRes = await http.get(Uri.parse('${AppConfig.baseUrl}/process-types/${p['p_id']}/route'));
           String routeString = "Route path unassigned or empty";
+          List<dynamic> rawStops = [];
           
           if (routeRes.statusCode == 200) {
             final routeData = json.decode(routeRes.body);
-            List<dynamic> stops = routeData['stops'] ?? [];
+            rawStops = routeData['stops'] ?? [];
             
             List<String> stopNames = [];
-            for (var stopId in stops) {
+            for (var stopId in rawStops) {
               final office = officesList.firstWhere(
                 (o) => o['o_id'] == stopId, 
                 orElse: () => {'office_name': 'Unknown Node'}
@@ -108,6 +101,7 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             'p_id': p['p_id'],
             'process_name': p['process_name'],
             'path': routeString,
+            'raw_stops': rawStops, // Keep raw IDs for editing
             'is_active': true, 
           });
         }
@@ -115,16 +109,249 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading data: $e'), backgroundColor: Colors.red));
       }
     } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+      if (mounted) setState(() => isLoading = false);
     }
   }
+
+  // --- CRUD HELPERS ---
+
+  Future<void> _updateItem(String endpoint, int id, String fieldKey, String newValue) async {
+    if (newValue.trim().isEmpty) return;
+    try {
+      final response = await http.put(
+        Uri.parse('${AppConfig.baseUrl}/$endpoint/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({fieldKey: newValue.trim()}),
+      );
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully!'), backgroundColor: Colors.green));
+        _fetchDashboardData(isBackground: true);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update item'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _deleteItem(String endpoint, int id) async {
+    try {
+      final response = await http.delete(Uri.parse('${AppConfig.baseUrl}/$endpoint/$id'));
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted successfully!'), backgroundColor: Colors.green));
+        _fetchDashboardData(isBackground: true);
+      } else {
+        final errorData = json.decode(response.body);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorData['error'] ?? 'Failed to delete'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  void _showEditNameDialog(String title, String initialValue, Function(String) onSave) {
+    TextEditingController editController = TextEditingController(text: initialValue);
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Edit $title', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: TextField(
+            controller: editController,
+            decoration: InputDecoration(
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+              focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: primaryRed)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                onSave(editController.text);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: darkCardColor),
+              child: const Text('Save', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDeleteConfirmation(String itemName, VoidCallback onConfirm) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Confirm Deletion', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: Text('Are you sure you want to delete "$itemName"?\n\nIf this item is currently bound to active users or documents, the system will reject the deletion to protect tracking integrity.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                onConfirm();
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: const Text('Delete', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // --- ROUTE EDITOR MODAL ---
+  void _showEditRouteDialog(int processId, String processName, List<dynamic> rawStops) {
+    // Convert dynamic list to List<int?>
+    List<int?> editingStops = rawStops.map((s) => s as int?).toList();
+    if (editingStops.length < 2) {
+      editingStops = [null, null]; // Safety fallback
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        // Use StatefulBuilder so the modal can rebuild its own internal dropdowns
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return AlertDialog(
+              contentPadding: const EdgeInsets.all(20),
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Edit Route Sequence', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text(processName, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ...List.generate(editingStops.length, (index) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: lightRedBg,
+                              border: Border.all(color: cardOutlineColor),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  height: 20, width: 20,
+                                  decoration: const BoxDecoration(color: Color(0xFF3E312F), shape: BoxShape.circle),
+                                  alignment: Alignment.center,
+                                  child: Text('${index + 1}', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      hint: const Text('Select Office', style: TextStyle(color: Colors.black54, fontSize: 12)),
+                                      value: editingStops[index],
+                                      isExpanded: true,
+                                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                                      items: officesList.map((office) {
+                                        return DropdownMenuItem<int>(
+                                          value: office['o_id'],
+                                          child: Text(office['office_name'], style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                                        );
+                                      }).toList(),
+                                      onChanged: (val) {
+                                        setStateModal(() => editingStops[index] = val);
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: editingStops.length < 7 ? () {
+                                setStateModal(() => editingStops.add(null));
+                              } : null, 
+                              style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 8)),
+                              child: Text('+ Add Step', style: TextStyle(color: primaryRed, fontSize: 11)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: editingStops.length > 2 ? () {
+                                setStateModal(() => editingStops.removeLast());
+                              } : null, 
+                              style: OutlinedButton.styleFrom(side: BorderSide(color: cardOutlineColor), padding: const EdgeInsets.symmetric(vertical: 8)),
+                              child: Text('× Delete Last', style: TextStyle(color: primaryRed, fontSize: 11)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (editingStops.contains(null)) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select an office for all stops')));
+                      return;
+                    }
+                    Navigator.pop(context); // Close modal
+                    
+                    try {
+                      final response = await http.put(
+                        Uri.parse('${AppConfig.baseUrl}/process-types/$processId/route'),
+                        headers: {'Content-Type': 'application/json'},
+                        body: json.encode({'stops': editingStops}),
+                      );
+                      if (response.statusCode == 200) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Route updated successfully!'), backgroundColor: Colors.green));
+                        _fetchDashboardData(isBackground: true); 
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update route'), backgroundColor: Colors.red));
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: darkCardColor),
+                  child: const Text('Save Route', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  // --- EXISTING ACTIONS ---
 
   Future<void> _deployNewTemplate() async {
     if (processNameController.text.trim().isEmpty) {
@@ -171,8 +398,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Department added successfully!'), backgroundColor: Colors.green));
         departmentController.clear();
         _fetchDashboardData(isBackground: true); 
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add department'), backgroundColor: Colors.red));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -191,8 +416,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office added successfully!'), backgroundColor: Colors.green));
         officeController.clear();
         _fetchDashboardData(isBackground: true); 
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to add office'), backgroundColor: Colors.red));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
@@ -265,12 +488,10 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   }
 
   Widget _buildInteractiveVisualizerTab() {
-    // Wrapped with RefreshIndicator
     return RefreshIndicator(
       color: primaryRed,
       onRefresh: () => _fetchDashboardData(isBackground: true),
       child: SingleChildScrollView(
-        // AlwaysScrollableScrollPhysics ensures pull-to-refresh works even if content isn't tall enough to scroll natively
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -363,9 +584,24 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: _buildBlueprintItem(
+                        id: process['p_id'],
                         title: process['process_name'],
                         path: process['path'],
                         isActive: process['is_active'],
+                        onEditName: () {
+                          _showEditNameDialog('Workflow Name', process['process_name'], (newName) {
+                            _updateItem('process-types', process['p_id'], 'process_name', newName);
+                          });
+                        },
+                        onEditRoute: () {
+                          // Opens the route sequence editor modal
+                          _showEditRouteDialog(process['p_id'], process['process_name'], process['raw_stops']);
+                        },
+                        onDelete: () {
+                          _showDeleteConfirmation(process['process_name'], () {
+                            _deleteItem('process-types', process['p_id']);
+                          });
+                        },
                       ),
                     );
                   }).toList(),
@@ -379,7 +615,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
   }
 
   Widget _buildCampusInfrastructureTab() {
-    // Wrapped with RefreshIndicator
     return RefreshIndicator(
       color: primaryRed,
       onRefresh: () => _fetchDashboardData(isBackground: true),
@@ -496,7 +731,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title Row
                   Row(
                     children: [
                       Icon(showOffices ? Icons.hub : Icons.business, color: Colors.white, size: 18),
@@ -507,7 +741,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                   
                   const SizedBox(height: 16),
                   
-                  // The Toggle Switches
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(4),
@@ -551,7 +784,6 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                   
                   const SizedBox(height: 20),
                   
-                  // Conditionally render based on the toggle
                   if (showOffices) ...[
                     if (officesList.isEmpty)
                       const Text('No offices registered yet.', style: TextStyle(color: Colors.white54, fontSize: 12))
@@ -560,9 +792,19 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _buildStationMonitor(
-                            office['office_name'] ?? 'Unknown Node', 
-                            office['staff_count'] ?? 0,
-                            Colors.grey
+                            name: office['office_name'] ?? 'Unknown Node', 
+                            staffCount: office['staff_count'] ?? 0,
+                            badgeColor: Colors.grey,
+                            onEdit: () {
+                              _showEditNameDialog('Office Name', office['office_name'], (newName) {
+                                _updateItem('offices', office['o_id'], 'office_name', newName);
+                              });
+                            },
+                            onDelete: () {
+                              _showDeleteConfirmation(office['office_name'], () {
+                                _deleteItem('offices', office['o_id']);
+                              });
+                            }
                           ),
                         );
                       }).toList(),
@@ -574,9 +816,19 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 12),
                           child: _buildStationMonitor(
-                            dept['department_name'] ?? 'Unknown Dept', 
-                            dept['staff_count'] ?? 0,
-                            Colors.blueGrey
+                            name: dept['department_name'] ?? 'Unknown Dept', 
+                            staffCount: dept['staff_count'] ?? 0,
+                            badgeColor: Colors.blueGrey,
+                            onEdit: () {
+                              _showEditNameDialog('Department Name', dept['department_name'], (newName) {
+                                _updateItem('departments', dept['d_id'], 'department_name', newName);
+                              });
+                            },
+                            onDelete: () {
+                              _showDeleteConfirmation(dept['department_name'], () {
+                                _deleteItem('departments', dept['d_id']);
+                              });
+                            }
                           ),
                         );
                       }).toList(),
@@ -631,7 +883,15 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  Widget _buildBlueprintItem({required String title, required String path, required bool isActive}) {
+  Widget _buildBlueprintItem({
+    required int id,
+    required String title, 
+    required String path, 
+    required bool isActive,
+    required VoidCallback onEditName,
+    required VoidCallback onEditRoute,
+    required VoidCallback onDelete,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -646,7 +906,31 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))),
-              Icon(isActive ? Icons.edit : Icons.chevron_right, color: isActive ? primaryRed : Colors.grey[400], size: 16),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit, size: 16, color: Colors.white70),
+                    tooltip: 'Edit Process Name',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    onPressed: onEditName,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.alt_route, size: 16, color: Colors.white70),
+                    tooltip: 'Edit Route Sequence',
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    onPressed: onEditRoute,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                    tooltip: 'Delete Workflow',
+                    constraints: const BoxConstraints(),
+                    padding: EdgeInsets.zero,
+                    onPressed: onDelete,
+                  ),
+                ],
+              )
             ],
           ),
           const SizedBox(height: 10),
@@ -656,9 +940,15 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
     );
   }
 
-  Widget _buildStationMonitor(String name, int staffCount, MaterialColor badgeColor) {
+  Widget _buildStationMonitor({
+    required String name, 
+    required int staffCount, 
+    required MaterialColor badgeColor,
+    required VoidCallback onEdit,
+    required VoidCallback onDelete,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: cardOutlineColor),
@@ -677,10 +967,27 @@ class _IctAdminRolesScreenState extends State<IctAdminRolesScreen> {
             ),
           ),
           Container(
+            margin: const EdgeInsets.only(right: 8),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(color: badgeColor.shade50, borderRadius: BorderRadius.circular(2)),
             child: Text('$staffCount STAFF', style: TextStyle(color: badgeColor.shade700, fontSize: 10, fontWeight: FontWeight.bold)),
           ),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit, size: 18, color: Colors.black54),
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                onPressed: onEdit,
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                constraints: const BoxConstraints(),
+                padding: EdgeInsets.zero,
+                onPressed: onDelete,
+              ),
+            ],
+          )
         ],
       ),
     );
