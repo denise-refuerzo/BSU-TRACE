@@ -149,6 +149,16 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, user.u_id]);
+
+    res.status(200).json({
+      u_id: user.u_id,
+      a_id: user.a_id,
+      two_fa_enabled: user.two_fa_enabled,
+      session_token: sessionToken // NEW: Send to the app
+    });
+
     res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id,
@@ -179,6 +189,8 @@ app.post('/api/verify-2fa', async (req, res) => {
 
     if (user.two_fa_code === code) {
       failed2FAAttempts.delete(u_id);
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, u_id]);
       return res.status(200).json({ success: true });
     } else {
       const currentAttempts = (failed2FAAttempts.get(u_id) || 0) + 1;
@@ -207,6 +219,27 @@ app.post('/api/verify-2fa', async (req, res) => {
     }
   } catch (error) {
     console.error('2FA Verification Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 1.6 CHECK SESSION ENDPOINT (Single Device Login)
+// ==========================================
+app.post('/api/check-session', async (req, res) => {
+  const { u_id, session_token } = req.body;
+  if (!u_id || !session_token) return res.status(400).json({ valid: false });
+
+  try {
+    const result = await pool.query('SELECT session_token FROM public."User" WHERE u_id = $1', [u_id]);
+    
+    // If the token in the DB doesn't match the app's token, another device logged in
+    if (result.rows.length === 0 || result.rows[0].session_token !== session_token) {
+      return res.status(401).json({ valid: false, error: 'Logged in from another device' });
+    }
+    
+    res.status(200).json({ valid: true });
+  } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
