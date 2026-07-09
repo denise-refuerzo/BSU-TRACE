@@ -4,6 +4,7 @@ const jwt = require('jwt-simple');
 const bcrypt = require('bcrypt');
 const pool = require('./db');
 const { sendResetCodeEmail } = require('./mailer');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -15,7 +16,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key';
 const failed2faAttemptsTracker = {};
 
 // 1. CONDITIONAL LOGIN ENDPOINT WITH 2FA VERIFICATION CHANNELS
-
 app.post('/api/login', async (req, res) => {
   const { username, password, pinCode } = req.body;
   try {
@@ -73,7 +73,22 @@ app.post('/api/login', async (req, res) => {
       failed2faAttemptsTracker[user.u_id] = 0;
     }
 
-    const token = jwt.encode({ u_id: user.u_id, username: user.username, a_id: user.a_id }, JWT_SECRET);
+    // --- NEW SESSION TOKEN GENERATION & DATABASE STORAGE ---
+    const newSessionToken = crypto.randomBytes(16).toString('hex');
+
+    await pool.query(
+      `UPDATE public."User" SET session_token = $1 WHERE u_id = $2`, 
+      [newSessionToken, user.u_id]
+    );
+
+    // Inject the newSessionToken into the JWT payload
+    const token = jwt.encode({ 
+      u_id: user.u_id, 
+      username: user.username, 
+      a_id: user.a_id,
+      session_token: newSessionToken 
+    }, JWT_SECRET);
+
     res.json({ 
       token, 
       role: user.a_id, 
@@ -87,7 +102,45 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.get('/api/accounts', async (req, res) => {
+// SESSION VERIFICATION MIDDLEWARE
+const requireAuth = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Unauthorized access. Please log in.' });
+  }
+
+  const token = authHeader.split(' ')[1]; // Expects format: "Bearer <token>"
+
+  try {
+    const decoded = jwt.decode(token, JWT_SECRET);
+    
+    // Check the database to see if the session token matches the current one
+    const result = await pool.query('SELECT session_token FROM public."User" WHERE u_id = $1', [decoded.u_id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'User account no longer exists.' });
+    }
+
+    const currentDbToken = result.rows[0].session_token;
+
+    // THE KICK-OUT LOGIC: If the tokens don't match, they logged in somewhere else!
+    if (currentDbToken !== decoded.session_token) {
+      return res.status(401).json({ 
+        error: 'Session expired. You logged in from another device.', 
+        forceLogout: true 
+      });
+    }
+
+    // If it matches, attach user info to req and proceed
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token.' });
+  }
+};
+
+app.get('/api/accounts', requireAuth, async (req, res) => {
   try {
     const query = `
                   SELECT u.u_id, u.username, u.full_name, u.uni_email, u.faculty_id, u.two_fa_enabled, u.a_id, u.d_id, u.o_id, u.is_active,
@@ -108,7 +161,7 @@ app.get('/api/accounts', async (req, res) => {
   }
 });
 
-app.put('/api/accounts/:userId', async (req, res) => {
+app.put('/api/accounts/:userId', requireAuth, async (req, res) => {
   const { userId } = req.params;
   const { username, fullName, email, accountType, departmentId, officeId, isActive } = req.body;  
   try {
@@ -144,7 +197,7 @@ app.put('/api/accounts/:userId', async (req, res) => {
   }
 });
 
-app.get('/api/profile/:userId', async (req, res) => {
+app.get('/api/profile/:userId', requireAuth, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT u.u_id, u.full_name, u.uni_email, u.faculty_id, u.two_fa_enabled, u.two_fa_code, u.o_id,
@@ -164,7 +217,7 @@ app.get('/api/profile/:userId', async (req, res) => {
   }
 });
 
-app.put('/api/profile/:userId', async (req, res) => {
+app.put('/api/profile/:userId', requireAuth, async (req, res) => {
   const { fullName, email, twoFaEnabled, twoFaCode } = req.body;
   try {
     await pool.query(
@@ -179,7 +232,7 @@ app.put('/api/profile/:userId', async (req, res) => {
   }
 });
 
-app.put('/api/profile/:userId/password', async (req, res) => {
+app.put('/api/profile/:userId/password', requireAuth, async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   try {
     const userRes = await pool.query('SELECT password FROM public."User" WHERE u_id = $1', [req.params.userId]);
@@ -196,7 +249,7 @@ app.put('/api/profile/:userId/password', async (req, res) => {
   }
 });
 
-app.get('/api/process-types', async (req, res) => {
+app.get('/api/process-types', requireAuth, async (req, res) => {
   try {
     const query = `
       SELECT p.p_id, p.process_name, p.is_active, r.r_id,
@@ -222,7 +275,7 @@ app.get('/api/process-types', async (req, res) => {
   }
 });
 
-app.get('/api/documents/:userId', async (req, res) => {
+app.get('/api/documents/:userId', requireAuth, async (req, res) => {
   try {
     const query = `
       SELECT DISTINCT ON (idoc.ini_id)
@@ -258,7 +311,7 @@ app.get('/api/documents/:userId', async (req, res) => {
   }
 });
 
-app.post('/api/documents', async (req, res) => {
+app.post('/api/documents', requireAuth, async (req, res) => {
   const { userId, title, processTypeId, edc } = req.body;
   try {
     const uniqueQrPayload = `TRK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -277,7 +330,7 @@ app.post('/api/documents', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Failed' }); }
 });
 
-app.post('/api/accounts', async (req, res) => {
+app.post('/api/accounts', requireAuth, async (req, res) => {
   const { username, password, accountType, fullName, email, departmentId, officeId } = req.body;
   try {
     const userCheck = await pool.query(
@@ -391,7 +444,7 @@ app.post('/api/resources/book', async (req, res) => {
 });
 
 // FETCH INCOMING ACTIVE PENDING DOCUMENTS FOR PROCESSOR/SIGNEE DASHBOARD LISTS ONLY
-app.get('/api/processor/documents/:officeId', async (req, res) => {
+app.get('/api/processor/documents/:officeId', requireAuth, async (req, res) => {
   const { officeId } = req.params;
   try {
     const query = `
@@ -430,7 +483,7 @@ app.get('/api/processor/documents/:officeId', async (req, res) => {
 });
 
 // FETCH EXTENDED PIPELINE TRACKS CONTAINING HISTORICAL ENGAGEMENTS UNIQUE TO THIS STATION
-app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
+app.get('/api/processor/documents/pipeline/:officeId', requireAuth, async (req, res) => {
   const { officeId } = req.params;
   try {
     const query = `
@@ -473,7 +526,7 @@ app.get('/api/processor/documents/pipeline/:officeId', async (req, res) => {
 // ==========================================
 // SMART SCANNER ENDPOINTS WITH MANILA TIMEZONE
 // ==========================================
-app.post('/api/documents/scan-in', async (req, res) => {
+app.post('/api/documents/scan-in', requireAuth, async (req, res) => {
   const { qrCode, processorUserId } = req.body;
   try {
     const procRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
@@ -528,7 +581,7 @@ app.post('/api/documents/scan-in', async (req, res) => {
   }
 });
 
-app.post('/api/documents/scan-out', async (req, res) => {
+app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
   const { qrCode, processorUserId } = req.body;
   try {
     const procRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
@@ -662,7 +715,7 @@ app.post('/api/documents/scan-out', async (req, res) => {
 });
 
 // FETCH HISTORY DATA LEDGER FOR ALL PROCESSORS IN THE SPECIFIC OFFICE
-app.get('/api/processor/history/:officeId', async (req, res) => {
+app.get('/api/processor/history/:officeId', requireAuth, async (req, res) => {
   const { officeId } = req.params;
   try {
     const query = `
@@ -722,7 +775,7 @@ app.get('/api/offices', async (req, res) => {
   }
 });
 
-app.post('/api/signee/sign', async (req, res) => {
+app.post('/api/signee/sign', requireAuth, async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId } = req.body;
   try {
     const updateResult = await pool.query(`
@@ -748,7 +801,7 @@ app.post('/api/signee/sign', async (req, res) => {
   }
 });
 
-app.post('/api/signee/return', async (req, res) => {
+app.post('/api/signee/return', requireAuth, async (req, res) => {
   const { iniId, currentOfficeId, signeeUserId, reason } = req.body;
   try {
     // Set status to 'Action Required' (s_id = 4) and decouple next_office_id to freeze the route
@@ -1136,7 +1189,7 @@ app.get('/api/admin/dashboard-metrics', async (req, res) => {
   }
 });
 
-app.get('/api/notifications/:userId/:roleId/:officeId', async (req, res) => {
+app.get('/api/notifications/:userId/:roleId/:officeId', requireAuth, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const roleId = parseInt(req.params.roleId);
   const officeId = parseInt(req.params.officeId) || 0;

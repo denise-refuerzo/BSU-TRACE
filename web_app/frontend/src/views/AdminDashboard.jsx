@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { fetchWithAuth } from '../api';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export default function AdminDashboard() {
 
   const fetchDashboardMetrics = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/admin/dashboard-metrics');
+      const res = await fetchWithAuth('http://localhost:5000/api/admin/dashboard-metrics');
       const payload = await res.json();
       if (res.ok) setData(payload);
     } catch (err) {

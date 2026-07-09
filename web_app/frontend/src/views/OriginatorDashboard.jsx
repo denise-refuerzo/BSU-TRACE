@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode } from 'lucide-react';
 import DocumentsHub from './DocumentsHub';
 import ResourceScheduler from './ResourceScheduler';
+import { fetchWithAuth } from '../api';
 
 export default function OriginatorDashboard() {
   const navigate = useNavigate();
@@ -92,7 +93,7 @@ export default function OriginatorDashboard() {
   const fetchLiveNotificationFeeds = async () => {
     try {
       // roleId = 1 signifies an Originator account
-      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/1/0`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/1/0`);
       const data = await res.json();
       if (res.ok) {
         const alertCollection = data.map(n => ({
@@ -110,7 +111,7 @@ export default function OriginatorDashboard() {
 
   const fetchUserProfile = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`);
       const data = await res.json();
       if (res.ok && data) {
         const loadedProfile = {
@@ -135,7 +136,7 @@ export default function OriginatorDashboard() {
 
   const fetchDashboardLedger = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/documents/${userId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/documents/${userId}`);
       const data = await res.json();
       if (res.ok) {
         setDocuments(data);
@@ -148,7 +149,7 @@ export default function OriginatorDashboard() {
 
   const fetchWorkflowTemplates = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/process-types');
+      const res = await fetchWithAuth('http://localhost:5000/api/process-types');
       const data = await res.json();
       if (res.ok) setProcessTypes(data);
     } catch (err) { console.error(err); }
@@ -167,7 +168,7 @@ export default function OriginatorDashboard() {
     }
     
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profile)
@@ -184,7 +185,7 @@ export default function OriginatorDashboard() {
     e.preventDefault();
     if (passForm.newPassword !== passForm.confirmNew) return alert("New passwords mismatched.");
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}/password`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(passForm)
@@ -218,7 +219,7 @@ export default function OriginatorDashboard() {
   const submitDocument = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('http://localhost:5000/api/documents', {
+      const res = await fetchWithAuth('http://localhost:5000/api/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: parseInt(userId), title: form.title, processTypeId: parseInt(form.processTypeId), edc: estimatedDate ? new Date(estimatedDate).toISOString().split('T')[0] : null })

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2'; // 🚨 Handles explicit confirmation validations
+import { fetchWithAuth } from '../api';
 
 export default function RolesPermissionsMatrix() {
   const navigate = useNavigate();
@@ -30,15 +31,15 @@ export default function RolesPermissionsMatrix() {
 
   const fetchBaselineCatalogs = async () => {
     try {
-      const officeRes = await fetch('http://localhost:5000/api/offices');
+      const officeRes = await fetchWithAuth('http://localhost:5000/api/offices');
       const officeData = await officeRes.json();
       if (officeRes.ok) setOffices(officeData);
 
-      const processRes = await fetch('http://localhost:5000/api/process-types');
+      const processRes = await fetchWithAuth('http://localhost:5000/api/process-types');
       const processData = await processRes.json();
       if (processRes.ok) setProcessTypes(processData);
 
-      const summaryRes = await fetch('http://localhost:5000/api/admin/infrastructure-summary');
+      const summaryRes = await fetchWithAuth('http://localhost:5000/api/admin/infrastructure-summary');
       const summaryData = await summaryRes.json();
       if (summaryRes.ok) setInfraSummary(summaryData);
     } catch (err) {
@@ -115,7 +116,7 @@ export default function RolesPermissionsMatrix() {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const response = await fetch(targetUrl, {
+          const response = await fetchWithAuth(targetUrl, {
             method: targetMethod,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -143,7 +144,7 @@ export default function RolesPermissionsMatrix() {
   const handleCreateDepartment = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/departments', {
+      const response = await fetchWithAuth('http://localhost:5000/api/departments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ departmentName: newDeptName })
@@ -162,7 +163,7 @@ export default function RolesPermissionsMatrix() {
   const handleCreateOffice = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/offices', {
+      const response = await fetchWithAuth('http://localhost:5000/api/offices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ officeName: newOfficeName })

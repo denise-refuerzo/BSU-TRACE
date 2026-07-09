@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2'; // 🚨 SweetAlert2 handles explicit double-check confirmations
+import { fetchWithAuth } from '../api';
 
 export default function AccountManagement() {
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ export default function AccountManagement() {
 
   const fetchOffices = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/offices');
+      const res = await fetchWithAuth('http://localhost:5000/api/offices');
       const data = await res.json();
       if (res.ok) setOffices(data);
     } catch (err) {
@@ -40,7 +41,7 @@ export default function AccountManagement() {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/accounts');
+      const res = await fetchWithAuth('http://localhost:5000/api/accounts');
       const data = await res.json();
       if (res.ok) setAccounts(data);
     } catch (err) {
@@ -59,7 +60,7 @@ export default function AccountManagement() {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/accounts', {
+      const response = await fetchWithAuth('http://localhost:5000/api/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(submissionFormPayload)
@@ -92,7 +93,7 @@ export default function AccountManagement() {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
-          const response = await fetch(`http://localhost:5000/api/accounts/${selectedUser.u_id}`, {
+          const response = await fetchWithAuth(`http://localhost:5000/api/accounts/${selectedUser.u_id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

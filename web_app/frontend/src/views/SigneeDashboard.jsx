@@ -20,6 +20,7 @@ import {
   Building,
   Landmark
 } from 'lucide-react';
+import { fetchWithAuth } from '../api';
 
 export default function SigneeDashboard() {
   const navigate = useNavigate();
@@ -94,7 +95,7 @@ export default function SigneeDashboard() {
     if (!signeeOfficeId) return;
     try {
       // roleId = 3 signifies a Signee account
-      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/3/${signeeOfficeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/3/${signeeOfficeId}`);
       const data = await res.json();
       if (res.ok) {
         setNotifications(data.map(n => ({
@@ -111,7 +112,7 @@ export default function SigneeDashboard() {
 
   const fetchSigneeMeta = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`);
       const data = await res.json();
       if (res.ok) {
         setSigneeOfficeName(data.office_name || 'CICS Office');
@@ -135,7 +136,7 @@ export default function SigneeDashboard() {
   const fetchPipelineDocs = async (officeId) => {
     if (!officeId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/processor/documents/pipeline/${officeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/documents/pipeline/${officeId}`);
       const data = await res.json();
       if (res.ok) {
         setPipelineDocs(data);
@@ -152,7 +153,7 @@ export default function SigneeDashboard() {
   const fetchOfficeActionHistory = async (officeId) => {
     if (!officeId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/processor/history/${officeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/history/${officeId}`);
       const data = await res.json();
       if (res.ok) setActionHistory(data);
     } catch (err) { console.error("History transaction log retrieval error:", err); }
@@ -160,7 +161,7 @@ export default function SigneeDashboard() {
 
   const fetchWorkflowTemplates = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/process-types');
+      const res = await fetchWithAuth('http://localhost:5000/api/process-types');
       const data = await res.json();
       if (res.ok) setProcessTypes(data);
     } catch (err) { console.error(err); }
@@ -168,7 +169,7 @@ export default function SigneeDashboard() {
 
   const fetchOfficesList = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/offices'); 
+      const res = await fetchWithAuth('http://localhost:5000/api/offices'); 
       const data = await res.json();
       if (res.ok) setOfficesList(data);
     } catch (err) { console.error("Error building office lookup:", err); }
@@ -177,7 +178,7 @@ export default function SigneeDashboard() {
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -201,7 +202,7 @@ export default function SigneeDashboard() {
     e.preventDefault();
     if (newPassword !== confirmPassword) return Swal.fire('Mismatch', 'New passwords do not match.', 'error');
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}/password`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword })
@@ -225,7 +226,7 @@ export default function SigneeDashboard() {
     setTwoFaEnabled(checked);
     if (!checked) {
       try {
-        const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+        const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -249,7 +250,7 @@ export default function SigneeDashboard() {
       return Swal.fire('Invalid PIN', 'PIN must be a 4-6 digit numeric code.', 'error');
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -292,7 +293,7 @@ export default function SigneeDashboard() {
       if (result.isConfirmed) {
         setIsActionProcessing(true);
         try {
-          const res = await fetch(`http://localhost:5000/api/signee/sign`, {
+          const res = await fetchWithAuth(`http://localhost:5000/api/signee/sign`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -322,7 +323,7 @@ export default function SigneeDashboard() {
 
     setIsActionProcessing(true);
     try {
-      const res = await fetch(`http://localhost:5000/api/signee/return`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/signee/return`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -351,7 +352,7 @@ export default function SigneeDashboard() {
     
     setIsActionProcessing(true);
     try {
-      const res = await fetch('http://localhost:5000/api/processor/documents/ad-hoc', {
+      const res = await fetchWithAuth('http://localhost:5000/api/processor/documents/ad-hoc', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

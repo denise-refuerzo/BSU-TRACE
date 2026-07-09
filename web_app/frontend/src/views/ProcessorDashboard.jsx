@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FileText, History, Bell, User, Search, Filter, X, QrCode, LogOut, Camera, KeyRound, ShieldCheck, Building, Landmark } from 'lucide-react';
+import { fetchWithAuth } from '../api';
 
 export default function ProcessorDashboard() {
   const navigate = useNavigate();
@@ -77,7 +78,7 @@ export default function ProcessorDashboard() {
     if (!processorOfficeId) return;
     try {
       // roleId = 2 signifies a Processor account
-      const res = await fetch(`http://localhost:5000/api/notifications/${userId}/2/${processorOfficeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/2/${processorOfficeId}`);
       const data = await res.json();
       if (res.ok) {
         setNotifications(data.map(n => ({
@@ -94,7 +95,7 @@ export default function ProcessorDashboard() {
   
   const fetchProcessorMeta = async () => {
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`);
       const data = await res.json();
       if (res.ok) {
         setProcessorOfficeName(data.office_name || 'CICS Office');
@@ -119,7 +120,7 @@ export default function ProcessorDashboard() {
   const fetchIncomingDocumentLogs = async (officeId) => {
     if (!officeId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/processor/documents/${officeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/documents/${officeId}`);
       const data = await res.json();
       if (res.ok) {
         setIncomingDocs(data);
@@ -135,7 +136,7 @@ export default function ProcessorDashboard() {
   const fetchPipelineDocs = async (officeId) => {
     if (!officeId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/processor/documents/pipeline/${officeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/documents/pipeline/${officeId}`);
       const data = await res.json();
       if (res.ok) setPipelineDocs(data);
     } catch (err) { console.error("Pipeline sync error:", err); }
@@ -144,7 +145,7 @@ export default function ProcessorDashboard() {
   const fetchOfficeActionHistory = async (officeId) => {
     if (!officeId) return;
     try {
-      const res = await fetch(`http://localhost:5000/api/processor/history/${officeId}`);
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/history/${officeId}`);
       const data = await res.json();
       if (res.ok) setActionHistory(data);
     } catch (err) { console.error("History transaction log retrieval error:", err); }
@@ -152,7 +153,7 @@ export default function ProcessorDashboard() {
 
   const fetchWorkflowTemplates = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/process-types');
+      const res = await fetchWithAuth('http://localhost:5000/api/process-types');
       const data = await res.json();
       if (res.ok) setProcessTypes(data);
     } catch (err) { console.error(err); }
@@ -160,7 +161,7 @@ export default function ProcessorDashboard() {
 
   const fetchOfficesList = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/offices'); 
+      const res = await fetchWithAuth('http://localhost:5000/api/offices'); 
       const data = await res.json();
       if (res.ok) {
         setOfficesList(data);
@@ -173,7 +174,7 @@ export default function ProcessorDashboard() {
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -195,7 +196,7 @@ export default function ProcessorDashboard() {
     e.preventDefault();
     if (newPassword !== confirmPassword) return alert("New passwords do not match.");
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}/password`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword })
@@ -217,7 +218,7 @@ export default function ProcessorDashboard() {
     setTwoFaEnabled(checked);
     if (!checked) {
       try {
-        const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+        const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -241,7 +242,7 @@ export default function ProcessorDashboard() {
       return alert("Please enter a valid 4-6 digit numeric security PIN code.");
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/profile/${userId}`, {
+      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -276,7 +277,7 @@ export default function ProcessorDashboard() {
     
     setIsAdHocProcessing(true);
     try {
-      const res = await fetch('http://localhost:5000/api/processor/documents/ad-hoc', {
+      const res = await fetchWithAuth('http://localhost:5000/api/processor/documents/ad-hoc', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -307,7 +308,7 @@ export default function ProcessorDashboard() {
       : 'http://localhost:5000/api/documents/scan-out';
 
     try {
-      const res = await fetch(targetUrl, {
+      const res = await fetchWithAuth(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ qrCode: simulatedQrInput, processorUserId: parseInt(userId) })

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
+import { fetchWithAuth } from '../api';
 
 export default function ResourceScheduler({ userId }) {
   const userName = localStorage.getItem('user') || 'Faculty User';
@@ -34,7 +35,7 @@ export default function ResourceScheduler({ userId }) {
 
   const fetchActiveReservations = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/resources/bookings');
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/bookings');
       const data = await res.json();
       if (res.ok) setBookings(data);
     } catch (err) { console.error("Error connecting calendar rows:", err); }
@@ -42,7 +43,7 @@ export default function ResourceScheduler({ userId }) {
 
   const fetchInventoryMetrics = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/resources/inventory');
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/inventory');
       const data = await res.json();
       if (res.ok) setInventory(data);
     } catch (err) { console.error(err); }
@@ -65,7 +66,7 @@ export default function ResourceScheduler({ userId }) {
     };
 
     try {
-      const res = await fetch('http://localhost:5000/api/resources/book', {
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

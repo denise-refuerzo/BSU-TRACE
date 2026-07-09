@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle } from 'lucide-react';
+import { fetchWithAuth } from '../api';
 
 export default function DocumentsHub({ 
   userId, 
