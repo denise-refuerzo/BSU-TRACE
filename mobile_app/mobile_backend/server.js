@@ -149,6 +149,16 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, user.u_id]);
+
+    res.status(200).json({
+      u_id: user.u_id,
+      a_id: user.a_id,
+      two_fa_enabled: user.two_fa_enabled,
+      session_token: sessionToken // NEW: Send to the app
+    });
+
     res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id,
@@ -179,6 +189,8 @@ app.post('/api/verify-2fa', async (req, res) => {
 
     if (user.two_fa_code === code) {
       failed2FAAttempts.delete(u_id);
+      const sessionToken = crypto.randomBytes(32).toString('hex');
+      await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, u_id]);
       return res.status(200).json({ success: true });
     } else {
       const currentAttempts = (failed2FAAttempts.get(u_id) || 0) + 1;
@@ -207,6 +219,27 @@ app.post('/api/verify-2fa', async (req, res) => {
     }
   } catch (error) {
     console.error('2FA Verification Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 1.6 CHECK SESSION ENDPOINT (Single Device Login)
+// ==========================================
+app.post('/api/check-session', async (req, res) => {
+  const { u_id, session_token } = req.body;
+  if (!u_id || !session_token) return res.status(400).json({ valid: false });
+
+  try {
+    const result = await pool.query('SELECT session_token FROM public."User" WHERE u_id = $1', [u_id]);
+    
+    // If the token in the DB doesn't match the app's token, another device logged in
+    if (result.rows.length === 0 || result.rows[0].session_token !== session_token) {
+      return res.status(401).json({ valid: false, error: 'Logged in from another device' });
+    }
+    
+    res.status(200).json({ valid: true });
+  } catch (error) {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1233,14 +1266,47 @@ app.get('/api/users/:id/processing-timeline', async (req, res) => {
 });
 
 // ==========================================
-// 18. FETCH ALL OFFICES (For Dropdowns)
+// 18. FETCH ALL OFFICES (For Dropdowns & UI)
 // ==========================================
 app.get('/api/offices', async (req, res) => {
   try {
-    const result = await pool.query('SELECT o_id, office_name FROM public.offices ORDER BY office_name ASC');
+    const query = `
+      SELECT 
+        o.o_id, 
+        o.office_name,
+        COUNT(u.u_id)::int AS staff_count
+      FROM public.offices o
+      LEFT JOIN public."User" u ON o.o_id = u.o_id
+      GROUP BY o.o_id, o.office_name
+      ORDER BY o.office_name ASC
+    `;
+    const result = await pool.query(query);
     res.status(200).json(result.rows);
   } catch (error) {
     console.error('Fetch Offices Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 18.5 REGISTER NEW BRANCH OFFICE NODE
+// ==========================================
+app.post('/api/offices', async (req, res) => {
+  const { office_name } = req.body;
+
+  if (!office_name) {
+    return res.status(400).json({ error: 'Office name is required' });
+  }
+
+  try {
+    // Insert into the public.offices table
+    await pool.query(
+      'INSERT INTO public.offices (office_name) VALUES ($1)',
+      [office_name]
+    );
+    res.status(201).json({ message: 'Office added successfully' });
+  } catch (error) {
+    console.error('Add Office Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -1411,6 +1477,245 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 });
 
+// ==========================================
+// 22. FETCH ICT ADMIN DASHBOARD STATS
+// ==========================================
+app.get('/api/dashboard/ict/stats', async (req, res) => {
+  try {
+    // Count total documents
+    const activeDocsRes = await pool.query(`SELECT COUNT(*) FROM public.initial_document`);
+    // Count total users
+    const usersRes = await pool.query(`SELECT COUNT(*) FROM public."User"`);
+    // Count total process types/workflows
+    const workflowsRes = await pool.query(`SELECT COUNT(*) FROM public.process_type`);
+
+    res.status(200).json({
+      active_documents: parseInt(activeDocsRes.rows[0].count) || 0,
+      total_users: parseInt(usersRes.rows[0].count) || 0,
+      total_workflows: parseInt(workflowsRes.rows[0].count) || 0
+    });
+  } catch (error) {
+    console.error('ICT Stats Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 23. FETCH ICT ADMIN AUDIT LOGS
+// ==========================================
+app.get('/api/dashboard/ict/logs', async (req, res) => {
+  try {
+    // Dynamically generates a log sentence by joining the document, status, and office tables
+    const query = `
+      SELECT 
+        'Document "' || i.title || '" marked as "' || s.current_status || '" at ' || o.office_name AS message,
+        TO_CHAR(pd.time_in, 'HH12:MI AM') AS timestamp
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      JOIN public.offices o ON pd.current_office_id = o.o_id
+      WHERE pd.time_in IS NOT NULL
+      ORDER BY pd.time_in DESC
+      LIMIT 5;
+    `;
+    const result = await pool.query(query);
+    
+    res.status(200).json({ logs: result.rows });
+  } catch (error) {
+    console.error('ICT Logs Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 24. CREATE NEW WORKFLOW TEMPLATE
+// ==========================================
+app.post('/api/process-types', async (req, res) => {
+  const { process_name, stops } = req.body;
+
+  if (!process_name || !stops || !Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'Process name and at least 2 stops are required.' });
+  }
+
+  try {
+    // 1. Ensure we don't exceed the database schema (stop_1 to stop_7)
+    if (stops.length > 7) {
+      return res.status(400).json({ error: 'Maximum of 7 stops allowed per route.' });
+    }
+
+    // 2. Insert the new route sequence
+    // We pad the array to 7 items with null to match table structure
+    const paddedStops = [...stops, ...Array(7 - stops.length).fill(null)];
+    
+    const routeInsert = await pool.query(
+      `INSERT INTO public.route (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING r_id`,
+      paddedStops
+    );
+    const newRouteId = routeInsert.rows[0].r_id;
+
+    // 3. Insert the new process type linked to the route
+    const processInsert = await pool.query(
+      `INSERT INTO public.process_type (r_id, process_name, is_active) 
+       VALUES ($1, $2, true) 
+       RETURNING p_id`,
+      [newRouteId, process_name]
+    );
+
+    res.status(201).json({ 
+      message: 'Workflow template deployed successfully', 
+      p_id: processInsert.rows[0].p_id 
+    });
+
+  } catch (error) {
+    console.error('Deploy Workflow Error:', error);
+    res.status(500).json({ error: 'Internal server error while deploying workflow.' });
+  }
+});
+
+// ==========================================
+// 25. REGISTER NEW DEPARTMENT
+// ==========================================
+app.post('/api/departments', async (req, res) => {
+  const { department_name } = req.body;
+
+  if (!department_name) {
+    return res.status(400).json({ error: 'Department name is required' });
+  }
+
+  try {
+    await pool.query(
+      'INSERT INTO public.department (department_name) VALUES ($1)',
+      [department_name]
+    );
+    res.status(201).json({ message: 'Department added successfully' });
+  } catch (error) {
+    console.error('Add Department Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 25.5 FETCH ALL DEPARTMENTS (WITH STAFF COUNT)
+// ==========================================
+app.get('/api/departments', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        d.d_id, 
+        d.department_name,
+        COUNT(u.u_id)::int AS staff_count
+      FROM public.department d
+      LEFT JOIN public."User" u ON d.d_id = u.d_id
+      GROUP BY d.d_id, d.department_name
+      ORDER BY d.department_name ASC
+    `;
+    const result = await pool.query(query);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error('Fetch Departments Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 26. EDIT & DELETE DEPARTMENTS
+// ==========================================
+app.put('/api/departments/:id', async (req, res) => {
+  const { department_name } = req.body;
+  try {
+    await pool.query('UPDATE public.department SET department_name = $1 WHERE d_id = $2', [department_name, req.params.id]);
+    res.status(200).json({ message: 'Department updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/departments/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM public.department WHERE d_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Department deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: This department is currently assigned to active users.' }); }
+});
+
+// ==========================================
+// 27. EDIT & DELETE OFFICES
+// ==========================================
+app.put('/api/offices/:id', async (req, res) => {
+  const { office_name } = req.body;
+  try {
+    await pool.query('UPDATE public.offices SET office_name = $1 WHERE o_id = $2', [office_name, req.params.id]);
+    res.status(200).json({ message: 'Office updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/offices/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM public.offices WHERE o_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Office deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: This office is tied to active users or document routes.' }); }
+});
+
+// ==========================================
+// 28. EDIT & DELETE PROCESS TYPES
+// ==========================================
+app.put('/api/process-types/:id', async (req, res) => {
+  const { process_name } = req.body;
+  try {
+    await pool.query('UPDATE public.process_type SET process_name = $1 WHERE p_id = $2', [process_name, req.params.id]);
+    res.status(200).json({ message: 'Workflow updated successfully' });
+  } catch (error) { res.status(500).json({ error: 'Server error' }); }
+});
+
+app.delete('/api/process-types/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM public.process_type WHERE p_id = $1', [req.params.id]);
+    res.status(200).json({ message: 'Workflow deleted successfully' });
+  } catch (error) { res.status(500).json({ error: 'Cannot delete: There are active documents currently using this workflow.' }); }
+});
+
+// ==========================================
+// 28.5 EDIT ROUTE SEQUENCE FOR WORKFLOW
+// ==========================================
+app.put('/api/process-types/:id/route', async (req, res) => {
+  const processId = req.params.id;
+  const { stops } = req.body;
+
+  if (!Array.isArray(stops) || stops.length < 2) {
+    return res.status(400).json({ error: 'A route must have at least 2 stops.' });
+  }
+  if (stops.includes(null) || stops.includes(undefined)) {
+    return res.status(400).json({ error: 'All stops must be valid offices.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Find the routing ID linked to this process
+    const processResult = await client.query('SELECT r_id FROM public.process_type WHERE p_id = $1', [processId]);
+    if (processResult.rows.length === 0) throw new Error("Process not found");
+    const r_id = processResult.rows[0].r_id;
+
+    // Pad the sequence to match the 7-stop column structure in DB
+    const paddedStops = [...stops, ...Array(7 - stops.length).fill(null)];
+
+    await client.query(
+      `UPDATE public.route 
+       SET stop_1=$1, stop_2=$2, stop_3=$3, stop_4=$4, stop_5=$5, stop_6=$6, stop_7=$7 
+       WHERE r_id = $8`,
+      [...paddedStops, r_id]
+    );
+
+    await client.query('COMMIT');
+    res.status(200).json({ message: 'Route updated successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Update Route Error:', error);
+    res.status(500).json({ error: 'Server error' });
+  } finally {
+    client.release();
+  }
+});
 
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
