@@ -11,26 +11,32 @@ export const fetchWithAuth = async (url, options = {}) => {
   };
 
   const response = await fetch(url, { ...options, headers });
-  const data = await response.json();
+  
+  // Clone the response to read it for the interceptor 
+  // without locking the data stream for your components.
+  const clonedResponse = response.clone();
+  
+  try {
+    const data = await clonedResponse.json();
 
-  // 🚨 THE KICK-OUT INTERCEPTOR: Checks if another device logged in
-  if (response.status === 401 && data.forceLogout) {
-    Swal.fire({
-      title: '⚠️ Session Expired',
-      text: 'You have been logged out because your account was accessed from another device or location.',
-      icon: 'warning',
-      confirmButtonColor: '#800000',
-      allowOutsideClick: false
-    }).then(() => {
-      localStorage.clear(); // Wipe saved credentials
-      window.location.href = '/login'; // Boot them back to the login screen
-    });
-    throw new Error('Session terminated by concurrent login.');
+    // 🚨 THE KICK-OUT INTERCEPTOR: Checks if another device logged in
+    if (response.status === 401 && data.forceLogout) {
+      Swal.fire({
+        title: '⚠️ Session Expired',
+        text: 'You have been logged out because your account was accessed from another device or location.',
+        icon: 'warning',
+        confirmButtonColor: '#800000',
+        allowOutsideClick: false
+      }).then(() => {
+        localStorage.clear(); // Wipe saved credentials
+        window.location.href = '/login'; // Boot them back to the login screen
+      });
+      throw new Error('Session terminated by concurrent login.');
+    }
+  } catch (err) {
+    // Fails silently if the response body is empty or not JSON
   }
 
-  if (!response.ok) {
-    throw new Error(data.error || 'Request failed');
-  }
-
-  return data;
+  // Return the raw response object so res.json() and res.ok function perfectly in your views
+  return response;
 };

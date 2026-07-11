@@ -542,6 +542,7 @@ app.post('/api/documents/scan-in', requireAuth, async (req, res) => {
       JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
       JOIN public.offices off ON pd.current_office_id = off.o_id
       WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
     `, [qrCode]);
 
     if (docRes.rows.length === 0) {
@@ -588,12 +589,14 @@ app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
     const processorOfficeId = procRes.rows[0]?.o_id;
 
     // 1. Fetch current document state along with its numeric status ID (s_id)
+    // FIX: Added pd.current_office_id to the SELECT statement
     const checkStatusRes = await pool.query(`
-      SELECT pd.pd_id, pd.time_in, pd.s_id, st.current_status, pd.next_office_id, pd.ini_id, idoc.title
+      SELECT pd.pd_id, pd.time_in, pd.s_id, st.current_status, pd.current_office_id, pd.next_office_id, pd.ini_id, idoc.title
       FROM public.processed_document pd
       JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
       JOIN public.status st ON pd.s_id = st.s_id
       WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
     `, [qrCode]);
 
     if (checkStatusRes.rows.length === 0) {
@@ -658,45 +661,65 @@ app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
     `, [currentActiveStep.ini_id]);
 
     const r = routeRes.rows[0];
-    let foundNextStop = null;
-    let targetCurrentOffice = currentActiveStep.next_office_id || adhocData.current_office_id;
 
-    if (r && !adhocData.is_adhoc) {
-      const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
-      const currentIndex = sequence.indexOf(targetCurrentOffice);
-      if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
-        foundNextStop = sequence[currentIndex + 1];
-      }
-    }
-
+    // ==========================================================
+    // 1. AD-HOC RETURN TRIP LOGIC
+    // ==========================================================
     if (adhocData && adhocData.is_adhoc) {
+      // Clock out of Transferred Office (Office B)
       await pool.query(`
         UPDATE public.processed_document 
         SET time_out = TIMEZONE('Asia/Manila', NOW()) 
         WHERE pd_id = $1
       `, [currentActiveStep.pd_id]);
 
+      // UNFREEZE Original Office (Office A) back to pending (s_id = 1)
       await pool.query(`
-        INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, is_returned_from_adhoc, time_in)
-        VALUES ($1, 1, $2, NULL, true, NULL)
+        UPDATE public.processed_document 
+        SET s_id = 1
+        WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
       `, [currentActiveStep.ini_id, adhocData.adhoc_return_office_id]);
-    } else if (!foundNextStop) {
-      await pool.query(`
-        UPDATE public.processed_document 
-        SET time_out = TIMEZONE('Asia/Manila', NOW()), s_id = 5
-        WHERE pd_id = $1
-      `, [currentActiveStep.pd_id]);
+      
     } else {
-      await pool.query(`
-        UPDATE public.processed_document 
-        SET time_out = TIMEZONE('Asia/Manila', NOW()) 
-        WHERE pd_id = $1
-      `, [currentActiveStep.pd_id]);
+      // ==========================================================
+      // 2. NORMAL 7-STOP ROUTING LOGIC
+      // ==========================================================
+      const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
+      
+      // Look for the office we are CURRENTLY scanning out of
+      const currentIndex = sequence.indexOf(currentActiveStep.current_office_id);
+      
+      let nextStopToReceive = null;
+      let followingStop = null;
 
-      await pool.query(`
-        INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
-        VALUES ($1, 1, $2, $3, NULL)
-      `, [currentActiveStep.ini_id, targetCurrentOffice, foundNextStop]);
+      if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
+        nextStopToReceive = sequence[currentIndex + 1]; // The immediate next stop
+        if (currentIndex + 2 < sequence.length) {
+          followingStop = sequence[currentIndex + 2]; // The stop after next (for UI display)
+        }
+      }
+
+      if (!nextStopToReceive) {
+        // If there is no next stop, the document has finished its ENTIRE route!
+        await pool.query(`
+          UPDATE public.processed_document 
+          SET time_out = TIMEZONE('Asia/Manila', NOW()), s_id = 5
+          WHERE pd_id = $1
+        `, [currentActiveStep.pd_id]);
+      } else {
+        // Clock out of current office
+        await pool.query(`
+          UPDATE public.processed_document 
+          SET time_out = TIMEZONE('Asia/Manila', NOW()) 
+          WHERE pd_id = $1
+        `, [currentActiveStep.pd_id]);
+
+        // Push to the next office in the sequence
+        await pool.query(`
+          INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
+          VALUES ($1, 1, $2, $3, NULL)
+        `, [currentActiveStep.ini_id, nextStopToReceive, followingStop]);
+      }
     }
 
     if (processorOfficeId) {
@@ -711,6 +734,58 @@ app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Scan-Out Error:", err);
     res.status(500).json({ error: "Internal Server Error checking out document." });
+  }
+});
+
+// ==========================================
+// AD-HOC VERIFICATION DETOUR ENDPOINT
+// ==========================================
+app.post('/api/processor/documents/ad-hoc', requireAuth, async (req, res) => {
+  const { iniId, targetOfficeId, currentOfficeId, executorUserId } = req.body;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const activeRes = await client.query(`
+      SELECT pd_id, time_in 
+      FROM public.processed_document 
+      WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL
+    `, [iniId, currentOfficeId]);
+
+    if (activeRes.rows.length === 0) throw new Error("Active document track not found in your office.");
+    const activeStep = activeRes.rows[0];
+
+    if (activeStep.time_in === null) throw new Error("Cannot route detour: Document must be Scanned-In to your office first.");
+
+    // PATCH 1: Do NOT clock out Office A. Just change status to In Verification (s_id = 2).
+    await client.query(`
+      UPDATE public.processed_document 
+      SET s_id = 2
+      WHERE pd_id = $1
+    `, [activeStep.pd_id]);
+
+    // Insert Office B's new record
+    await client.query(`
+      INSERT INTO public.processed_document 
+      (ini_id, s_id, current_office_id, next_office_id, is_adhoc, adhoc_return_office_id, time_in)
+      VALUES ($1, 1, $2, NULL, true, $3, NULL)
+    `, [iniId, targetOfficeId, currentOfficeId]);
+
+    await client.query(`
+      INSERT INTO public.office_action_history 
+      (ini_id, u_id, o_id, action_type, action_timestamp)
+      VALUES ($1, $2, $3, 'Ad-Hoc Detour Routed', TIMEZONE('Asia/Manila', NOW()))
+    `, [iniId, executorUserId, currentOfficeId]);
+
+    await client.query('COMMIT');
+    res.json({ message: "Detour active. Document transferred to target office for verification." });
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message || "Failed to process ad-hoc detour route." });
+  } finally {
+    client.release();
   }
 });
 

@@ -388,7 +388,10 @@ export default function SigneeDashboard() {
 
   const pendingDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'pending' && !d.time_out);
   const signedDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'signed' || d.status?.toLowerCase() === 'completed');
-  const verificationDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'in verification' || d.current_step_is_adhoc);
+  const verificationDocsList = pipelineDocs.filter(d => 
+    d.status?.toLowerCase() === 'in verification' || 
+    ((d.current_step_is_adhoc || d.is_adhoc) && d.current_office !== signeeOfficeName)
+  );
   const sentBackDocsList = pipelineDocs.filter(d => d.status?.toLowerCase() === 'action required');
 
   const filteredDashDocs = pendingDocsList.filter(doc => 
@@ -399,7 +402,7 @@ export default function SigneeDashboard() {
     const matchesSearch = doc.title?.toLowerCase().includes(search.toLowerCase()) || doc.qr_code?.toLowerCase().includes(search.toLowerCase());
     if (filterStatus === 'Pending') return matchesSearch && doc.status?.toLowerCase() === 'pending' && !doc.time_out;
     if (filterStatus === 'Signed') return matchesSearch && (doc.status?.toLowerCase() === 'signed' || doc.status?.toLowerCase() === 'completed');
-    if (filterStatus === 'In Verification') return matchesSearch && (doc.status?.toLowerCase() === 'in verification' || doc.current_step_is_adhoc);
+    if (filterStatus === 'In Verification') return matchesSearch && (doc.status?.toLowerCase() === 'in verification' || ((doc.current_step_is_adhoc || doc.is_adhoc) && doc.current_office !== signeeOfficeName));    
     if (filterStatus === 'Action Required') return matchesSearch && doc.status?.toLowerCase() === 'action required';
     return matchesSearch;
   });
@@ -418,7 +421,7 @@ export default function SigneeDashboard() {
   const currentHistoryPageRows = filteredHistoryLogs.slice((historyPage - 1) * itemsPerPage, historyPage * itemsPerPage);
   const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
-  const isInVerification = selectedDoc?.status?.toLowerCase() === 'in verification' || selectedDoc?.current_step_is_adhoc || selectedDoc?.is_adhoc;
+  const isInVerification = selectedDoc?.status?.toLowerCase() === 'in verification' || ((selectedDoc?.current_step_is_adhoc || selectedDoc?.is_adhoc) && selectedDoc?.current_office !== signeeOfficeName);
   const isAwaitingScanIn = selectedDoc && !selectedDoc.time_in;
   const isActionAltered = selectedDoc && (selectedDoc.status?.toLowerCase() === 'signed' || selectedDoc.status?.toLowerCase() === 'completed' || selectedDoc.status?.toLowerCase() === 'action required');
 
