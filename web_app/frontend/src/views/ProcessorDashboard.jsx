@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Swal from 'sweetalert2';
 import { LayoutDashboard, FileText, History, Bell, User, Search, Filter, X, QrCode, LogOut, Camera, KeyRound, ShieldCheck, Building, Landmark } from 'lucide-react';
 import { fetchWithAuth } from '../api';
+
+const minimalSwal = Swal.mixin({
+  customClass: {
+    confirmButton: 'px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-red-800 hover:bg-red-900 shadow-md mx-2',
+    cancelButton: 'px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-neutral-600 border border-neutral-200 bg-white hover:bg-neutral-50 mx-2',
+    popup: 'rounded-3xl border border-neutral-100 shadow-2xl',
+    title: 'text-lg font-black text-neutral-900',
+    htmlContainer: 'text-sm font-medium text-neutral-500'
+  },
+  buttonsStyling: false
+});
 
 export default function ProcessorDashboard() {
   const navigate = useNavigate();
@@ -74,10 +86,24 @@ export default function ProcessorDashboard() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = () => {
+    minimalSwal.fire({
+      title: 'Sign Out?',
+      text: 'Are you sure you want to securely end your session?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Sign Out'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        localStorage.clear();
+        navigate('/login');
+      }
+    });
+  };
+
   const fetchLiveNotificationFeeds = async () => {
     if (!processorOfficeId) return;
     try {
-      // roleId = 2 signifies a Processor account
       const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/2/${processorOfficeId}`);
       const data = await res.json();
       if (res.ok) {
@@ -185,16 +211,20 @@ export default function ProcessorDashboard() {
         })
       });
       if (res.ok) {
-        alert("🟢 Profile information synchronized successfully!");
+        minimalSwal.fire({ icon: 'success', title: 'Profile Updated', text: 'Profile information synchronized successfully!' });
         localStorage.setItem('user', profileName);
         fetchProcessorMeta();
       }
-    } catch (err) { alert("Failed to save changes."); }
+    } catch (err) { 
+      minimalSwal.fire({ icon: 'error', title: 'Update Failed', text: 'Failed to save changes.' }); 
+    }
   };
 
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmPassword) return alert("New passwords do not match.");
+    if (newPassword !== confirmPassword) {
+      return minimalSwal.fire({ icon: 'warning', title: 'Mismatch', text: 'New passwords do not match.' });
+    }
     try {
       const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/password`, {
         method: 'PUT',
@@ -203,15 +233,17 @@ export default function ProcessorDashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert("🟢 Password updated cleanly.");
+        minimalSwal.fire({ icon: 'success', title: 'Password Updated', text: 'Security credentials updated cleanly.' });
         setShowPassModal(false);
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
       } else {
-        alert(`🔴 ${data.error}`);
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: data.error });
       }
-    } catch (err) { alert("Failed to change credentials record."); }
+    } catch (err) { 
+      minimalSwal.fire({ icon: 'error', title: 'Update Failed', text: 'Failed to change credentials record.' }); 
+    }
   };
 
   const toggle2FA = async (checked) => {
@@ -230,7 +262,7 @@ export default function ProcessorDashboard() {
         });
         if (res.ok) {
           setTwoFaCode('');
-          alert("🔓 Two-Factor Authentication disabled.");
+          minimalSwal.fire({ icon: 'info', title: 'Security Update', text: 'Two-Factor Authentication disabled.' });
         }
       } catch (err) { console.error(err); }
     }
@@ -239,7 +271,7 @@ export default function ProcessorDashboard() {
   const handleSaveCustomPin = async (e) => {
     e.preventDefault();
     if (twoFaCode.length < 4 || twoFaCode.length > 6 || isNaN(twoFaCode)) {
-      return alert("Please enter a valid 4-6 digit numeric security PIN code.");
+      return minimalSwal.fire({ icon: 'warning', title: 'Invalid PIN', text: 'Please enter a valid 4-6 digit numeric security PIN code.' });
     }
     try {
       const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
@@ -253,10 +285,12 @@ export default function ProcessorDashboard() {
         })
       });
       if (res.ok) {
-        alert("🔒 Custom security PIN configured successfully!");
+        minimalSwal.fire({ icon: 'success', title: 'PIN Configured', text: 'Custom security PIN configured successfully!' });
         fetchProcessorMeta();
       }
-    } catch (err) { alert("Failed to save security configuration."); }
+    } catch (err) { 
+      minimalSwal.fire({ icon: 'error', title: 'Configuration Failed', text: 'Failed to save security configuration.' }); 
+    }
   };
 
   const handleOpenDashboardDetails = (doc) => {
@@ -273,7 +307,9 @@ export default function ProcessorDashboard() {
 
   const handleExecuteAdHocDetour = async (e) => {
     e.preventDefault();
-    if (!selectedAdHocOffice) return alert("Please select a target verification destination office step first.");
+    if (!selectedAdHocOffice) {
+      return minimalSwal.fire({ icon: 'warning', title: 'Required', text: 'Please select a target verification destination office step first.' });
+    }
     
     setIsAdHocProcessing(true);
     try {
@@ -289,20 +325,24 @@ export default function ProcessorDashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`🟢 Detour Activated: ${data.message}`);
+        minimalSwal.fire({ icon: 'success', title: 'Detour Activated', text: data.message });
         setShowPipelineModal(false);
         setSelectedAdHocOffice('');
         fetchProcessorMeta();
       } else {
-        alert(`🔴 ${data.error}`);
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: data.error });
       }
-    } catch (err) { alert("Network communication error routing detour."); }
+    } catch (err) { 
+      minimalSwal.fire({ icon: 'error', title: 'Network Error', text: 'Network communication error routing detour.' }); 
+    }
     finally { setIsAdHocProcessing(false); }
   };
 
   const executeSimulatedScanner = async (e) => {
     e.preventDefault();
-    if (!simulatedQrInput.trim()) return alert("Please type or scan a valid reference token string first.");
+    if (!simulatedQrInput.trim()) {
+      return minimalSwal.fire({ icon: 'warning', title: 'Input Required', text: 'Please type or scan a valid reference token string first.' });
+    }
     const targetUrl = scanMode === 'time-in' 
       ? 'http://localhost:5000/api/documents/scan-in' 
       : 'http://localhost:5000/api/documents/scan-out';
@@ -315,14 +355,16 @@ export default function ProcessorDashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert(`🟢 Transaction Approved:\n${data.message}`);
+        minimalSwal.fire({ icon: 'success', title: 'Transaction Approved', text: data.message });
         setShowScannerModal(false);
         setSimulatedQrPayload('');
         fetchProcessorMeta();
       } else {
-        alert(`🔴 ${data.error || 'Processing verification failed.'}`);
+        minimalSwal.fire({ icon: 'error', title: 'Rejection', text: data.error || 'Processing verification failed.' });
       }
-    } catch (err) { alert("Failed to establish server authentication checks."); }
+    } catch (err) { 
+      minimalSwal.fire({ icon: 'error', title: 'Network Error', text: 'Failed to establish server authentication checks.' }); 
+    }
   };
 
   const getRouteStopsArray = (doc) => {
@@ -437,7 +479,7 @@ export default function ProcessorDashboard() {
           </button>
           
           <div className="border-t border-neutral-700 pt-4">
-            <button onClick={() => { localStorage.clear(); navigate('/login'); }} className="w-full flex items-center gap-3 px-3 py-2 text-sm text-neutral-400 hover:text-red-400 font-semibold transition-colors">
+            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-3 py-2 text-sm text-neutral-400 hover:text-red-400 font-semibold transition-colors">
               <LogOut size={16} /> Sign Out
             </button>
           </div>
@@ -987,10 +1029,19 @@ export default function ProcessorDashboard() {
             <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
               <div className="space-y-5 flex flex-col justify-between">
                 <div className="space-y-4">
+                  
+                  {/* STACKED REFERENCE NUM & DATE CREATED */}
                   <div>
                     <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Reference Number</span>
                     <h4 className="text-sm font-black text-red-800 font-mono tracking-wide mt-0.5">{selectedDoc.qr_code}</h4>
                   </div>
+                  <div>
+                    <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Date Created</span>
+                    <p className="text-xs font-black text-neutral-800 mt-0.5">
+                      {selectedDoc.created_at ? new Date(selectedDoc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                    </p>
+                  </div>
+
                   <div>
                     <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider block">Subject</span>
                     <p className="text-xs font-bold text-neutral-700 leading-normal mt-0.5">{selectedDoc.title}</p>

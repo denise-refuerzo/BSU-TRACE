@@ -283,6 +283,7 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
              idoc.title, 
              idoc.edc, 
              idoc.qr_code, 
+             idoc.created_at,
              pt.process_name,
              curr_o.office_name as current_office, 
              next_o.office_name as next_office, 
@@ -293,7 +294,17 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
                WHERE ini_id = idoc.ini_id AND action_type LIKE 'Sent Back for Revision:%'
                ORDER BY history_id DESC 
                LIMIT 1
-             ) as last_action
+             ) as last_action,
+             (
+               SELECT json_agg(json_build_object(
+                 'office_name', off2.office_name,
+                 'time_in', p2.time_in,
+                 'time_out', p2.time_out
+               ))
+               FROM public.processed_document p2
+               JOIN public.offices off2 ON p2.current_office_id = off2.o_id
+               WHERE p2.ini_id = idoc.ini_id
+             ) as history_logs
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       LEFT JOIN public.processed_document pdoc ON idoc.ini_id = pdoc.ini_id
@@ -453,6 +464,7 @@ app.get('/api/processor/documents/:officeId', requireAuth, async (req, res) => {
         idoc.title, 
         idoc.edc, 
         idoc.qr_code, 
+        idoc.created_at, 
         pt.process_name,
         INITCAP(st.current_status) as status,
         curr_o.office_name as current_office, 
@@ -492,6 +504,7 @@ app.get('/api/processor/documents/pipeline/:officeId', requireAuth, async (req, 
         idoc.title, 
         idoc.edc, 
         idoc.qr_code, 
+        idoc.created_at, 
         pt.process_name,
         INITCAP(st.current_status) as status,
         orig_o.office_name as originating_office,
@@ -803,6 +816,7 @@ app.get('/api/processor/history/:officeId', requireAuth, async (req, res) => {
         idoc.qr_code,
         idoc.ini_id,
         idoc.edc,
+        idoc.created_at, 
         pt.process_name,
         COALESCE(INITCAP(st.current_status), 'Active Path') as status,
         curr_o.office_name as current_office,

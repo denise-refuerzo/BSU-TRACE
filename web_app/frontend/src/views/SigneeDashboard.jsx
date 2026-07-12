@@ -22,6 +22,17 @@ import {
 } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
+const minimalSwal = Swal.mixin({
+  customClass: {
+    confirmButton: 'px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-red-800 hover:bg-red-900 shadow-md mx-2',
+    cancelButton: 'px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-neutral-600 border border-neutral-200 bg-white hover:bg-neutral-50 mx-2',
+    popup: 'rounded-3xl border border-neutral-100 shadow-2xl',
+    title: 'text-lg font-black text-neutral-900',
+    htmlContainer: 'text-sm font-medium text-neutral-500'
+  },
+  buttonsStyling: false
+});
+
 export default function SigneeDashboard() {
   const navigate = useNavigate();
   const notificationRef = useRef(null);
@@ -91,10 +102,24 @@ export default function SigneeDashboard() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = () => {
+    minimalSwal.fire({
+      title: 'Sign Out?',
+      text: 'Are you sure you want to securely end your session?',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Sign Out'
+    }).then((result) => {
+      if (result.isConfirmed) {
+        localStorage.clear();
+        navigate('/login');
+      }
+    });
+  };
+
   const fetchLiveNotificationFeeds = async () => {
     if (!signeeOfficeId) return;
     try {
-      // roleId = 3 signifies a Signee account
       const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/3/${signeeOfficeId}`);
       const data = await res.json();
       if (res.ok) {
@@ -189,18 +214,20 @@ export default function SigneeDashboard() {
         })
       });
       if (res.ok) {
-        Swal.fire('Success', 'Profile settings updated.', 'success');
+        minimalSwal.fire({ icon: 'success', title: 'Profile Updated', text: 'Profile settings updated.' });
         localStorage.setItem('user', profileName);
         fetchSigneeMeta();
       }
     } catch (err) { 
-      Swal.fire('Error', 'Failed to synchronize profile changes.', 'error'); 
+      minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to synchronize profile changes.' }); 
     }
   };
 
   const handleUpdatePassword = async (e) => {
     e.preventDefault();
-    if (newPassword !== confirmPassword) return Swal.fire('Mismatch', 'New passwords do not match.', 'error');
+    if (newPassword !== confirmPassword) {
+      return minimalSwal.fire({ icon: 'warning', title: 'Mismatch', text: 'New passwords do not match.' });
+    }
     try {
       const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/password`, {
         method: 'PUT',
@@ -209,16 +236,16 @@ export default function SigneeDashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        Swal.fire('Success', 'Security credentials updated cleanly.', 'success');
+        minimalSwal.fire({ icon: 'success', title: 'Password Updated', text: 'Security credentials updated cleanly.' });
         setShowPassModal(false);
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
       } else {
-        Swal.fire('Error', data.error || 'Password update rejected.', 'error');
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: data.error || 'Password update rejected.' });
       }
     } catch (err) { 
-      Swal.fire('Error', 'Failed to modify database records.', 'error'); 
+      minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to modify database records.' }); 
     }
   };
 
@@ -238,7 +265,7 @@ export default function SigneeDashboard() {
         });
         if (res.ok) {
           setTwoFaCode('');
-          Swal.fire('Security Update', 'Two-Factor PIN verification disabled.', 'info');
+          minimalSwal.fire({ icon: 'info', title: 'Security Update', text: 'Two-Factor PIN verification disabled.' });
         }
       } catch (err) { console.error(err); }
     }
@@ -247,7 +274,7 @@ export default function SigneeDashboard() {
   const handleSaveCustomPin = async (e) => {
     e.preventDefault();
     if (twoFaCode.length < 4 || twoFaCode.length > 6 || isNaN(twoFaCode)) {
-      return Swal.fire('Invalid PIN', 'PIN must be a 4-6 digit numeric code.', 'error');
+      return minimalSwal.fire({ icon: 'warning', title: 'Invalid PIN', text: 'PIN must be a 4-6 digit numeric code.' });
     }
     try {
       const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
@@ -261,10 +288,10 @@ export default function SigneeDashboard() {
         })
       });
       if (res.ok) {
-        Swal.fire('Success', 'Custom security authentication PIN configured.', 'success');
+        minimalSwal.fire({ icon: 'success', title: 'PIN Configured', text: 'Custom security authentication PIN configured.' });
         fetchSigneeMeta();
       }
-    } catch (err) { Swal.fire('Error', 'Failed to update credentials security PIN.', 'error'); }
+    } catch (err) { minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to update credentials security PIN.' }); }
   };
 
   const handleOpenDetails = (doc, fromHistory = false) => {
@@ -280,13 +307,11 @@ export default function SigneeDashboard() {
   const handleSignDocument = async () => {
     if (!selectedDoc) return;
 
-    Swal.fire({
-      title: 'Are you sure you want to sign?',
+    minimalSwal.fire({
+      title: 'Confirm Signature',
       text: `This will certify "${selectedDoc.title || selectedDoc.document_title}" and advance it to the next office stage.`,
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonColor: '#991b1b',
-      cancelButtonColor: '#4b5563',
       confirmButtonText: 'Yes, Sign Document',
       cancelButtonText: 'Cancel'
     }).then(async (result) => {
@@ -304,12 +329,12 @@ export default function SigneeDashboard() {
           });
           
           if (res.ok) {
-            Swal.fire('Successfully Signed!', 'The document identity seal has been committed. Processors can now check it out.', 'success');
+            minimalSwal.fire({ icon: 'success', title: 'Successfully Signed!', text: 'The document identity seal has been committed. Processors can now check it out.' });
             setShowDetailsModal(false);
             fetchSigneeMeta();
           }
         } catch (err) {
-          Swal.fire('Error', 'Failed sequence commitment tracking link.', 'error');
+          minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed sequence commitment tracking link.' });
         } finally {
           setIsActionProcessing(false);
         }
@@ -335,12 +360,12 @@ export default function SigneeDashboard() {
       });
 
       if (res.ok) {
-        Swal.fire('Document Sent Back', 'The file has been frozen with Action Required status flags.', 'success');
+        minimalSwal.fire({ icon: 'success', title: 'Document Sent Back', text: 'The file has been frozen with Action Required status flags.' });
         setShowDetailsModal(false);
         fetchSigneeMeta();
       }
     } catch (err) {
-      Swal.fire('Error', 'Failed to commit document updates.', 'error');
+      minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to commit document updates.' });
     } finally {
       setIsActionProcessing(false);
     }
@@ -348,7 +373,9 @@ export default function SigneeDashboard() {
 
   const handleExecuteAdHocDetour = async (e) => {
     e.preventDefault();
-    if (!selectedAdHocOffice) return Swal.fire('Error', 'Please select a destination campus unit.', 'error');
+    if (!selectedAdHocOffice) {
+      return minimalSwal.fire({ icon: 'warning', title: 'Required', text: 'Please select a destination campus unit.' });
+    }
     
     setIsActionProcessing(true);
     try {
@@ -363,12 +390,12 @@ export default function SigneeDashboard() {
         })
       });
       if (res.ok) {
-        Swal.fire('Detour Routed', 'Ad-hoc validation checkpoint successfully injected.', 'success');
+        minimalSwal.fire({ icon: 'success', title: 'Detour Routed', text: 'Ad-hoc validation checkpoint successfully injected.' });
         setShowDetailsModal(false);
         fetchSigneeMeta();
       }
     } catch (err) { 
-      Swal.fire('Error', 'Ad-hoc communication assignment breakdown.', 'error'); 
+      minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Ad-hoc communication assignment breakdown.' }); 
     } finally { 
       setIsActionProcessing(false); 
     }
@@ -457,7 +484,7 @@ export default function SigneeDashboard() {
             <p className="text-xs font-black text-white truncate">{userName}</p>
             <p className="text-[9px] text-neutral-400 font-bold uppercase truncate">{signeeOfficeName}</p>
           </div>
-          <button onClick={() => { localStorage.clear(); navigate('/login'); }} className="text-neutral-400 hover:text-red-400 transition-colors"><LogOut size={16} /></button>
+          <button onClick={handleLogout} className="text-neutral-400 hover:text-red-400 transition-colors"><LogOut size={16} /></button>
         </div>
       </div>
 
@@ -867,10 +894,16 @@ export default function SigneeDashboard() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 border-b pb-3">
+                    <div className="grid grid-cols-3 gap-4 border-b pb-3">
                       <div>
                         <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide block">Originating Office</span>
                         <p className="font-bold text-neutral-700 mt-1">{docOrigin}</p>
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide block">Date Created</span>
+                        <p className="font-bold text-neutral-700 mt-1">
+                          {selectedDoc.created_at ? new Date(selectedDoc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
+                        </p>
                       </div>
                       <div>
                         <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide block">Next Office Stop</span>

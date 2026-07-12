@@ -74,7 +74,6 @@ export default function DocumentsHub({
     if (!doc || !stops || stops.length <= 1) return 0;
     if (doc.status?.toLowerCase() === 'completed') return 100;
     
-    // If halted, lock progress representation to the current station visually
     const currentIndex = stops.indexOf(doc.current_office);
     if (currentIndex === -1) return 0;
     
@@ -102,7 +101,6 @@ export default function DocumentsHub({
             </span>
           </div>
 
-          {/* EXPLICIT SIGNEE FEEDBACK ERROR NOTICE BOX */}
           {selectedDoc.status?.toLowerCase() === 'action required' && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3 text-xs text-red-800 font-medium">
               <AlertTriangle className="w-4 h-4 text-red-700 flex-shrink-0 mt-0.5" />
@@ -260,7 +258,6 @@ export default function DocumentsHub({
           </table>
         </div>
 
-        {/* Pagination Controls */}
         {totalPages > 1 && (
           <div className="p-4 border-t border-neutral-100 flex items-center justify-between bg-neutral-50/50">
             <span className="text-xs text-neutral-500">
@@ -324,8 +321,10 @@ export default function DocumentsHub({
                       <p className="text-xs font-black font-mono text-red-800 tracking-wider mt-0.5">{activeDetailsDoc.qr_code}</p>
                     </div>
                     <div>
-                      <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Requestor</span>
-                      <p className="text-xs font-bold text-neutral-700 mt-0.5">{userName} <span className="text-neutral-400 font-normal">(Faculty)</span></p>
+                      <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Date Created</span>
+                      <p className="text-xs font-bold text-neutral-700 mt-0.5">
+                        {activeDetailsDoc.created_at ? new Date(activeDetailsDoc.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) + ', ' + new Date(activeDetailsDoc.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                      </p>
                     </div>
                   </div>
 
@@ -374,6 +373,11 @@ export default function DocumentsHub({
                     const isCurrent = stop === activeDetailsDoc?.current_office && !isCompletedAll;
                     const isPast = isCompletedAll || (currentOfficeIdx !== -1 && i <= currentOfficeIdx);
 
+                    const stopLog = activeDetailsDoc?.history_logs?.find(log => log.office_name === stop);
+                    const formatTime = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : null;
+                    const timeIn = formatTime(stopLog?.time_in);
+                    const timeOut = formatTime(stopLog?.time_out);
+
                     return (
                       <div key={i} className="relative flex flex-col">
                         <div className={`absolute -left-[23px] top-0.5 w-3.5 h-3.5 rounded-full border-2 bg-white flex items-center justify-center transition-all z-10 ${
@@ -383,15 +387,38 @@ export default function DocumentsHub({
                         }`}>
                           {isCurrent && isHalted ? '✕' : isPast && <div className="w-1 h-1 bg-white rounded-full"></div>}
                         </div>
-                        <p className={`text-xs font-bold leading-none ${
-                          isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'
-                        }`}>
-                          {stop}
-                        </p>
-                        <span className="text-[10px] text-gray-400 mt-1 font-medium">
-                          {isCurrent && isHalted ? '🛑 Route Halted Here for Revision Notes' : 
-                           isCurrent ? 'Under Active Review' : isPast ? 'Completed signature verification step' : 'Awaiting structural arrival queue'}
-                        </span>
+                        
+                        <div className="flex justify-between items-start gap-4">
+                          <div>
+                            <p className={`text-xs font-bold leading-none ${
+                              isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'
+                            }`}>
+                              {stop}
+                            </p>
+                            <span className="text-[10px] text-gray-400 mt-1.5 font-medium block">
+                              {isCurrent && isHalted ? '🛑 Route Halted Here for Revision Notes' : 
+                               isCurrent ? 'Under Active Review' : isPast ? 'Completed signature verification step' : 'Awaiting structural arrival queue'}
+                            </span>
+                          </div>
+
+                          {(timeIn || timeOut || isCurrent) && (
+                            <div className="text-right flex flex-col items-end gap-1 flex-shrink-0">
+                              {timeIn ? (
+                                <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
+                                  IN: {timeIn}
+                                </span>
+                              ) : (
+                                isCurrent && <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shadow-xs uppercase tracking-tight">Awaiting Scan In</span>
+                              )}
+                              
+                              {timeOut && (
+                                <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
+                                  OUT: {timeOut}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
