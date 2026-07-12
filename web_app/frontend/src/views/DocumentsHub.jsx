@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle } from 'lucide-react';
+import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
 export default function DocumentsHub({ 
@@ -18,6 +18,10 @@ export default function DocumentsHub({
   const [filterStatus, setFilterStatus] = useState('All');
   const [activeRouteStops, setActiveRouteStops] = useState([]);
 
+  // Pagination State for Documents Hub
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
   useEffect(() => {
     if (documents.length > 0 && !selectedDoc) {
       handleSelectDocument(documents[0]);
@@ -26,6 +30,11 @@ export default function DocumentsHub({
       if (updatedDoc) handleSelectDocument(updatedDoc);
     }
   }, [documents]);
+
+  // Reset pagination when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterStatus]);
 
   const handleSelectDocument = (doc) => {
     setSelectedDoc(doc);
@@ -54,6 +63,12 @@ export default function DocumentsHub({
     const matchesStatus = filterStatus === 'All' || doc.status?.toLowerCase() === filterStatus.toLowerCase();
     return matchesSearch && matchesStatus;
   });
+
+  // Pagination Logic
+  const indexOfLastDoc = currentPage * itemsPerPage;
+  const indexOfFirstDoc = indexOfLastDoc - itemsPerPage;
+  const currentDocs = filteredDocs.slice(indexOfFirstDoc, indexOfLastDoc);
+  const totalPages = Math.ceil(filteredDocs.length / itemsPerPage);
 
   const getCurrentProgressPercent = (doc, stops) => {
     if (!doc || !stops || stops.length <= 1) return 0;
@@ -154,7 +169,7 @@ export default function DocumentsHub({
         </div>
       )}
 
-      <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
         <div className="p-6 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <h3 className="text-base font-bold text-neutral-950">Recent Submissions</h3>
           <div className="flex flex-wrap items-center gap-2">
@@ -195,7 +210,7 @@ export default function DocumentsHub({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100 font-medium">
-              {filteredDocs.map((doc) => (
+              {currentDocs.map((doc) => (
                 <tr key={doc.ini_id} 
                     onClick={() => handleSelectDocument(doc)}
                     className={`transition-colors cursor-pointer ${selectedDoc?.ini_id === doc.ini_id ? 'bg-red-50/20' : 'hover:bg-neutral-50/80'}`}>
@@ -236,9 +251,39 @@ export default function DocumentsHub({
                   </td>
                 </tr>
               ))}
+              {currentDocs.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="p-8 text-center text-neutral-500 text-xs">No documents found matching your criteria.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="p-4 border-t border-neutral-100 flex items-center justify-between bg-neutral-50/50">
+            <span className="text-xs text-neutral-500">
+              Showing page <span className="font-bold text-neutral-900">{currentPage}</span> of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} 
+                disabled={currentPage === 1}
+                className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-600"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button 
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} 
+                disabled={currentPage === totalPages}
+                className="p-2 border rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-neutral-600"
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showDetailsModal && activeDetailsDoc && (

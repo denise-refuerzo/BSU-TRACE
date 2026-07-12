@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode } from 'lucide-react';
+import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode, ChevronLeft, ChevronRight } from 'lucide-react';
 import DocumentsHub from './DocumentsHub';
 import ResourceScheduler from './ResourceScheduler';
 import { fetchWithAuth } from '../api';
@@ -19,6 +19,10 @@ export default function OriginatorDashboard() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   
+  // Pagination State for Dashboard Ledger
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 5;
+
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
@@ -90,9 +94,13 @@ export default function OriginatorDashboard() {
     return () => clearInterval(alertInterval);
   }, [userId]);
 
+  // Reset pagination when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterStatus]);
+
   const fetchLiveNotificationFeeds = async () => {
     try {
-      // roleId = 1 signifies an Originator account
       const res = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/1/0`);
       const data = await res.json();
       if (res.ok) {
@@ -238,6 +246,12 @@ export default function OriginatorDashboard() {
     return doc.title.toLowerCase().includes(search.toLowerCase()) && (filterStatus === 'All' || doc.status?.toLowerCase() === filterStatus.toLowerCase());
   });
 
+  // Pagination Logic for Ledger
+  const indexOfLastDoc = currentPage * itemsPerPage;
+  const indexOfFirstDoc = indexOfLastDoc - itemsPerPage;
+  const currentLedgerDocs = filteredDocuments.slice(indexOfFirstDoc, indexOfLastDoc);
+  const totalPages = Math.ceil(filteredDocuments.length / itemsPerPage);
+
   const pendingCount = documents.filter(d => d.status?.toLowerCase() === 'pending' || d.status?.toLowerCase() === 'in verification').length;
   const mostRecentDoc = documents[0];
 
@@ -312,7 +326,7 @@ export default function OriginatorDashboard() {
                   <button onClick={() => setActiveTab('profile')} className="mt-4 px-4 py-1.5 w-max bg-red-800 text-white rounded-lg text-xs font-medium hover:bg-red-900">View Profile</button>
                 </div>
                 <div className="xl:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  {[{ label: 'Total Documents', val: documents.length, color: 'text-neutral-900' }, { label: 'Pending Process', val: pendingCount, color: 'text-amber-600' }, { label: 'Action Required', val: 0, color: 'text-red-600' }, { label: 'Completed Log', val: documents.filter(d => d.status?.toLowerCase() === 'completed').length, color: 'text-green-600' }].map((kpi, idx) => (
+                  {[{ label: 'Total Documents', val: documents.length, color: 'text-neutral-900' }, { label: 'Pending Process', val: pendingCount, color: 'text-amber-600' }, { label: 'Action Required', val: documents.filter(d => d.status?.toLowerCase() === 'action required').length, color: 'text-red-600' }, { label: 'Completed Log', val: documents.filter(d => d.status?.toLowerCase() === 'completed').length, color: 'text-green-600' }].map((kpi, idx) => (
                     <div key={idx} className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm text-center">
                       <p className="text-xs font-bold text-neutral-400 uppercase tracking-tight mb-2">{kpi.label}</p>
                       <p className={`text-4xl font-extrabold ${kpi.color}`}>{String(kpi.val).padStart(2, '0')}</p>
@@ -364,7 +378,7 @@ export default function OriginatorDashboard() {
               </div>
             )}
 
-              <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left">
+              <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left flex flex-col">
                 <div className="p-6 border-b border-neutral-100 flex items-center justify-between">
                   <div><h3 className="text-base font-bold text-neutral-950">Document Ledger Matrix</h3></div>
                   <button onClick={() => setShowModal(true)} className="px-4 py-2 bg-red-800 text-white text-xs font-medium rounded-lg flex items-center gap-1.5"><Plus size={14} /> New Document</button>
@@ -373,12 +387,42 @@ export default function OriginatorDashboard() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead><tr className="bg-neutral-50 border-b"><th className="p-4">Title / ID</th><th className="p-4">Workflow Type</th><th className="p-4">Status</th></tr></thead>
                     <tbody>
-                      {filteredDocuments.map(doc => (
+                      {currentLedgerDocs.map(doc => (
                         <tr key={doc.ini_id} className="border-b"><td className="p-4 font-bold">{doc.title}</td><td className="p-4">{doc.process_name}</td><td className="p-4 text-amber-600 font-bold">• {doc.status || 'Active Path'}</td></tr>
                       ))}
+                      {currentLedgerDocs.length === 0 && (
+                        <tr>
+                          <td colSpan="3" className="p-8 text-center text-neutral-500 text-xs">No documents found.</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+                
+                {/* Pagination Controls */}
+                {totalPages > 1 && (
+                  <div className="p-4 border-t border-neutral-100 flex items-center justify-between bg-neutral-50/50">
+                    <span className="text-xs text-neutral-500">
+                      Page <span className="font-bold text-neutral-900">{currentPage}</span> of {totalPages}
+                    </span>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} 
+                        disabled={currentPage === 1}
+                        className="p-1.5 border rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <button 
+                        onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} 
+                        disabled={currentPage === totalPages}
+                        className="p-1.5 border rounded-lg hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -508,6 +552,7 @@ export default function OriginatorDashboard() {
         </div>
       </div>
 
+      {/* Modals... */}
       {showPassModal && (
         <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl border overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
