@@ -1361,5 +1361,33 @@ app.get('/api/notifications/:userId/:roleId/:officeId', requireAuth, async (req,
   }
 });
 
+// FETCH GLOBAL INCOMING COUNT (ALL EXPECTED DOCUMENTS FOR THIS OFFICE)
+app.get('/api/processor/documents/expected-count/:officeId', requireAuth, async (req, res) => {
+  const { officeId } = req.params;
+  try {
+    const query = `
+      SELECT COUNT(DISTINCT idoc.ini_id) as expected_count
+      FROM public.initial_document idoc
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
+      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+        AND COALESCE(pdoc_active.s_id, 1) != 4 
+        AND COALESCE(pdoc_active.s_id, 1) != 5
+        AND NOT EXISTS (
+          SELECT 1 FROM public.processed_document pd_past 
+          WHERE pd_past.ini_id = idoc.ini_id 
+            AND pd_past.current_office_id = $1 
+            AND pd_past.time_out IS NOT NULL
+        )
+    `;
+    const result = await pool.query(query, [parseInt(officeId)]);
+    res.json({ count: parseInt(result.rows[0].expected_count, 10) });
+  } catch (err) {
+    console.error("Expected incoming documents count error:", err);
+    res.status(500).json({ error: "Failed to compile incoming documents KPI." });
+  }
+});
+
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 Core backend subsystem running on port ${PORT}`));

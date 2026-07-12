@@ -27,6 +27,7 @@ export default function ProcessorDashboard() {
   const [notifications, setNotifications] = useState([]);
   
   const [incomingDocs, setIncomingDocs] = useState([]);
+  const [expectedIncomingCount, setExpectedIncomingCount] = useState(0);
   const [pipelineDocs, setPipelineDocs] = useState([]);  
   const [actionHistory, setActionHistory] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
@@ -135,12 +136,22 @@ export default function ProcessorDashboard() {
         setTwoFaCode(data.two_fa_code || '');
 
         fetchIncomingDocumentLogs(data.o_id);
+        fetchExpectedIncomingCount(data.o_id);
         fetchPipelineDocs(data.o_id);
         fetchOfficeActionHistory(data.o_id);
       }
     } catch (err) { 
       console.error("Error connecting metadata:", err); 
     }
+  };
+
+  const fetchExpectedIncomingCount = async (officeId) => {
+    if (!officeId) return;
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/processor/documents/expected-count/${officeId}`);
+      const data = await res.json();
+      if (res.ok) setExpectedIncomingCount(data.count);
+    } catch (err) { console.error("Expected incoming sync error:", err); }
   };
 
   const fetchIncomingDocumentLogs = async (officeId) => {
@@ -440,7 +451,7 @@ export default function ProcessorDashboard() {
   const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
   const awaitingScanInCount = incomingDocs.filter(d => d.time_in === null || d.time_in === undefined).length;
-  const pendingCount = incomingDocs.length;
+  const pendingCount = incomingDocs.filter(d => d.time_in !== null && d.time_out === null).length;
   const completedProcessingCount = pipelineDocs.filter(d => d.time_out !== null && d.time_out !== undefined).length;
   const inVerificationCount = pipelineDocs.filter(d => d.status?.toLowerCase() === 'in verification' && (d.time_out === null || d.time_out === undefined)).length;
 
@@ -532,7 +543,7 @@ export default function ProcessorDashboard() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm relative overflow-hidden">
                   <span className="text-[10px] uppercase font-black text-neutral-400 tracking-wider">Incoming Documents</span>
-                  <p className="text-3xl font-black text-neutral-900 mt-2">{String(incomingDocs.length).padStart(2, '0')}</p>
+                  <p className="text-3xl font-black text-neutral-900 mt-2">{String(expectedIncomingCount).padStart(2, '0')}</p>
                   <div className="absolute right-4 bottom-4 text-lg opacity-40">📂</div>
                   <div className="h-1 bg-blue-600 absolute bottom-0 left-0 right-0"></div>
                 </div>
@@ -642,7 +653,7 @@ export default function ProcessorDashboard() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
-                  { title: 'Incoming Docs', count: incomingDocs.length, border: 'border-l-blue-500', icon: '📂' },
+                  { title: 'Incoming Docs', count: expectedIncomingCount, border: 'border-l-blue-500', icon: '📂' },
                   { title: 'Awaiting Scan-In', count: awaitingScanInCount, border: 'border-l-red-600', icon: '📥' },
                   { title: 'Pending Docs', count: pendingCount, border: 'border-l-amber-500', icon: '🕒' },
                   { title: 'Completed Docs', count: completedProcessingCount, border: 'border-l-green-500', icon: '✅' },
