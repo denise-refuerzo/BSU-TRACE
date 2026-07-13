@@ -25,6 +25,9 @@ import 'screens/dashboard/ict_admin_dashboard.dart';
 import 'screens/ict_admin_accounts_screen.dart';
 import 'screens/ict_admin_roles_screen.dart';
 
+// ADDED: Global key for the Navigator to allow SessionManager to force redirects
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() {
   runApp(const BsuPortalApp());
 }
@@ -38,6 +41,8 @@ class BsuPortalApp extends StatelessWidget {
       listenable: SessionManager(),
       builder: (context, _) {
         return MaterialApp(
+          // ADDED: Attach the global key to MaterialApp
+          navigatorKey: navigatorKey,
           title: 'University Portal',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.lightTheme,
@@ -45,13 +50,21 @@ class BsuPortalApp extends StatelessWidget {
           routes: {
             '/': (context) => const AuthScreen(),
             '/dashboard_user': (context) => const RouteGuard(
-              allowedRoles: [UserRole.user], child: UserDashboardScreen()),
+              allowedRoles: [UserRole.user],
+              child: UserDashboardScreen(),
+            ),
             '/dashboard_processor': (context) => const RouteGuard(
-              allowedRoles: [UserRole.processor], child: ProcessorDashboardScreen()),
+              allowedRoles: [UserRole.processor],
+              child: ProcessorDashboardScreen(),
+            ),
             '/dashboard_signee': (context) => const RouteGuard(
-              allowedRoles: [UserRole.signee], child: SigneeDashboardScreen()),
+              allowedRoles: [UserRole.signee],
+              child: SigneeDashboardScreen(),
+            ),
             '/dashboard_admin': (context) => const RouteGuard(
-              allowedRoles: [UserRole.admin, UserRole.ictAdmin], child: AdminDashboardScreen()),
+              allowedRoles: [UserRole.admin, UserRole.ictAdmin],
+              child: AdminDashboardScreen(),
+            ),
             '/tracking': (context) => const TrackingScreen(),
             '/scheduler': (context) => const SchedulerScreen(),
             '/profile': (context) => const ProfileScreen(),
@@ -59,16 +72,25 @@ class BsuPortalApp extends StatelessWidget {
             '/analytics': (context) => const OperationalAnalyticsScreen(),
             '/documents': (context) => const DocumentsScreen(),
             // --- FIX: Calling the route via the alias ---
-            '/history': (context) => const processor_history.ProcessingHistoryScreen(),
-            '/signee_approvals': (context) => const SigneePendingApprovalsScreen(),
-            '/signee_history': (context) => const SigneeSignatureHistoryScreen(),
+            '/history': (context) =>
+                const processor_history.ProcessingHistoryScreen(),
+            '/signee_approvals': (context) =>
+                const SigneePendingApprovalsScreen(),
+            '/signee_history': (context) =>
+                const SigneeSignatureHistoryScreen(),
             // NEW: ICT Admin Routes
             '/dashboard_ict_admin': (context) => const RouteGuard(
-              allowedRoles: [UserRole.ictAdmin], child: IctAdminDashboardScreen()),
+              allowedRoles: [UserRole.ictAdmin],
+              child: IctAdminDashboardScreen(),
+            ),
             '/ict_admin_accounts': (context) => const RouteGuard(
-              allowedRoles: [UserRole.ictAdmin], child: IctAdminAccountsScreen()),
+              allowedRoles: [UserRole.ictAdmin],
+              child: IctAdminAccountsScreen(),
+            ),
             '/ict_admin_roles': (context) => const RouteGuard(
-              allowedRoles: [UserRole.ictAdmin], child: IctAdminRolesScreen()),
+              allowedRoles: [UserRole.ictAdmin],
+              child: IctAdminRolesScreen(),
+            ),
           },
         );
       },
