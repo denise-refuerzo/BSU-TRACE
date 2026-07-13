@@ -1390,36 +1390,57 @@ app.post('/api/offices', async (req, res) => {
 });
 
 // ==========================================
-// 19. AD-HOC ROUTING ENDPOINT
+// 19. AD-HOC ROUTING ENDPOINT - FIXED FOR MOBILE
 // ==========================================
 app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
   const { qrCode } = req.params;
   const { target_office_id, reason } = req.body;
+  const client = await pool.connect(); // Use a transaction to ensure safety
 
   if (!target_office_id) {
     return res.status(400).json({ error: 'Target office is required' });
   }
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
+    await client.query('BEGIN');
+
+    // 1. Find the active document step to get the current_office_id (Originating office)
+    const docResult = await client.query(`
+      SELECT pd.pd_id, pd.ini_id, pd.current_office_id
+      FROM public.processed_document pd
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      WHERE i.qr_code = $1 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode]);
+
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
+      throw new Error('Document not found or no active step available.');
     }
-    const iniId = docResult.rows[0].ini_id;
 
-    // FIX: We revert to INSERT so history is saved.
-    // The ROW_NUMBER() logic in Section 5 prevents this from showing as a duplicate tile.
-    // By hardcoding the s_id to 'In Verification', the app will instantly override the 'Incoming' status.
-    await pool.query(
-      `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, time_in)
-       VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1), $2, NULL)`,
-      [iniId, target_office_id]
-    );
+    const activeStep = docResult.rows[0];
 
+    // 2. Freeze the originating office's status to 'In Verification' (s_id = 2)
+    await client.query(`
+      UPDATE public.processed_document 
+      SET s_id = 2 
+      WHERE pd_id = $1
+    `, [activeStep.pd_id]);
+
+    // 3. Insert the target office step and explicitly attach the Ad-Hoc flags!
+    await client.query(`
+      INSERT INTO public.processed_document 
+      (ini_id, s_id, current_office_id, is_adhoc, adhoc_return_office_id, time_in)
+      VALUES ($1, 1, $2, true, $3, NULL)
+    `, [activeStep.ini_id, target_office_id, activeStep.current_office_id]);
+
+    await client.query('COMMIT');
     res.status(200).json({ message: 'Document successfully routed ad-hoc' });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Ad-Hoc Routing Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
