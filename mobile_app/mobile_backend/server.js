@@ -1105,26 +1105,39 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 });
 
 // ==========================================
-// 14. SIGN DOCUMENT ENDPOINT
+// 14. SIGN DOCUMENT ENDPOINT - BUG FIX
 // ==========================================
 app.put('/api/documents/:qrCode/sign', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
+    // 1. Find the exact active row that is currently checked IN and waiting
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, st.current_status 
+      FROM public.processed_document pd
+      JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
+      JOIN public.status st ON pd.s_id = st.s_id
+      WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode]);
 
-    // Target the latest routing step and mark as Signed WITHOUT setting time_out
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
-    );
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No active document found to sign.' });
+    }
+
+    const activeDoc = docResult.rows[0];
+
+    // 2. Prevent multiple signatures
+    if (activeDoc.current_status.toLowerCase() === 'signed') {
+      return res.status(400).json({ error: 'Document is already signed and ready for scan-out.' });
+    }
+
+    // 3. Update the exact active row to Signed
+    await pool.query(`
+      UPDATE public.processed_document 
+      SET s_id = (SELECT s_id FROM public.status WHERE current_status = 'Signed' LIMIT 1)
+      WHERE pd_id = $1
+    `, [activeDoc.pd_id]);
 
     res.status(200).json({ message: 'Document signed successfully' });
   } catch (error) {
@@ -1445,26 +1458,31 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
 });
 
 // ==========================================
-// 20. SEND BACK DOCUMENT ENDPOINT
+// 20. SEND BACK DOCUMENT ENDPOINT - BUG FIX
 // ==========================================
 app.put('/api/documents/:qrCode/send-back', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    const docResult = await pool.query('SELECT ini_id FROM public.initial_document WHERE qr_code = $1', [qrCode]);
-    if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    const iniId = docResult.rows[0].ini_id;
+    // 1. Find the exact active row that is currently checked IN and waiting
+    const docResult = await pool.query(`
+      SELECT pd.pd_id
+      FROM public.processed_document pd
+      JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
+      WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC LIMIT 1
+    `, [qrCode]);
 
-    // Target the latest routing step and mark as 'Action Required'
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
-       WHERE ini_id = $1 
-       AND pd_id = (SELECT pd_id FROM public.processed_document WHERE ini_id = $1 ORDER BY time_in DESC LIMIT 1)`,
-      [iniId]
-    );
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No active document found to send back.' });
+    }
+
+    // 2. Target the exact active routing step and mark as 'Action Required'
+    await pool.query(`
+      UPDATE public.processed_document 
+      SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
+      WHERE pd_id = $1
+    `, [docResult.rows[0].pd_id]);
 
     res.status(200).json({ message: 'Document sent back (Action Required) successfully' });
   } catch (error) {
