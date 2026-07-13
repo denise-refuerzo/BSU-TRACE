@@ -1,6 +1,8 @@
+// lib/screens/document_details_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
 import '../theme/app_theme.dart';
 import '../config.dart';
 
@@ -82,7 +84,7 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
                 await _fetchDocumentDetails();
               },
               child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(), // Pull-down physics added
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(left: 20.0, top: 20.0, right: 20.0, bottom: 100.0),
                 child: Column(
                   children: [
@@ -109,7 +111,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
             ),
           ),
           
-          // Sticky Footer
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: OutlinedButton.icon(
@@ -123,8 +124,6 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
       ),
     );
   }
-
-  // --- WIDGETS ---
 
   Widget _buildHeader() => Container(
     padding: const EdgeInsets.all(20),
@@ -187,9 +186,33 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
         child: Column(children: [
-          Container(height: 150, width: 150, color: Colors.grey.shade100, child: const Center(child: Text("QR Placeholder"))),
+          // --- REAL QR CODE ---
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.1),
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: QrImageView(
+              data: _docData['qr_code'] ?? 'No Tracking Code',
+              version: QrVersions.auto,
+              size: 150.0,
+              backgroundColor: Colors.white,
+            ),
+          ),
           const SizedBox(height: 16),
-          const Text('Scan this code at any BSU kiosk to instantly view document status or verify authenticity.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 13))
+          const Text(
+            'Scan this code at any BSU kiosk to instantly view document status or verify authenticity.',
+            textAlign: TextAlign.center, 
+            style: TextStyle(color: Colors.black54, fontSize: 13),
+          )
         ]),
       )
     ],

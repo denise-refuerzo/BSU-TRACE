@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
 import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
@@ -29,42 +30,30 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
 
-// EXACT BUSINESS RULE STATUS LOGIC
   String _resolveStatus(Map<String, dynamic> doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
-    
     bool isCompletedByMe = doc['is_completed_by_me'] == true || doc['is_completed_by_me'] == 'true';
-    
-    // Safely check for ad-hoc either via the explicit boolean or text fallback
     bool isAdHoc = doc['is_adhoc'] == true || doc['is_adhoc'] == 'true' || 
                    dbStatus == 'in verification' || dbStatus.contains('ad hoc');
 
-    // 1. If it's globally completed or this processor has already scanned it out
     if (dbStatus == 'completed' || isCompletedByMe) {
       return 'completed';
     }
 
-    // Role isolated fallback -> Uses exact rules if the endpoint provided "is_at_current_office"
     if (doc.containsKey('is_at_current_office')) {
       bool isAtCurrentOffice = doc['is_at_current_office'] == true || doc['is_at_current_office'] == 'true';
       if (isAtCurrentOffice) {
-        // Awaiting scan-in at this office
         if (doc['time_in'] == null) return 'awaiting scan in'; 
-        
-        // Scanned in but waiting for processing or scan-out
         if (dbStatus == 'signed') return 'pending'; 
         if (dbStatus == 'in verification' || isAdHoc) return 'pending'; 
         if (doc['time_out'] == null) return 'pending'; 
-        
         return 'verified'; 
       } else {
-        // Currently at another office
         if (dbStatus == 'in verification' || isAdHoc) return 'in verification'; 
         return 'incoming'; 
       }
     } 
     
-    // Global fallback for Admins/Originators who see all system documents
     if (dbStatus == 'signed') return 'pending';
     if (doc['time_out'] != null) return 'verified';
     if (isAdHoc) return 'in verification';
@@ -92,7 +81,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final role = SessionManager().currentRole;
     if (userId == null) return;
     
-    // If the user is a Processor, fetch isolated routing queue. Otherwise, fallback to global queue.
     String url = '${AppConfig.baseUrl}/documents';
     if (role == UserRole.processor) {
       url = '${AppConfig.baseUrl}/processors/$userId/documents';
@@ -303,11 +291,41 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text('Form: $form', style: const TextStyle(fontSize: 12, color: Colors.black54)),
-          Text('Origin: $origin', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+          const SizedBox(height: 12),
+          
+          // --- REAL MINI QR CODE IN LIST ---
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: QrImageView(
+                  data: trackingId,
+                  version: QrVersions.auto,
+                  size: 45.0,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text('Form: $form', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    Text('Origin: $origin', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

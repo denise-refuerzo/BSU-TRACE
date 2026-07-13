@@ -1,7 +1,8 @@
 // lib/widgets/modals/document_scanner_modal.dart
-import 'dart:convert'; // Added to decode the backend error message
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:mobile_scanner/mobile_scanner.dart'; // Added Mobile Scanner
 import '../../theme/app_theme.dart';
 import '../../config.dart';
 import '../../services/session_manager.dart';
@@ -15,6 +16,7 @@ class DocumentScannerModal extends StatefulWidget {
 
 class _DocumentScannerModalState extends State<DocumentScannerModal> {
   final TextEditingController _trackingIdController = TextEditingController();
+  final MobileScannerController _cameraController = MobileScannerController();
   bool _isLoading = false;
 
   Future<void> _processScan(String action) async {
@@ -31,11 +33,8 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
 
     try {
       final endpoint = action == 'in' ? 'scan-in' : 'scan-out';
-
-      // Grab the userId from the SessionManager
       final userId = SessionManager().userId;
 
-      // Send the userId in the body of the PUT request
       final response = await http.put(
         Uri.parse('${AppConfig.baseUrl}/documents/$trackingId/$endpoint'),
         headers: {'Content-Type': 'application/json'},
@@ -81,6 +80,7 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
   @override
   void dispose() {
     _trackingIdController.dispose();
+    _cameraController.dispose();
     super.dispose();
   }
 
@@ -115,49 +115,48 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
             ),
             const SizedBox(height: 16),
 
-            // --- CAMERA PLACEHOLDER ---
+            // --- REAL CAMERA SCANNER ---
             Container(
               height: 250,
               decoration: BoxDecoration(
-                color: Colors.black87, // Dark background to simulate camera
+                color: Colors.black87,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Viewfinder border simulation
-                  Container(
-                    width: 160,
-                    height: 160,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.3),
-                        width: 2,
-                      ),
-                      borderRadius: BorderRadius.circular(12),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    MobileScanner(
+                      controller: _cameraController,
+                      onDetect: (capture) {
+                        final List<Barcode> barcodes = capture.barcodes;
+                        for (final barcode in barcodes) {
+                          if (barcode.rawValue != null) {
+                            if (_trackingIdController.text != barcode.rawValue) {
+                              setState(() {
+                                _trackingIdController.text = barcode.rawValue!;
+                              });
+                            }
+                            break;
+                          }
+                        }
+                      },
                     ),
-                  ),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.qr_code_scanner,
-                        color: Colors.white.withOpacity(0.7),
-                        size: 50,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Camera Placeholder\n(Point at QR Code)',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
+                    // Viewfinder overlay
+                    Container(
+                      width: 160,
+                      height: 160,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: AppTheme.primaryRed.withOpacity(0.8),
+                          width: 3,
                         ),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 24),
@@ -175,7 +174,6 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
             ),
             const SizedBox(height: 12),
 
-            // Tracking ID Input
             TextField(
               controller: _trackingIdController,
               decoration: InputDecoration(
@@ -202,17 +200,10 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () => _processScan('in'),
-                      icon: const Icon(
-                        Icons.login,
-                        color: Colors.white,
-                        size: 18,
-                      ),
+                      icon: const Icon(Icons.login, color: Colors.white, size: 18),
                       label: const Text(
                         'Scan IN',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue.shade600,
@@ -227,17 +218,10 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () => _processScan('out'),
-                      icon: const Icon(
-                        Icons.logout,
-                        color: Colors.white,
-                        size: 18,
-                      ),
+                      icon: const Icon(Icons.logout, color: Colors.white, size: 18),
                       label: const Text(
                         'Scan OUT',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green.shade600,

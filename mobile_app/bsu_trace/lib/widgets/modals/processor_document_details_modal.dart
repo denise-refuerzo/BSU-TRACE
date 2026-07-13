@@ -1,7 +1,8 @@
 // lib/widgets/modals/processor_document_details_modal.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // Required for Clipboard
-import 'signee_ad_hoc_routing_modal.dart'; // Import the Ad-hoc modal
+import 'package:flutter/services.dart'; 
+import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
+import 'signee_ad_hoc_routing_modal.dart'; 
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
   final Map<String, dynamic> document;
@@ -17,16 +18,12 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ----------------------------------------------------------------------
-    // UPDATED: Aligned extraction keys with the API data from documents_screen
-    // ----------------------------------------------------------------------
     final String title = document['title'] ?? 'No Title';
     final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
     final String formType = document['form_type'] ?? document['process_name'] ?? 'N/A';
     final String status = document['status'] ?? 'Pending';
     final String originatingOffice = document['origin_office'] ?? document['originatingOffice'] ?? 'N/A';
 
-    // Theme Colors
     const Color primaryRed = Color(0xFFB71C1C);
     const Color lightPink = Color(0xFFFFEBEE);
 
@@ -40,7 +37,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Drag Handle
           Center(
             child: Container(
               width: 40,
@@ -53,7 +49,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
             ),
           ),
 
-          // Header Row
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -71,7 +66,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    // --- UPDATED: Tracking ID Row with Copy Button ---
                     Row(
                       children: [
                         Text(
@@ -99,7 +93,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                         ),
                       ],
                     ),
-                    // --------------------------------------------------
                   ],
                 ),
               ),
@@ -123,7 +116,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
           const Divider(color: Color(0xFFEEEEEE), thickness: 1),
           const SizedBox(height: 16),
 
-          // Details Row 1
           Row(
             children: [
               Expanded(
@@ -187,8 +179,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
           ),
 
           const SizedBox(height: 16),
-
-          // Details Row 2
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -217,7 +207,7 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
           const Divider(color: Color(0xFFEEEEEE), thickness: 1),
           const SizedBox(height: 16),
 
-          // QR Code Section
+          // --- REAL QR CODE ---
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24.0),
@@ -233,7 +223,12 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.qr_code_2, size: 120, color: Colors.black87),
+                  child: QrImageView(
+                    data: trackingId,
+                    version: QrVersions.auto,
+                    size: 120.0,
+                    backgroundColor: Colors.white,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -250,13 +245,11 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
 
           const SizedBox(height: 24),
 
-          // Action Buttons
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              // WIRE AD-HOC ROUTING DIRECTLY HERE
               onPressed: () {
-                Navigator.pop(context); // Close the bottom sheet first
+                Navigator.pop(context);
                 showDialog(
                   context: context,
                   builder: (context) => SigneeAdHocRoutingModal(document: document),
@@ -273,7 +266,7 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
               ),
               icon: const Icon(Icons.fact_check_outlined, size: 20),
               label: const Text(
-                'Ad-hoc Routing', // Updated label
+                'Ad-hoc Routing',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
               ),
             ),
