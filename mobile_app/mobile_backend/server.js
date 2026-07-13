@@ -1458,15 +1458,19 @@ app.post('/api/documents/:qrCode/ad-hoc', async (req, res) => {
 });
 
 // ==========================================
-// 20. SEND BACK DOCUMENT ENDPOINT - BUG FIX
+// 20. SEND BACK DOCUMENT ENDPOINT - FULL FIX
 // ==========================================
 app.put('/api/documents/:qrCode/send-back', async (req, res) => {
   const { qrCode } = req.params;
+  const { reason, signeeUserId, processorUserId } = req.body; 
+  const client = await pool.connect();
 
   try {
-    // 1. Find the exact active row that is currently checked IN and waiting
-    const docResult = await pool.query(`
-      SELECT pd.pd_id
+    await client.query('BEGIN');
+
+    // 1. Find the exact active document step
+    const docResult = await client.query(`
+      SELECT pd.pd_id, pd.ini_id, pd.current_office_id
       FROM public.processed_document pd
       JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
       WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
@@ -1474,20 +1478,45 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
     `, [qrCode]);
 
     if (docResult.rows.length === 0) {
-      return res.status(404).json({ error: 'No active document found to send back.' });
+      throw new Error('No active document found to send back.');
     }
 
-    // 2. Target the exact active routing step and mark as 'Action Required'
-    await pool.query(`
-      UPDATE public.processed_document 
-      SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1)
-      WHERE pd_id = $1
-    `, [docResult.rows[0].pd_id]);
+    const activeDoc = docResult.rows[0];
 
-    res.status(200).json({ message: 'Document sent back (Action Required) successfully' });
+    // 2. Mark as 'Action Required' and freeze the route by severing next_office_id
+    await client.query(`
+      UPDATE public.processed_document 
+      SET s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Action Required' LIMIT 1),
+          next_office_id = NULL
+      WHERE pd_id = $1
+    `, [activeDoc.pd_id]);
+
+    // 3. Log the exact reason into the history table so the user can read it
+    const actionMessage = reason ? `Sent Back for Revision: ${reason}` : 'Sent Back for Revision';
+    
+    // Check if the app sent a user ID, otherwise fallback to a safe database read
+    const userIdToLog = signeeUserId || processorUserId || null;
+
+    if (userIdToLog) {
+      await client.query(`
+        INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+        VALUES ($1, $2, $3, $4, TIMEZONE('Asia/Manila', NOW()))
+      `, [activeDoc.ini_id, userIdToLog, activeDoc.current_office_id, actionMessage]);
+    } else {
+      await client.query(`
+        INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp)
+        VALUES ($1, (SELECT u_id FROM public.initial_document WHERE ini_id = $1), $2, $3, TIMEZONE('Asia/Manila', NOW()))
+      `, [activeDoc.ini_id, activeDoc.current_office_id, actionMessage]);
+    }
+
+    await client.query('COMMIT');
+    res.status(200).json({ message: 'Document flagged for corrections and frozen successfully.' });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Send Back Document Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
