@@ -12,10 +12,12 @@ class SigneeDocumentDetailsModal extends StatefulWidget {
   const SigneeDocumentDetailsModal({super.key, required this.document});
 
   @override
-  State<SigneeDocumentDetailsModal> createState() => _SigneeDocumentDetailsModalState();
+  State<SigneeDocumentDetailsModal> createState() =>
+      _SigneeDocumentDetailsModalState();
 }
 
-class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal> {
+class _SigneeDocumentDetailsModalState
+    extends State<SigneeDocumentDetailsModal> {
   bool _isSigning = false;
 
   Future<void> _signDocument() async {
@@ -23,11 +25,13 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
     final String qrCode = widget.document['qr_code'] ?? '';
 
     try {
-      final response = await http.put(Uri.parse('${AppConfig.baseUrl}/documents/$qrCode/sign'));
+      final response = await http.put(
+        Uri.parse('${AppConfig.baseUrl}/documents/$qrCode/sign'),
+      );
 
       if (response.statusCode == 200) {
         if (!mounted) return;
-        Navigator.pop(context, true); 
+        Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Document $qrCode successfully signed!'),
@@ -56,9 +60,16 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
     final String formType = widget.document['form_type'] ?? 'N/A';
     final String originOffice = widget.document['origin_office'] ?? 'N/A';
     final String rawStatus = widget.document['status'] ?? 'Pending';
-    final String status = rawStatus.isEmpty ? 'Pending' : rawStatus[0].toUpperCase() + rawStatus.substring(1);
+    final String status = rawStatus.isEmpty
+        ? 'Pending'
+        : rawStatus[0].toUpperCase() + rawStatus.substring(1);
 
-    final bool isAlreadySigned = ['signed', 'completed', 'approved', 'verified'].contains(status.toLowerCase());
+    final bool isAlreadySigned = [
+      'signed',
+      'completed',
+      'approved',
+      'verified',
+    ].contains(status.toLowerCase());
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -72,8 +83,12 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
           children: [
             Center(
               child: Container(
-                width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(2)),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade100,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
             const SizedBox(height: 20),
@@ -85,9 +100,24 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('ID: $qrCode', style: const TextStyle(color: AppTheme.primaryRed, fontSize: 11, fontWeight: FontWeight.bold)),
+                      Text(
+                        'ID: $qrCode',
+                        style: const TextStyle(
+                          color: AppTheme.primaryRed,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 8),
-                      Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, height: 1.3, color: Colors.black87)),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
+                          color: Colors.black87,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -109,57 +139,136 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
             const SizedBox(height: 12),
             _buildRequestorCard('System Originator', 'SO'),
             const SizedBox(height: 32),
-            const Text('PROCESSING ROUTE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5)),
+            const Text(
+              'PROCESSING ROUTE',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Colors.black54,
+                letterSpacing: 0.5,
+              ),
+            ),
             const SizedBox(height: 16),
-            _buildTimelineStep(dotColor: Colors.green, hasOuterRing: false, lineColor: Colors.grey.shade300, title: 'Initial Submission', titleColor: Colors.black87, subtitle: 'Completed', isLast: false),
-            _buildTimelineStep(dotColor: AppTheme.primaryRed, hasOuterRing: true, lineColor: Colors.grey.shade300, title: 'Current Step', titleColor: AppTheme.primaryRed, subtitle: 'Status: $status', isLast: false),
-            _buildTimelineStep(dotColor: Colors.red.shade100, hasOuterRing: false, lineColor: Colors.transparent, title: 'Final Approval', titleColor: Colors.black38, subtitle: 'Next in queue', isLast: true),
+            _buildTimelineStep(
+              dotColor: Colors.green,
+              hasOuterRing: false,
+              lineColor: Colors.grey.shade300,
+              title: 'Initial Submission',
+              titleColor: Colors.black87,
+              subtitle: 'Completed',
+              isLast: false,
+            ),
+            _buildTimelineStep(
+              dotColor: AppTheme.primaryRed,
+              hasOuterRing: true,
+              lineColor: Colors.grey.shade300,
+              title: 'Current Step',
+              titleColor: AppTheme.primaryRed,
+              subtitle: 'Status: $status',
+              isLast: false,
+            ),
+            _buildTimelineStep(
+              dotColor: Colors.red.shade100,
+              hasOuterRing: false,
+              lineColor: Colors.transparent,
+              title: 'Final Approval',
+              titleColor: Colors.black38,
+              subtitle: 'Next in queue',
+              isLast: true,
+            ),
             const SizedBox(height: 8),
             Divider(color: Colors.red.shade100, thickness: 1),
             const SizedBox(height: 20),
-            
+
             if (!isAlreadySigned) ...[
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton(
                       // FIXED: Passing document to AdHoc modal
-                      onPressed: () => showDialog(context: context, builder: (context) => SigneeAdHocRoutingModal(document: widget.document)),
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                      child: const Text('Ad-hoc Routing', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (context) =>
+                            SigneeAdHocRoutingModal(document: widget.document),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: const BorderSide(color: AppTheme.primaryRed),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        'Ad-hoc Routing',
+                        style: TextStyle(
+                          color: AppTheme.primaryRed,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => showDialog(context: context, builder: (context) => const SigneeSendBackModal()),
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: AppTheme.primaryRed), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                      child: const Text('Send Back', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 13)),
+                      onPressed: () => showDialog(
+                        context: context,
+                        builder: (context) =>
+                            SigneeSendBackModal(document: widget.document),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        side: const BorderSide(color: AppTheme.primaryRed),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: const Text(
+                        'Send Back',
+                        style: TextStyle(
+                          color: AppTheme.primaryRed,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
             ],
-            
+
             ElevatedButton(
               onPressed: (isAlreadySigned || _isSigning) ? null : _signDocument,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryRed,
-                disabledBackgroundColor: isAlreadySigned ? Colors.grey.shade300 : Colors.red.shade200,
+                disabledBackgroundColor: isAlreadySigned
+                    ? Colors.grey.shade300
+                    : Colors.red.shade200,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 elevation: 0,
               ),
               child: _isSigning
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
                   : Text(
-                      isAlreadySigned ? 'SIGNED' : 'Sign Document', 
+                      isAlreadySigned ? 'SIGNED' : 'Sign Document',
                       style: TextStyle(
-                        color: isAlreadySigned ? Colors.grey.shade600 : Colors.white, 
-                        fontWeight: FontWeight.bold, 
-                        fontSize: 16
-                      )
+                        color: isAlreadySigned
+                            ? Colors.grey.shade600
+                            : Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
             ),
           ],
@@ -169,14 +278,151 @@ class _SigneeDocumentDetailsModalState extends State<SigneeDocumentDetailsModal>
   }
 
   Widget _buildInfoCard(String label, String value) {
-    return Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.shade50.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5)), const SizedBox(height: 6), Text(value, style: const TextStyle(fontSize: 13, color: Colors.black87))]));
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: Colors.black54,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildRequestorCard(String name, String initials) {
-    return Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.shade50.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('REQUESTOR', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black54, letterSpacing: 0.5)), const SizedBox(height: 8), Row(children: [CircleAvatar(radius: 14, backgroundColor: Colors.red.shade200, child: Text(initials, style: const TextStyle(fontSize: 10, color: AppTheme.primaryRed, fontWeight: FontWeight.bold))), const SizedBox(width: 12), Text(name, style: const TextStyle(fontSize: 14, color: Colors.black87))])]));
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'REQUESTOR',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.bold,
+              color: Colors.black54,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: Colors.red.shade200,
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: AppTheme.primaryRed,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                name,
+                style: const TextStyle(fontSize: 14, color: Colors.black87),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
-  Widget _buildTimelineStep({required Color dotColor, required bool hasOuterRing, required Color lineColor, required String title, required Color titleColor, required String subtitle, required bool isLast}) {
-    return IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Column(children: [Container(width: 16, height: 16, decoration: BoxDecoration(shape: BoxShape.circle, color: hasOuterRing ? Colors.white : dotColor, border: hasOuterRing ? Border.all(color: Colors.red.shade100, width: 3) : null), child: hasOuterRing ? Center(child: Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: dotColor))) : null), if (!isLast) Expanded(child: Container(width: 2, color: lineColor))]), const SizedBox(width: 16), Expanded(child: Padding(padding: const EdgeInsets.only(bottom: 24.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: titleColor)), const SizedBox(height: 2), Text(subtitle, style: TextStyle(fontSize: 11, color: isLast ? Colors.black38 : Colors.black54))])))]));
+  Widget _buildTimelineStep({
+    required Color dotColor,
+    required bool hasOuterRing,
+    required Color lineColor,
+    required String title,
+    required Color titleColor,
+    required String subtitle,
+    required bool isLast,
+  }) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: hasOuterRing ? Colors.white : dotColor,
+                  border: hasOuterRing
+                      ? Border.all(color: Colors.red.shade100, width: 3)
+                      : null,
+                ),
+                child: hasOuterRing
+                    ? Center(
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: dotColor,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              if (!isLast)
+                Expanded(child: Container(width: 2, color: lineColor)),
+            ],
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: titleColor,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isLast ? Colors.black38 : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
