@@ -1492,6 +1492,7 @@ app.put('/api/documents/:qrCode/send-back', async (req, res) => {
     `, [activeDoc.pd_id]);
 
     // 3. Log the exact reason into the history table so the user can read it
+    // NOTE: The backticks here are extremely important!
     const actionMessage = reason ? `Sent Back for Revision: ${reason}` : 'Sent Back for Revision';
     
     // Check if the app sent a user ID, otherwise fallback to a safe database read
