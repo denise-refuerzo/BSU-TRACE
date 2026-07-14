@@ -1147,169 +1147,91 @@ app.put('/api/documents/:qrCode/sign', async (req, res) => {
 });
 
 // ==========================================
-// 15. SCAN IN DOCUMENT (Processor) - PORTED FROM WEB
+// 15. SCAN IN DOCUMENT (Processor)
 // ==========================================
 app.put('/api/documents/:qrCode/scan-in', async (req, res) => {
   const { qrCode } = req.params;
-  const { processorUserId } = req.body;
-
-  if (!processorUserId) return res.status(400).json({ error: 'Missing processor user ID.' });
 
   try {
-    const procRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
-    const processorOfficeId = procRes.rows[0]?.o_id;
-
-    const docRes = await pool.query(`
-      SELECT pd.pd_id, pd.ini_id, pd.current_office_id, pd.time_in, idoc.title, off.office_name as expected_office_name
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, pd.time_in, s.current_status, i.ini_id
       FROM public.processed_document pd
-      JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
-      JOIN public.offices off ON pd.current_office_id = off.o_id
-      WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
-      ORDER BY pd.pd_id DESC LIMIT 1
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1 AND pd.time_in IS NULL
+      ORDER BY pd.pd_id ASC 
+      LIMIT 1
     `, [qrCode]);
 
-    if (docRes.rows.length === 0) return res.status(404).json({ error: "No pending document found to scan in." });
-    
-    const activeLog = docRes.rows[0];
-
-    if (processorOfficeId && activeLog.current_office_id !== processorOfficeId) {
-      return res.status(400).json({ error: `This document belongs to the ${activeLog.expected_office_name}. It cannot be scanned here.` });
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No pending document found to scan in.' });
     }
 
-    if (activeLog.time_in !== null) return res.status(400).json({ error: `Document has already been clocked in.` });
+    const { pd_id } = docResult.rows[0];
 
-    await pool.query(`
-      UPDATE public.processed_document 
-      SET time_in = TIMEZONE('Asia/Manila', NOW()),
-          s_id = CASE 
+    // FIX: If it was routed ad-hoc, keep it 'In Verification'. 
+    // Otherwise, standard scans become 'Pending'.
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET time_in = timezone('Asia/Manila', now()),
+           s_id = CASE 
                     WHEN s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'In Verification' LIMIT 1) THEN s_id
                     ELSE (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1)
-                 END
-      WHERE pd_id = $1
-    `, [activeLog.pd_id]);
-
-    if (processorOfficeId) {
-      await pool.query(`INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp) VALUES ($1, $2, $3, 'Scanned In', TIMEZONE('Asia/Manila', NOW()))`, [activeLog.ini_id, processorUserId, processorOfficeId]);
-    }
+                  END
+       WHERE pd_id = $1`,
+      [pd_id]
+    );
 
     res.status(200).json({ message: 'Document scanned IN successfully.' });
-  } catch (err) {
-    console.error("Scan In Error:", err);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (error) {
+    console.error('Scan In Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // ==========================================
-// 16. SCAN OUT DOCUMENT (Processor) - BULLETPROOF FIX
+// 16. SCAN OUT DOCUMENT (Processor)
 // ==========================================
 app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
-  const { processorUserId } = req.body;
-  const client = await pool.connect(); // Use a dedicated client for a safe transaction
 
   try {
-    await client.query('BEGIN'); // Start transaction
-
-    if (!processorUserId) throw new Error('Missing processor user ID in mobile payload.');
-
-    const procRes = await client.query('SELECT o_id FROM public."User" WHERE u_id = $1', [processorUserId]);
-    const processorOfficeId = procRes.rows[0]?.o_id;
-
-    const checkStatusRes = await client.query(`
-      SELECT pd.pd_id, pd.time_in, pd.s_id, st.current_status, pd.current_office_id, pd.next_office_id, pd.ini_id, idoc.title
+    // FIX: Specifically look for the step that is scanned IN, but not yet scanned OUT
+    const docResult = await pool.query(`
+      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
       FROM public.processed_document pd
-      JOIN public.initial_document idoc ON pd.ini_id = idoc.ini_id
-      JOIN public.status st ON pd.s_id = st.s_id
-      WHERE idoc.qr_code = $1 AND pd.time_out IS NULL
-      ORDER BY pd.pd_id DESC LIMIT 1
+      JOIN public.initial_document i ON pd.ini_id = i.ini_id
+      JOIN public.status s ON pd.s_id = s.s_id
+      WHERE i.qr_code = $1 
+        AND pd.time_in IS NOT NULL 
+        AND pd.time_out IS NULL
+      ORDER BY pd.pd_id DESC 
+      LIMIT 1
     `, [qrCode]);
 
-    if (checkStatusRes.rows.length === 0) throw new Error("Document not found or already checked out.");
-
-    const currentActiveStep = checkStatusRes.rows[0];
-    const currentStatusClean = currentActiveStep.current_status.toLowerCase();
-
-    if (currentActiveStep.time_in === null) {
-      throw new Error(`Cannot complete Time-Out. "${currentActiveStep.title}" must be scanned IN first.`);
+    if (docResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No active document found ready for scan-out.' });
     }
 
-    if (currentStatusClean === 'pending' || currentStatusClean === 'in verification') {
-      throw new Error("Cannot scan out: Document requires approval/signature from the office Signee.");
+    const { pd_id, current_status } = docResult.rows[0];
+    const statusLower = current_status.toLowerCase();
+
+    if (statusLower === 'in verification' || statusLower === 'pending') {
+      return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
     }
 
-    // Handle Action Required / Sent Back Workflow
-    if (currentActiveStep.s_id === 4 || currentStatusClean === 'action required') {
-      await client.query(`UPDATE public.processed_document SET time_out = TIMEZONE('Asia/Manila', NOW()) WHERE pd_id = $1`, [currentActiveStep.pd_id]);
-      if (processorOfficeId) {
-        await client.query(`INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp) VALUES ($1, $2, $3, 'Scanned Out (Halted - Revision Required)', TIMEZONE('Asia/Manila', NOW()))`, [currentActiveStep.ini_id, processorUserId, processorOfficeId]);
-      }
-      await client.query('COMMIT');
-      return res.status(200).json({ message: "Document safely checked out and frozen for Originator revisions." });
-    }
+    await pool.query(
+      `UPDATE public.processed_document 
+       SET time_out = timezone('Asia/Manila', now()),
+           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
+       WHERE pd_id = $1`,
+      [pd_id]
+    );
 
-    const adhocCheckRes = await client.query(`SELECT is_adhoc, adhoc_return_office_id FROM public.processed_document WHERE pd_id = $1`, [currentActiveStep.pd_id]);
-    const adhocData = adhocCheckRes.rows[0];
-
-    const routeRes = await client.query(`
-      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
-      FROM public.initial_document idoc
-      JOIN public.process_type pt ON idoc.p_id = pt.p_id
-      JOIN public.route r ON pt.r_id = r.r_id
-      WHERE idoc.ini_id = $1
-    `, [currentActiveStep.ini_id]);
-    const r = routeRes.rows[0];
-
-    // Handle Ad-Hoc Returns
-    if (adhocData && adhocData.is_adhoc) {
-      await client.query(`UPDATE public.processed_document SET time_out = TIMEZONE('Asia/Manila', NOW()) WHERE pd_id = $1`, [currentActiveStep.pd_id]);
-      await client.query(`UPDATE public.processed_document SET s_id = 1 WHERE ini_id = $1 AND current_office_id = $2 AND time_out IS NULL`, [currentActiveStep.ini_id, adhocData.adhoc_return_office_id]);
-    } else {
-      // Normal 7-Stop Routing Logic
-      // We convert everything to Numbers explicitly to guarantee strict equality works perfectly
-      const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(s => s !== null && s !== undefined).map(Number);
-      const currentOfficeNum = Number(currentActiveStep.current_office_id);
-      const currentIndex = sequence.indexOf(currentOfficeNum);
-      
-      if (currentIndex === -1) {
-          throw new Error(`Routing Failure: Current office (${currentOfficeNum}) is not in the assigned route [${sequence.join(', ')}].`);
-      }
-
-      let nextStopToReceive = null;
-      let followingStop = null;
-
-      if (currentIndex + 1 < sequence.length) {
-        nextStopToReceive = sequence[currentIndex + 1];
-        if (currentIndex + 2 < sequence.length) {
-          followingStop = sequence[currentIndex + 2];
-        }
-      }
-
-      if (!nextStopToReceive) {
-        // Final Stop: Mark as Completed (s_id = 5)
-        await client.query(`UPDATE public.processed_document SET time_out = TIMEZONE('Asia/Manila', NOW()), s_id = 5 WHERE pd_id = $1`, [currentActiveStep.pd_id]);
-      } else {
-        // Clock out (DO NOT CHANGE STATUS)
-        await client.query(`UPDATE public.processed_document SET time_out = TIMEZONE('Asia/Manila', NOW()) WHERE pd_id = $1`, [currentActiveStep.pd_id]);
-        
-        // Push to next office queue as Pending (s_id = 1) with time_in = NULL
-        await client.query(`INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in) VALUES ($1, 1, $2, $3, NULL)`, [currentActiveStep.ini_id, nextStopToReceive, followingStop]);
-      }
-    }
-
-    if (processorOfficeId) {
-      await client.query(`INSERT INTO public.office_action_history (ini_id, u_id, o_id, action_type, action_timestamp) VALUES ($1, $2, $3, 'Scanned Out', TIMEZONE('Asia/Manila', NOW()))`, [currentActiveStep.ini_id, processorUserId, processorOfficeId]);
-    }
-
-    await client.query('COMMIT'); // Save the database changes safely
-    
-    // CUSTOM SUCCESS MESSAGE - If you see this, the new code is working!
-    res.status(200).json({ message: "SUCCESSFUL MOBILE SCAN: Document routed forward!" });
-  } catch (err) {
-    await client.query('ROLLBACK'); // Undo everything if it fails
-    console.error("Scan-Out Error:", err);
-    res.status(500).json({ error: err.message || "Internal Server Error checking out document." });
-  } finally {
-    client.release(); // Free up the database connection
+    res.status(200).json({ message: 'Document scanned OUT successfully.' });
+  } catch (error) {
+    console.error('Scan Out Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
