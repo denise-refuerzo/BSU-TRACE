@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.1",
+    "@yudiel/react-qr-scanner": "^2.6.0",
     "lucide-react": "^1.21.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.18.0",

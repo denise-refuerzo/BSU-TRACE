@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { QRCodeSVG } from 'qrcode.react';
 import { 
   LayoutDashboard, 
   FileText, 
@@ -937,11 +938,16 @@ export default function SigneeDashboard() {
                       </div>
                     </div>
                   </div>
-
                   <div className="border border-neutral-200/80 p-5 rounded-xl bg-white flex flex-col items-center justify-center text-center shadow-xs">
                     <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wide mb-3">Security QR Identity Token</span>
                     <div className="bg-white p-3 border border-neutral-200 rounded-xl shadow-xs">
-                      <QrCode size={115} className="text-neutral-900" />
+                      {/* Replaced placeholder with real QR */}
+                      <QRCodeSVG 
+                        value={docQr} 
+                        size={115} 
+                        level={"H"} 
+                        fgColor={"#171717"} 
+                      />
                     </div>
                     <div className="mt-4 text-center">
                       <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wider block">Tracking Reference Number</span>

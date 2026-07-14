@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchWithAuth } from '../api';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function DocumentsHub({ 
   userId, 
@@ -355,7 +356,13 @@ export default function DocumentsHub({
                 </div>
 
                 <div className="bg-neutral-50 p-3 border border-neutral-200 rounded-xl flex flex-col items-center flex-shrink-0">
-                  <QrCode size={80} className="text-neutral-800" />
+                  {/* Small Document QR Code */}
+                  <QRCodeSVG 
+                    value={activeDetailsDoc.qr_code} 
+                    size={80} 
+                    level={"M"}
+                    fgColor={"#171717"}
+                  />
                   <span className="text-[8px] font-black text-neutral-400 mt-1.5 uppercase tracking-widest">Tracking QR</span>
                 </div>
               </div>
@@ -453,7 +460,14 @@ export default function DocumentsHub({
               <p className="text-xs text-neutral-400 mt-1">Scan this token code to capture current tracking coordinates.</p>
             </div>
             <div className="bg-neutral-50 p-6 border rounded-xl flex flex-col items-center justify-center border-dashed">
-              <QrCode size={160} className="text-neutral-800" strokeWidth={1.5} />
+              {/* Enlarged Scannable QR Code */}
+              <QRCodeSVG 
+                value={selectedDoc.qr_code} 
+                size={160} 
+                level={"H"}
+                includeMargin={true}
+                fgColor={"#171717"}
+              />
               <code className="text-[10px] mt-3 font-mono bg-white px-2 py-0.5 border rounded text-neutral-600 tracking-wider font-bold">
                 {selectedDoc.qr_code}
               </code>

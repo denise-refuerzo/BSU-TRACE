@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
+import { Scanner } from '@yudiel/react-qr-scanner';
+import { QRCodeSVG } from 'qrcode.react';
 import { LayoutDashboard, FileText, History, Bell, User, Search, Filter, X, QrCode, LogOut, Camera, KeyRound, ShieldCheck, Building, Landmark } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
@@ -349,11 +351,17 @@ export default function ProcessorDashboard() {
     finally { setIsAdHocProcessing(false); }
   };
 
-  const executeSimulatedScanner = async (e) => {
-    e.preventDefault();
-    if (!simulatedQrInput.trim()) {
+  const executeSimulatedScanner = async (e, scannedCode = null) => {
+    // Prevent default only if triggered by the form submission
+    if (e) e.preventDefault();
+    
+    // Prioritize the direct camera scan, otherwise fall back to the text input
+    const targetQr = scannedCode || simulatedQrInput;
+
+    if (!targetQr || !targetQr.trim()) {
       return minimalSwal.fire({ icon: 'warning', title: 'Input Required', text: 'Please type or scan a valid reference token string first.' });
     }
+    
     const targetUrl = scanMode === 'time-in' 
       ? 'http://localhost:5000/api/documents/scan-in' 
       : 'http://localhost:5000/api/documents/scan-out';
@@ -362,9 +370,10 @@ export default function ProcessorDashboard() {
       const res = await fetchWithAuth(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ qrCode: simulatedQrInput, processorUserId: parseInt(userId) })
+        body: JSON.stringify({ qrCode: targetQr, processorUserId: parseInt(userId) })
       });
       const data = await res.json();
+      
       if (res.ok) {
         minimalSwal.fire({ icon: 'success', title: 'Transaction Approved', text: data.message });
         setShowScannerModal(false);
@@ -957,24 +966,53 @@ export default function ProcessorDashboard() {
       </div>
 
       {showScannerModal && (
-        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-100">
-          <div className="bg-white w-full max-w-sm rounded-2xl border shadow-2xl p-6 text-center space-y-4">
-            <div className="w-12 h-12 bg-red-50 text-red-800 rounded-full flex items-center justify-center mx-auto text-xl">📷</div>
-            <div>
-              <h4 className="font-bold text-neutral-900 text-base">Simulated QR Scanner Camera</h4>
-              <p className="text-xs text-neutral-400 mt-1">Simulate scanning a token to perform automated validation checks.</p>
-            </div>
-            <div className="bg-neutral-100 p-2 rounded-xl flex border font-bold text-xs">
-              <button type="button" onClick={() => setScanMode('time-in')} className={`w-1/2 py-1.5 rounded-lg transition-all uppercase ${scanMode === 'time-in' ? 'bg-white text-red-800 shadow-xs' : 'text-neutral-400'}`}>Time-In</button>
-              <button type="button" onClick={() => setScanMode('time-out')} className={`w-1/2 py-1.5 rounded-lg transition-all uppercase ${scanMode === 'time-out' ? 'bg-white text-red-800 shadow-xs' : 'text-neutral-400'}`}>Time-Out</button>
-            </div>
-            <form onSubmit={executeSimulatedScanner} className="space-y-3">
-              <input type="text" required placeholder="Paste or Type Tracking Token (e.g., TRK-...)" value={simulatedQrInput} onChange={e => setSimulatedQrPayload(e.target.value)} className="w-full border px-3 py-2 text-xs font-mono text-center rounded-lg focus:ring-1 focus:ring-red-700 outline-none" />
-              <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => { setShowScannerModal(false); setSimulatedQrPayload(''); }} className="w-1/2 border py-2 text-xs font-bold text-gray-500 rounded-xl hover:bg-neutral-50">Cancel</button>
-                <button type="submit" className="w-1/2 bg-red-800 hover:bg-red-900 text-white text-xs font-bold rounded-xl shadow-sm uppercase tracking-wide">Execute Scan</button>
+        <div className="fixed inset-0 bg-neutral-950/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl border shadow-2xl p-6 text-center space-y-5">
+            
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-red-50 text-red-800 rounded-full flex items-center justify-center text-sm">📷</div>
+                <h4 className="font-black text-neutral-900 text-sm">Live QR Scanner</h4>
               </div>
+              <button onClick={() => { setShowScannerModal(false); setSimulatedQrPayload(''); }} className="text-neutral-400 hover:text-neutral-600 transition-colors"><X size={20} /></button>
+            </div>
+
+            <div className="bg-neutral-100 p-1.5 rounded-xl flex border font-bold text-xs">
+              <button type="button" onClick={() => setScanMode('time-in')} className={`w-1/2 py-2 rounded-lg transition-all uppercase tracking-wide ${scanMode === 'time-in' ? 'bg-white text-red-800 shadow-sm' : 'text-neutral-400 hover:text-neutral-600'}`}>Time-In</button>
+              <button type="button" onClick={() => setScanMode('time-out')} className={`w-1/2 py-2 rounded-lg transition-all uppercase tracking-wide ${scanMode === 'time-out' ? 'bg-white text-red-800 shadow-sm' : 'text-neutral-400 hover:text-neutral-600'}`}>Time-Out</button>
+            </div>
+
+            {/* LIVE CAMERA FEED AREA */}
+            <div className="overflow-hidden rounded-2xl border-2 border-dashed border-red-200 bg-neutral-900 relative h-56 flex items-center justify-center group">
+              <Scanner
+                onScan={(result) => {
+                  // When the camera detects a code, immediately process it and stop scanning
+                  if (result && result.length > 0) {
+                    const scannedValue = result[0].rawValue;
+                    setSimulatedQrPayload(scannedValue);
+                    executeSimulatedScanner(null, scannedValue);
+                  }
+                }}
+                components={{ audio: false, zoom: false }}
+                styles={{ container: { width: '100%', height: '100%', borderRadius: '1rem' } }}
+              />
+              <div className="absolute inset-0 pointer-events-none border-4 border-transparent group-hover:border-red-500/30 transition-colors rounded-2xl"></div>
+            </div>
+
+            <form onSubmit={(e) => executeSimulatedScanner(e)} className="space-y-3 pt-2 border-t border-neutral-100">
+              <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wide text-left">Manual Fallback Input</p>
+              <input 
+                type="text" 
+                placeholder="Type tracking token (TRK-...)" 
+                value={simulatedQrInput} 
+                onChange={e => setSimulatedQrPayload(e.target.value)} 
+                className="w-full border px-4 py-2.5 text-xs font-mono text-center rounded-xl focus:ring-1 focus:ring-red-700 outline-none bg-neutral-50 placeholder:text-neutral-400" 
+              />
+              <button type="submit" className="w-full bg-neutral-900 hover:bg-black text-white text-xs py-2.5 font-bold rounded-xl shadow-sm uppercase tracking-wide transition-colors">
+                Submit Manually
+              </button>
             </form>
+
           </div>
         </div>
       )}
@@ -1003,7 +1041,13 @@ export default function ProcessorDashboard() {
                   </div>
                 </div>
                 <div className="bg-neutral-50 p-2 border rounded-xl text-center flex-shrink-0">
-                  <QrCode size={70} className="text-neutral-800" />
+                  {/* Replaced placeholder with real QR */}
+                  <QRCodeSVG 
+                    value={selectedDoc.qr_code} 
+                    size={70} 
+                    level={"M"} 
+                    fgColor={"#262626"} 
+                  />
                 </div>
               </div>
               <div className="pt-4 border-t text-left">
@@ -1118,10 +1162,16 @@ export default function ProcessorDashboard() {
               <div className="border border-neutral-200 rounded-2xl p-5 bg-neutral-50/50 flex flex-col justify-between items-center text-center">
                 <span className="text-[9px] font-black text-neutral-400 uppercase tracking-wider">Security QR Identity</span>
                 <div className="bg-white p-4 border border-neutral-200 rounded-2xl shadow-xs my-3">
-                  <QrCode size={110} className="text-red-900" />
+                  {/* Replaced placeholder with real QR */}
+                  <QRCodeSVG 
+                    value={selectedDoc.qr_code} 
+                    size={110} 
+                    level={"H"} 
+                    fgColor={"#7f1d1d"} 
+                  />
                 </div>
-                <p className="text-[10px] text-neutral-400 leading-normal max-w-[180px] font-medium">Scan to verify authenticity on any authorized workstation.</p>
-                
+                <p className="text-[10px] text-neutral-400 leading-normal max-w-[180px] font-medium">Scan to verify authenticity on any authorized workstation.</p>            
+
                 {isHistoryDetails || selectedDoc.time_out ? (
                   <div className="w-full mt-4 border-t border-dashed border-neutral-200 pt-4 text-center">
                     <p className="text-[10px] font-black text-blue-700 bg-blue-50/80 border border-blue-100 rounded-xl p-3 uppercase tracking-wide">

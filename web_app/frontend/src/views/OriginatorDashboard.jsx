@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { QRCodeSVG } from 'qrcode.react';
 import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode, ChevronLeft, ChevronRight } from 'lucide-react';
 import DocumentsHub from './DocumentsHub';
 import ResourceScheduler from './ResourceScheduler';
@@ -630,8 +631,16 @@ export default function OriginatorDashboard() {
               <p className="text-xs text-neutral-400 mt-1">Your unique tracking token registry code is now active.</p>
             </div>
             <div className="bg-neutral-50 p-6 border rounded-xl flex flex-col items-center justify-center border-dashed">
-              <QrCode size={140} className="text-neutral-800" strokeWidth={1.5} />
-              <code className="text-[10px] mt-3 font-mono bg-white px-2 py-0.5 border rounded text-neutral-600 tracking-wider font-bold">{generatedQr}</code>
+            <QRCodeSVG 
+                value={generatedQr} 
+                size={140} 
+                level={"H"} 
+                includeMargin={true}
+                fgColor={"#171717"}
+              />
+              <code className="text-[10px] mt-3 font-mono bg-white px-2 py-0.5 border rounded text-neutral-600 tracking-wider font-bold">
+                {generatedQr}
+              </code>
             </div>
             <button type="button" onClick={() => setShowQrModal(false)} className="w-full py-2 bg-neutral-900 hover:bg-neutral-800 text-white font-medium text-xs rounded-lg transition-colors">Done & Close</button>
           </div>
