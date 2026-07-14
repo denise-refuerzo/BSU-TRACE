@@ -37,6 +37,13 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   http: ^1.6.0       # To convert standard PNG exports to JPG
+  
+# Find this section and update it:
+  screenshot: ^3.0.0
+  gal: ^2.3.0 # Replaced image_gallery_saver
+  pdf: ^3.11.1
+  printing: ^5.12.0
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:
@@ -46,6 +53,7 @@ flutter_icons:
   android: true
   ios: true
   image_path: "assets/bsu_trace.png"
+
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

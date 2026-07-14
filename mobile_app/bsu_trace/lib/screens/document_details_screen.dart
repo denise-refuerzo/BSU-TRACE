@@ -2,9 +2,10 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../config.dart';
+import '../widgets/modals/qr_download_modal.dart'; // Added import
 
 class DocumentDetailsScreen extends StatefulWidget {
   final int docId; 
@@ -114,7 +115,25 @@ class _DocumentDetailsScreenState extends State<DocumentDetailsScreen> {
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: OutlinedButton.icon(
-              onPressed: () {},
+              onPressed: () {
+                // Working functionality implemented here
+                final qrData = _docData['qr_code'] ?? 'No Tracking Code';
+                final docTitle = _docData['title'] ?? 'Untitled Document';
+                
+                if (qrData != 'No Tracking Code') {
+                  showDialog(
+                    context: context,
+                    builder: (context) => QrDownloadModal(
+                      qrData: qrData,
+                      documentTitle: docTitle,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No QR Code available to download for this document.')),
+                  );
+                }
+              },
               icon: const Icon(Icons.download, color: AppTheme.primaryRed),
               label: const Text('Download QR Code', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
               style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 50), side: const BorderSide(color: AppTheme.primaryRed)),

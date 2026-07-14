@@ -1,8 +1,9 @@
 // lib/widgets/modals/processor_document_details_modal.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
-import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
+import 'package:qr_flutter/qr_flutter.dart'; 
 import 'signee_ad_hoc_routing_modal.dart'; 
+import 'qr_download_modal.dart'; // Added import for the downloader
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
   final Map<String, dynamic> document;
@@ -239,6 +240,21 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                     fontWeight: FontWeight.w500,
                   ),
                 ),
+                const SizedBox(height: 8),
+                // Attached the downloader modal here
+                TextButton.icon(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => QrDownloadModal(
+                        qrData: trackingId,
+                        documentTitle: title,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.download, color: primaryRed, size: 18),
+                  label: const Text('Download QR Sticker', style: TextStyle(color: primaryRed, fontWeight: FontWeight.bold)),
+                )
               ],
             ),
           ),
