@@ -10,7 +10,7 @@ export default function AccountManagement() {
   // Tab control state: toggles view smoothly between registry table and creation form
   const [activeTab, setActiveTab] = useState('registry');
 
-  // --- REGISTRATION FORM STATES (COMPLETELY PRESERVED) ---
+  // --- REGISTRATION FORM STATES ---
   const [form, setForm] = useState({
     username: '', password: '', accountType: '', fullName: '', email: '', departmentId: '', officeId: ''
   });
@@ -55,7 +55,12 @@ export default function AccountManagement() {
     setMessage({ type: '', text: '' });
 
     const submissionFormPayload = { ...form };
-    if (form.accountType !== 2 && form.accountType !== 3) {
+    
+    // GSO Admin Auto-Assignment Interceptor
+    if (form.accountType === 4) {
+      const gsoOffice = offices.find(o => o.name.includes('General Services Office') || o.name.includes('GSO'));
+      submissionFormPayload.officeId = gsoOffice ? gsoOffice.id : 3; // Fallback to ID 3
+    } else if (form.accountType !== 2 && form.accountType !== 3) {
       submissionFormPayload.officeId = null;
     }
 
@@ -93,6 +98,15 @@ export default function AccountManagement() {
     }).then(async (result) => {
       if (result.isConfirmed) {
         try {
+          // GSO Admin Auto-Assignment Interceptor for Updates
+          let payloadOfficeId = selectedUser.o_id;
+          if (selectedUser.a_id === 4) {
+            const gsoOffice = offices.find(o => o.name.includes('General Services Office') || o.name.includes('GSO'));
+            payloadOfficeId = gsoOffice ? gsoOffice.id : 3;
+          } else if (selectedUser.a_id !== 2 && selectedUser.a_id !== 3) {
+            payloadOfficeId = null;
+          }
+
           const response = await fetchWithAuth(`http://localhost:5000/api/accounts/${selectedUser.u_id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -102,7 +116,7 @@ export default function AccountManagement() {
               email: selectedUser.uni_email,
               accountType: selectedUser.a_id,
               departmentId: selectedUser.d_id,
-              officeId: selectedUser.o_id,
+              officeId: payloadOfficeId,
               isActive: selectedUser.is_active // 🟢 Passed soft active state toggle to backend schema query maps
             })
           });
@@ -238,7 +252,8 @@ export default function AccountManagement() {
                             <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] uppercase ${
                               user.a_id === 5 ? 'bg-purple-100 text-purple-700' :
                               user.a_id === 3 ? 'bg-amber-100 text-amber-700' :
-                              user.a_id === 2 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                              user.a_id === 2 ? 'bg-blue-100 text-blue-700' : 
+                              user.a_id === 4 ? 'bg-rose-100 text-red-800' : 'bg-gray-100 text-gray-700'
                             }`}>
                               {user.role_name}
                             </span>
@@ -316,16 +331,18 @@ export default function AccountManagement() {
                         <option value="2">Processor</option>
                         <option value="3">Signee</option>
                         <option value="4">GSO Admin</option>
+                        <option value="5">ICT Admin</option>
                       </select>
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Department Scope</label>
                       <select 
-                        required={form.accountType !== 2 && form.accountType !== 3} value={form.departmentId} 
+                        required={form.accountType !== 2 && form.accountType !== 3 && form.accountType !== 4} 
+                        value={form.departmentId} 
                         onChange={e => setForm({...form, departmentId: e.target.value ? parseInt(e.target.value) : ''})}
                         className="w-full border border-neutral-300 bg-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-700 outline-none"
                       >
-                        <option value="">Select campus department (Optional for Processors/Signees)...</option>
+                        <option value="">Select campus department...</option>
                         <option value="1">CICS</option>
                         <option value="2">CABEIHM</option>
                         <option value="3">CAS</option>
@@ -334,18 +351,29 @@ export default function AccountManagement() {
                     </div>
                   </div>
 
-                  {(form.accountType === 2 || form.accountType === 3) && (
+                  {(form.accountType === 2 || form.accountType === 3 || form.accountType === 4) && (
                     <div className="animate-in fade-in slide-in-from-top-2 duration-200">
                       <label className="block text-[11px] font-black text-red-800 uppercase mb-1 tracking-wider">Assigned Office Workspace (Required for routing)</label>
-                      <select 
-                        required value={form.officeId} onChange={e => setForm({...form, officeId: parseInt(e.target.value)})}
-                        className="w-full border-2 border-red-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:ring-1 focus:ring-red-700 outline-none font-semibold text-neutral-700 cursor-pointer shadow-xs"
-                      >
-                        <option value="">-- Choose Assigned Campus Branch Office Stop --</option>
-                        {offices.map((off) => (
-                          <option key={off.id} value={off.id}>{off.name}</option>
-                        ))}
-                      </select>
+                      
+                      {/* GSO Admin Dynamic Render Check */}
+                      {form.accountType === 4 ? (
+                        <div className="w-full border-2 border-red-200 bg-red-50 rounded-lg px-3 py-2.5 text-sm font-semibold text-red-800 shadow-xs flex items-center justify-between">
+                          <span>General Services Office (GSO)</span>
+                          <span className="text-[10px] bg-red-800 text-white px-2 py-0.5 rounded uppercase tracking-wider">Auto-Assigned</span>
+                        </div>
+                      ) : (
+                        <select 
+                          required value={form.officeId} onChange={e => setForm({...form, officeId: parseInt(e.target.value)})}
+                          className="w-full border-2 border-red-200 bg-white rounded-lg px-3 py-2.5 text-sm focus:ring-1 focus:ring-red-700 outline-none font-semibold text-neutral-700 cursor-pointer shadow-xs"
+                        >
+                          <option value="">-- Choose Assigned Campus Branch Office Stop --</option>
+                          {offices
+                            .filter(off => !off.name.includes('General Services Office') && !off.name.includes('GSO')) // Filter out GSO for Signee/Processor
+                            .map((off) => (
+                            <option key={off.id} value={off.id}>{off.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   )}
 
@@ -366,6 +394,7 @@ export default function AccountManagement() {
                 <div className="p-3 bg-white/5 rounded-lg border-l-2 border-red-600"><p className="font-bold text-white">Originator:</p><p className="text-neutral-400 mt-0.5">Initializes new document workflows and drafts requests.</p></div>
                 <div className="p-3 bg-white/5 rounded-lg border-l-2 border-amber-500"><p className="font-bold text-white">Processor:</p><p className="text-neutral-400 mt-0.5">Validates data entry, handles scan arrivals/releases, and routes ad-hoc workflows inside an assigned office destination.</p></div>
                 <div className="p-3 bg-white/5 rounded-lg border-l-2 border-purple-500"><p className="font-bold text-white">Signee:</p><p className="text-neutral-400 mt-0.5">Final authority within an assigned office branch with access privileges to evaluate, sign, or reject active document states.</p></div>
+                <div className="p-3 bg-white/5 rounded-lg border-l-2 border-rose-500"><p className="font-bold text-white">GSO Admin:</p><p className="text-neutral-400 mt-0.5">Hybrid Processor/Signee role locked permanently to the General Services Office (GSO).</p></div>
               </div>
             </div>
           </div>
@@ -443,19 +472,30 @@ export default function AccountManagement() {
                 </div>
               </div>
 
-              {(selectedUser.a_id === 2 || selectedUser.a_id === 3) && (
+              {(selectedUser.a_id === 2 || selectedUser.a_id === 3 || selectedUser.a_id === 4) && (
                 <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
                   <label className="block text-[10px] uppercase text-red-800 font-black mb-1">Assigned Branch Destination Office Block</label>
-                  <select 
-                    required value={selectedUser.o_id || ''}
-                    onChange={e => setSelectedUser({...selectedUser, o_id: e.target.value ? parseInt(e.target.value) : null})}
-                    className="w-full border border-neutral-300 bg-white rounded-lg px-2 py-2 font-bold outline-none text-neutral-700"
-                  >
-                    <option value="">-- No Location Assigned --</option>
-                    {offices.map((off) => (
-                      <option key={off.id} value={off.id}>{off.name}</option>
-                    ))}
-                  </select>
+                  
+                  {/* GSO Admin Edit Interceptor */}
+                  {selectedUser.a_id === 4 ? (
+                    <div className="w-full border border-red-200 bg-white rounded-lg px-2 py-2 font-bold text-red-800 flex items-center justify-between">
+                      <span>General Services Office (GSO)</span>
+                      <span className="text-[9px] bg-red-100 px-1.5 py-0.5 rounded tracking-wider">Locked</span>
+                    </div>
+                  ) : (
+                    <select 
+                      required value={selectedUser.o_id || ''}
+                      onChange={e => setSelectedUser({...selectedUser, o_id: e.target.value ? parseInt(e.target.value) : null})}
+                      className="w-full border border-neutral-300 bg-white rounded-lg px-2 py-2 font-bold outline-none text-neutral-700"
+                    >
+                      <option value="">-- No Location Assigned --</option>
+                      {offices
+                        .filter(off => !off.name.includes('General Services Office') && !off.name.includes('GSO'))
+                        .map((off) => (
+                        <option key={off.id} value={off.id}>{off.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 

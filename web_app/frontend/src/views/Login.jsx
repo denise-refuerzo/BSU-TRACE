@@ -72,7 +72,10 @@ export default function Login() {
         navigate('/processor/dashboard');   
       } else if (data.role === 3) {
         navigate('/signee/dashboard');   
-      } else {
+      } else if (data.role === 4) {
+        navigate('/gso-dashboard'); 
+      }
+       else {
         navigate('/dashboard');    
       }
     } catch (err) {

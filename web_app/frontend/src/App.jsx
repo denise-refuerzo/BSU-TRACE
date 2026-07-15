@@ -7,6 +7,7 @@ import AdminDashboard from './views/AdminDashboard';
 import OriginatorDashboard from './views/OriginatorDashboard';
 import ProcessorDashboard from './views/ProcessorDashboard';
 import SigneeDashboard from './views/SigneeDashboard';
+import GSOAdminDashboard from './views/GSOAdminDashboard';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="/dashboard" element={<OriginatorDashboard />} />
         <Route path="/processor/dashboard" element={<ProcessorDashboard />} />
         <Route path="/signee/dashboard" element={<SigneeDashboard />} />
+        <Route path="/gso-dashboard" element={<GSOAdminDashboard />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

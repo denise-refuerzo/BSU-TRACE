@@ -354,6 +354,7 @@ app.post('/api/accounts', requireAuth, async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     
+    
     const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3) && officeId 
       ? parseInt(officeId) 
       : null;
