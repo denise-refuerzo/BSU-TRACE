@@ -4,27 +4,7 @@ import Swal from 'sweetalert2';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
-  LayoutDashboard, 
-  Archive, 
-  ShoppingCart, 
-  BarChart3, 
-  History, 
-  Bell, 
-  User, 
-  Search, 
-  Filter, 
-  X, 
-  QrCode, 
-  LogOut, 
-  Eye, 
-  GitBranch,
-  Camera,
-  KeyRound,
-  ShieldCheck,
-  Building,
-  Landmark,
-  Download,
-  FileText
+  LayoutDashboard, Archive, ShoppingCart, BarChart3,History, Bell,  User,  Search, Filter, X,  QrCode, LogOut,Eye, GitBranch,Camera, KeyRound,ShieldCheck,Building, Landmark, Download, FileText, Plus, Calendar,  Lock, Edit, Trash2, Car
 } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
@@ -94,6 +74,70 @@ export default function GSOAdminDashboard() {
   const [scanMode, setScanMode] = useState('time-in');
   const [simulatedQrInput, setSimulatedQrPayload] = useState('');
   const [showPassModal, setShowPassModal] = useState(false);
+
+    // --- School Resources States ---
+  const [assetsList, setAssetsList] = useState([]);
+  const [equipmentInventory, setEquipmentInventory] = useState([]);
+  const [assetBlackouts, setAssetBlackouts] = useState([]);
+
+  // Resources Modal Controllers
+  const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [assetForm, setAssetForm] = useState({
+    assetName: '',
+    assetTypeId: '1', // Default to Room
+    quantity: 1,
+    isConfirmed: false
+  });
+  const [showInventoryModal, setShowInventoryModal] = useState(false);
+  const [inventoryModalMode, setInventoryModalMode] = useState('LEND'); // 'LEND' or 'RETURN'
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState(null);
+  const [showBlackoutModal, setShowBlackoutModal] = useState(false);
+
+  const [showEditAssetModal, setShowEditAssetModal] = useState(false);
+  const [selectedEditAsset, setSelectedEditAsset] = useState(null);
+  const [assetSchedule, setAssetSchedule] = useState([]);
+
+  const [inventoryForm, setInventoryForm] = useState({
+    requestorName: '', department: '', purpose: '', duration: '', quantityNeeded: '', 
+    returnDate: '', returnTime: '', 
+    isDamaged: false, damageNotes: '' // <-- Added these two
+  });
+
+const fetchMasterAssets = async () => {
+  try {
+    const res = await fetchWithAuth('http://localhost:5000/api/resources/assets');
+    const data = await res.json();
+    if (res.ok) setAssetsList(data);
+  } catch (err) { console.error("Error pulling master assets:", err); }
+};
+
+// Trigger fetch when the Resources tab is clicked
+useEffect(() => {
+  if (activeTab === 'resources') {
+    fetchMasterAssets();
+  }
+}, [activeTab]);
+
+const handleAddAssetSubmit = async (e) => {
+  e.preventDefault();
+  if (!assetForm.isConfirmed) return minimalSwal.fire({ icon: 'warning', title: 'Confirmation Required', text: 'Please verify the asset accuracy.' });
+  
+  try {
+    const res = await fetchWithAuth('http://localhost:5000/api/resources/assets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(assetForm)
+    });
+    if (res.ok) {
+      minimalSwal.fire({ icon: 'success', title: 'Asset Added', text: 'New asset registered to the master list.' });
+      setShowAddAssetModal(false);
+      setAssetForm({ assetName: '', assetTypeId: '1', quantity: 1, isConfirmed: false });
+      fetchMasterAssets(); // Refresh the table
+    }
+  } catch (err) {
+    minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to communicate with server.' });
+  }
+};
 
   useEffect(() => {
     if (!userId || userId === 'undefined') {
@@ -405,6 +449,116 @@ export default function GSOAdminDashboard() {
   const currentHistoryPageRows = filteredHistoryLogs.slice((historyPage - 1) * itemsPerPage, historyPage * itemsPerPage);
   const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
+  const handleDeleteAsset = (id, name) => {
+    minimalSwal.fire({
+      title: 'Delete Asset?',
+      text: `Are you sure you want to permanently remove ${name}?`,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'Yes, Delete'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          const res = await fetchWithAuth(`http://localhost:5000/api/resources/assets/${id}`, { method: 'DELETE' });
+          if (res.ok) {
+            minimalSwal.fire({ icon: 'success', title: 'Deleted', text: 'Asset removed from registry.' });
+            fetchMasterAssets();
+          } else {
+            minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Cannot delete asset tied to existing records.' });
+          }
+        } catch (err) { console.error(err); }
+      }
+    });
+  };
+  
+  const handleOpenEditModal = async (asset) => {
+    setSelectedEditAsset({ ...asset });
+    setAssetSchedule([]); // Clear previous schedule
+    setShowEditAssetModal(true);
+    
+    // Fetch upcoming confirmed reservations for this asset
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/resources/assets/${asset.asd_id}/schedule`);
+      const data = await res.json();
+      if (res.ok) setAssetSchedule(data);
+    } catch (err) { console.error(err); }
+  };
+  
+  const handleUpdateAsset = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/resources/assets/${selectedEditAsset.asd_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetName: selectedEditAsset.asset_name, quantity: selectedEditAsset.quantity })
+      });
+      if (res.ok) {
+        minimalSwal.fire({ icon: 'success', title: 'Updated', text: 'Asset details saved.' });
+        setShowEditAssetModal(false);
+        fetchMasterAssets();
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchInventoryMetrics = async () => {
+    try {
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/inventory');
+      const data = await res.json();
+      if (res.ok) setEquipmentInventory(data);
+    } catch (err) { console.error(err); }
+  };
+  
+  // Update your existing useEffect to also fetch the inventory when the tab opens
+  useEffect(() => {
+    if (activeTab === 'resources') {
+      fetchMasterAssets();
+      fetchInventoryMetrics(); // <-- Add this line
+    }
+  }, [activeTab]);
+  
+  const handleInventorySubmit = async (e) => {
+    e.preventDefault();
+    setIsActionProcessing(true);
+    
+    const endpoint = inventoryModalMode === 'LEND' 
+      ? 'http://localhost:5000/api/resources/inventory/lend' 
+      : 'http://localhost:5000/api/resources/inventory/return';
+  
+      const payload = inventoryModalMode === 'LEND' ? {
+        asd_id: selectedInventoryItem.asd_id,
+        requestorName: inventoryForm.requestorName,
+        department: inventoryForm.department,
+        purpose: inventoryForm.purpose,
+        quantityNeeded: parseInt(inventoryForm.quantityNeeded),
+        duration: inventoryForm.duration
+      } : {
+        asd_id: selectedInventoryItem.asd_id,
+        requestorName: inventoryForm.requestorName,
+        quantityReturned: parseInt(inventoryForm.quantityNeeded),
+        isDamaged: inventoryForm.isDamaged,        
+        damageNotes: inventoryForm.damageNotes      
+      };
+  
+    try {
+      const res = await fetchWithAuth(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (res.ok) {
+        minimalSwal.fire({ icon: 'success', title: 'Transaction Logged', text: `Stock successfully updated for ${selectedInventoryItem.asset_name}.` });
+        setShowInventoryModal(false);
+        setInventoryForm({ requestorName: '', department: '', purpose: '', duration: '', quantityNeeded: '', returnDate: '', returnTime: '' });
+        fetchInventoryMetrics(); // Refresh the numbers!
+      } else {
+        const errData = await res.json();
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: errData.error || 'Transaction failed.' });
+      }
+    } catch (err) { console.error(err); }
+    finally { setIsActionProcessing(false); }
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -607,6 +761,166 @@ export default function GSOAdminDashboard() {
             </div>
           )}
 
+            {activeTab === 'resources' && (
+              <div className="max-w-7xl mx-auto space-y-6 text-left animate-in fade-in duration-200">
+                
+                {/* HEADER SECTION */}
+                <div className="flex justify-between items-end border-b border-neutral-200 pb-4">
+                  <div>
+                    <h2 className="text-xl font-black text-neutral-900">Administrative Asset Management</h2>
+                    <p className="text-xs text-neutral-500 font-medium mt-1">Hub for managing institutional resources and logistics</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowAddAssetModal(true)}
+                    className="px-5 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                  >
+                    <Plus size={16} /> Add New Asset
+                  </button>
+                </div>
+
+                {/* TOP ROW: Management Table & Inventory Cards */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  
+                  {/* LEFT COLUMN: Resource Management Master Table */}
+                  <div className="lg:col-span-2 bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
+                        <Archive size={16} className="text-red-800" /> Resource Management
+                      </h3>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-bold text-neutral-500">Filter:</span>
+                        <select className="border border-neutral-300 rounded-lg px-2 py-1 outline-none font-bold text-neutral-700 bg-neutral-50">
+                          <option value="All">All Assets</option>
+                          <option value="Room">Rooms</option>
+                          <option value="Vehicle">Vehicles</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    {/* Table will go here */}
+                    <div className="overflow-x-auto border border-neutral-200 rounded-xl">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-red-50/50 border-b border-neutral-200 font-black uppercase text-[10px] text-neutral-600 tracking-wider">
+                            <th className="p-3 pl-4">Asset Name</th>
+                            <th className="p-3">Type</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3 text-right pr-4">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-100 font-medium">
+                        {assetsList.map((asset) => (
+                          <tr key={asset.asd_id} className="hover:bg-neutral-50 transition-colors">
+                            <td className="p-3 pl-4 flex items-center gap-3">
+                              <div className={`p-1.5 rounded-lg ${asset.ast_id === 4 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-800'}`}>
+                                {asset.ast_id === 4 ? <Car size={16} /> : <Building size={16} />}
+                              </div>
+                              <span className="font-bold text-neutral-900">{asset.asset_name}</span>
+                            </td>
+                            <td className="p-3 text-neutral-600">{asset.asset_type === 'Furniture' ? 'Equipment' : asset.asset_type}</td>
+                            <td className="p-3">
+                              {/* Dynamic Status Indicator */}
+                              <span className={`inline-flex items-center gap-1.5 px-2 py-1 border rounded-md font-bold text-[9px] uppercase tracking-wide
+                                ${asset.current_status === 'Available' ? 'bg-green-50 text-green-700 border-green-200' : 
+                                  asset.current_status === 'Maintenance' ? 'bg-neutral-100 text-neutral-700 border-neutral-300' : 
+                                  'bg-red-50 text-red-700 border-red-200'}
+                              `}>
+                                <span className={`w-1.5 h-1.5 rounded-full 
+                                  ${asset.current_status === 'Available' ? 'bg-green-500' : 
+                                    asset.current_status === 'Maintenance' ? 'bg-neutral-500' : 'bg-red-500'}`}>
+                                </span> 
+                                {asset.current_status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right pr-4">
+                              <div className="flex items-center justify-end gap-4 text-red-800">
+                                <button onClick={() => handleOpenEditModal(asset)} className="hover:text-red-900 transition-transform hover:scale-110"><Edit size={16}/></button>
+                                <button onClick={() => handleDeleteAsset(asset.asd_id, asset.asset_name)} className="hover:text-red-900 transition-transform hover:scale-110"><Trash2 size={16}/></button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                  {assetsList.length === 0 && (
+                    <tr><td colSpan="4" className="p-6 text-center text-neutral-400 font-bold">No assets found in the registry.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* RIGHT COLUMN: Logistics Inventory */}
+          <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm bg-neutral-50/30">
+            <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2 mb-4">
+              <Archive size={16} className="text-red-800" /> Logistics Inventory
+            </h3>
+            
+            {/* Inventory Cards will go here */}
+            <div className="space-y-4">
+              {equipmentInventory.length === 0 ? (
+                <div className="text-center p-6 border-2 border-dashed border-neutral-200 rounded-xl text-neutral-400 text-xs font-bold">
+                  No equipment registered.
+                </div>
+              ) : (
+                equipmentInventory.map((item) => (
+                  <div key={item.asd_id} className="bg-white border border-red-100 rounded-xl p-4 shadow-sm relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 w-16 h-16 bg-red-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+                    <h4 className="font-black text-neutral-900 text-sm">{item.asset_name}</h4>
+                    <span className="text-[9px] text-neutral-400 font-black uppercase tracking-wider block mt-0.5">EQP-ID-{item.asd_id}</span>
+                    
+                    <div className="flex justify-between items-center mt-4 mb-5">
+                      <div className="text-center w-1/2 border-r border-neutral-100">
+                        <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wide">Current</span>
+                        <p className="text-xl font-black text-red-800 leading-none mt-1">{item.current_stock}</p>
+                      </div>
+                      <div className="text-center w-1/2">
+                        <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wide">Capacity</span>
+                        <p className="text-xl font-black text-neutral-800 leading-none mt-1">{item.capacity}</p>
+                      </div>
+                    </div>
+                    
+                    <button 
+                      onClick={() => { setSelectedInventoryItem(item); setShowInventoryModal(true); }}
+                      className="w-full py-2 border border-red-200 text-red-800 bg-red-50 hover:bg-red-100 font-bold text-xs rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Edit size={14} /> Update Stock
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM ROW: Calendar Availability Control */}
+        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm mt-6">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
+                <Calendar size={16} className="text-red-800" /> Calendar Availability Control
+              </h3>
+              <p className="text-xs text-neutral-500 font-medium mt-1">Block dates for maintenance or priority events.</p>
+              <button className="mt-3 px-4 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-sm flex items-center gap-2">
+                <Lock size={12} /> Block Dates
+              </button>
+            </div>
+            
+            {/* Facility Toggle */}
+            <div className="bg-neutral-100 p-1 rounded-xl flex font-bold text-[10px]">
+              <button className="px-4 py-2 rounded-lg text-neutral-500 hover:text-neutral-800 uppercase tracking-wider">Vehicle</button>
+              <button className="px-4 py-2 rounded-lg text-neutral-500 hover:text-neutral-800 uppercase tracking-wider">Multimedia Room</button>
+              <button className="px-4 py-2 rounded-lg bg-red-800 text-white shadow-sm uppercase tracking-wider">Gymnasium</button>
+            </div>
+          </div>
+          
+          {/* Calendar Matrix will go here */}
+          <div className="min-h-[300px] border-2 border-dashed border-neutral-100 rounded-xl flex items-center justify-center text-neutral-400 text-xs font-bold bg-neutral-50/50">
+            [ Calendar Canvas Component ]
+          </div>
+        </div>
+
+      </div>
+    )}
+
     {activeTab === 'history' && (
             <div className="max-w-7xl mx-auto bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left animate-in fade-in duration-200">
               <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -687,7 +1001,7 @@ export default function GSOAdminDashboard() {
           )}
 
           {/* PLACEHOLDER TABS FOR OTHERS TO KEEP NAVIGATION CLEAN */}
-          {(activeTab === 'resources' || activeTab === 'procurement' || activeTab === 'analytics' ) && (
+          {( activeTab === 'procurement' || activeTab === 'analytics' ) && (
             <div className="max-w-7xl mx-auto flex items-center justify-center h-64 border-2 border-dashed border-neutral-200 rounded-xl bg-white text-neutral-400 font-bold">
               {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module - System Architecture Loading...
             </div>
@@ -1024,6 +1338,299 @@ export default function GSOAdminDashboard() {
             <form onSubmit={executeSimulatedScanner} className="pt-2 border-t">
               <input type="text" placeholder="Or enter manual token..." value={simulatedQrInput} onChange={e => setSimulatedQrPayload(e.target.value)} className="w-full border px-4 py-2.5 text-xs font-mono text-center rounded-xl outline-none focus:ring-1 focus:ring-red-800 mb-2 bg-neutral-50" />
               <button type="submit" className="w-full bg-neutral-900 hover:bg-black text-white text-xs py-2.5 font-bold rounded-xl uppercase tracking-wider">Process Submission</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- ADD NEW ASSET MODAL --- */}
+      {showAddAssetModal && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm">Add New Institutional Asset</h3>
+              <button onClick={() => setShowAddAssetModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+            
+            <form onSubmit={handleAddAssetSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Asset Name</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="e.g. Science Lab 302 or Bus 05" 
+                  value={assetForm.assetName} 
+                  onChange={e => setAssetForm({...assetForm, assetName: e.target.value})} 
+                  className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
+                />
+              </div>
+              
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Asset Type</label>
+                <select 
+                  value={assetForm.assetTypeId} 
+                  onChange={e => setAssetForm({...assetForm, assetTypeId: e.target.value})} 
+                  className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none bg-white font-medium"
+                >
+                  <option value="1">Room</option>
+                  <option value="2">Gymnasium</option>
+                  <option value="4">Vehicle</option>
+                  <option value="3">Equipment / Furniture</option>
+                </select>
+              </div>
+
+              {/* Conditionally render Quantity if "Equipment / Furniture" (ast_id 3) is selected */}
+              {assetForm.assetTypeId === '3' && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Total Quantity Stock</label>
+                  <input 
+                    type="number" 
+                    required 
+                    min="1"
+                    placeholder="e.g. 50" 
+                    value={assetForm.quantity} 
+                    onChange={e => setAssetForm({...assetForm, quantity: e.target.value})} 
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
+                  />
+                </div>
+              )}
+
+              <div className="flex items-start gap-2.5 pt-4">
+                <input 
+                  type="checkbox" 
+                  id="assetConfirm" 
+                  checked={assetForm.isConfirmed}
+                  onChange={e => setAssetForm({...assetForm, isConfirmed: e.target.checked})}
+                  className="mt-0.5 rounded text-red-800 focus:ring-red-700 w-3.5 h-3.5" 
+                />
+                <label htmlFor="assetConfirm" className="text-[11px] font-medium text-gray-500 leading-tight cursor-pointer">
+                  I confirm the accuracy of this asset information and its current availability status.
+                </label>
+              </div>
+
+              <div className="flex justify-between gap-3 pt-6 border-t border-neutral-100 mt-2">
+                <button type="button" onClick={() => setShowAddAssetModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs text-gray-500 hover:bg-neutral-50 uppercase tracking-wide">Cancel</button>
+                <button type="submit" className="w-1/2 py-2.5 bg-red-800 hover:bg-red-900 text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs">Add Asset</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- EDIT ASSET & DETAILS MODAL --- */}
+      {showEditAssetModal && selectedEditAsset && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm">Asset Details & Configuration</h3>
+              <button onClick={() => setShowEditAssetModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+            
+            <div className="flex flex-col md:flex-row h-[60vh] md:h-auto max-h-[80vh]">
+              {/* Left Column: Edit Form */}
+              <form onSubmit={handleUpdateAsset} className="p-6 md:w-1/2 space-y-4 border-b md:border-b-0 md:border-r border-neutral-100 overflow-y-auto">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Asset Name</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={selectedEditAsset.asset_name} 
+                    onChange={e => setSelectedEditAsset({...selectedEditAsset, asset_name: e.target.value})} 
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Asset Type</label>
+                  <input 
+                    type="text" 
+                    readOnly
+                    value={selectedEditAsset.asset_type === 'Furniture' ? 'Equipment' : selectedEditAsset.asset_type} 
+                    className="w-full px-4 py-2 text-xs border border-neutral-200 bg-neutral-50 text-neutral-500 rounded-lg outline-none cursor-not-allowed" 
+                  />
+                </div>
+
+                {selectedEditAsset.ast_id === 3 && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Total Quantity Stock</label>
+                    <input 
+                      type="number" 
+                      required 
+                      min="1"
+                      value={selectedEditAsset.quantity} 
+                      onChange={e => setSelectedEditAsset({...selectedEditAsset, quantity: e.target.value})} 
+                      className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
+                    />
+                  </div>
+                )}
+
+                <div className="pt-6 border-t border-neutral-100 mt-auto">
+                  <button type="submit" className="w-full py-2.5 bg-red-800 hover:bg-red-900 text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs">Save Changes</button>
+                </div>
+              </form>
+
+              {/* Right Column: Upcoming Schedule */}
+              <div className="p-6 md:w-1/2 bg-neutral-50/50 overflow-y-auto">
+                <h4 className="text-xs font-black text-neutral-900 uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <Calendar size={14} className="text-red-800"/> Confirmed Schedule
+                </h4>
+                
+                <div className="space-y-3">
+                  {assetSchedule.length === 0 ? (
+                    <div className="text-center p-6 border-2 border-dashed border-neutral-200 rounded-xl text-neutral-400 text-xs font-bold">
+                      No upcoming confirmed reservations.
+                    </div>
+                  ) : (
+                    assetSchedule.map((sched, idx) => {
+                      const dateObj = new Date(sched.reservation_date);
+                      return (
+                        <div key={idx} className="bg-white p-3 rounded-xl border border-neutral-200 shadow-sm flex flex-col gap-1">
+                          <div className="flex justify-between items-start">
+                            <span className="font-bold text-neutral-900 text-xs">{dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                            <span className="text-[10px] font-mono font-bold text-red-800 bg-red-50 px-2 py-0.5 rounded">
+                              {sched.start_time.substring(0,5)} - {sched.end_time.substring(0,5)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-neutral-600 font-medium">For: <span className="font-bold">{sched.purpose}</span></p>
+                          <p className="text-[10px] text-neutral-400">By: {sched.requestor}</p>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- LOGISTICS INVENTORY LEND/RETURN MODAL --- */}
+      {showInventoryModal && selectedInventoryItem && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            
+            {/* Tab Selectors */}
+            <div className="flex border-b">
+              <button 
+                onClick={() => setInventoryModalMode('LEND')}
+                className={`w-1/2 py-4 text-xs font-black uppercase tracking-wider transition-colors ${inventoryModalMode === 'LEND' ? 'text-red-800 border-b-2 border-red-800 bg-white' : 'text-neutral-400 bg-neutral-50 hover:bg-neutral-100'}`}
+              >
+                Lending Form
+              </button>
+              <button 
+                onClick={() => setInventoryModalMode('RETURN')}
+                className={`w-1/2 py-4 text-xs font-black uppercase tracking-wider transition-colors ${inventoryModalMode === 'RETURN' ? 'text-red-800 border-b-2 border-red-800 bg-white' : 'text-neutral-400 bg-neutral-50 hover:bg-neutral-100'}`}
+              >
+                Return Form
+              </button>
+            </div>
+            
+            <form onSubmit={handleInventorySubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="bg-red-50/50 p-3 rounded-xl border border-red-100 mb-2">
+                <span className="text-[10px] text-red-800 font-bold uppercase block">Target Asset</span>
+                <span className="font-black text-neutral-900 text-sm">{selectedInventoryItem.asset_name}</span>
+              </div>
+
+              {inventoryModalMode === 'LEND' ? (
+                <div className="space-y-4 animate-in fade-in slide-in-from-right-2 duration-200">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Requestor</label>
+                      <input type="text" required value={inventoryForm.requestorName} onChange={e => setInventoryForm({...inventoryForm, requestorName: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Department</label>
+                      <input type="text" required value={inventoryForm.department} onChange={e => setInventoryForm({...inventoryForm, department: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Purpose</label>
+                    <input type="text" required value={inventoryForm.purpose} onChange={e => setInventoryForm({...inventoryForm, purpose: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Date</label>
+                      <input type="date" required className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Duration (Hours)</label>
+                      <input type="number" required value={inventoryForm.duration} onChange={e => setInventoryForm({...inventoryForm, duration: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Quantity Needed</label>
+                    <input type="number" required max={selectedInventoryItem.current_stock} min="1" value={inventoryForm.quantityNeeded} onChange={e => setInventoryForm({...inventoryForm, quantityNeeded: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4 animate-in fade-in slide-in-from-left-2 duration-200">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Requestor (Matching Name)</label>
+                    <input type="text" required value={inventoryForm.requestorName} onChange={e => setInventoryForm({...inventoryForm, requestorName: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Return Date</label>
+                      <input type="date" required value={inventoryForm.returnDate} onChange={e => setInventoryForm({...inventoryForm, returnDate: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Return Time</label>
+                      <input type="time" required value={inventoryForm.returnTime} onChange={e => setInventoryForm({...inventoryForm, returnTime: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Quantity Returned</label>
+                    <input type="number" required min="1" value={inventoryForm.quantityNeeded} onChange={e => setInventoryForm({...inventoryForm, quantityNeeded: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                  </div>
+                  <div className="pt-2 border-t border-neutral-100">
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-3">Item Condition Upon Return</label>
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 text-xs font-bold text-neutral-700 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="condition" 
+                        checked={!inventoryForm.isDamaged} 
+                        onChange={() => setInventoryForm({...inventoryForm, isDamaged: false, damageNotes: ''})} 
+                        className="text-red-800 focus:ring-red-700 w-3.5 h-3.5" 
+                      />
+                      Good / No Damages
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-bold text-neutral-700 cursor-pointer">
+                      <input 
+                        type="radio" 
+                        name="condition" 
+                        checked={inventoryForm.isDamaged} 
+                        onChange={() => setInventoryForm({...inventoryForm, isDamaged: true})} 
+                        className="text-red-800 focus:ring-red-700 w-3.5 h-3.5" 
+                      />
+                      Damaged
+                    </label>
+                  </div>
+
+                  {/* Conditionally Render Damage Notes */}
+                  {inventoryForm.isDamaged && (
+                    <div className="mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Damage Assessment Notes</label>
+                      <textarea
+                        required
+                        rows="2"
+                        placeholder="Describe the damages found (e.g., 2 chairs have broken legs)..."
+                        value={inventoryForm.damageNotes}
+                        onChange={e => setInventoryForm({...inventoryForm, damageNotes: e.target.value})}
+                        className="w-full px-4 py-2 text-xs border border-red-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-red-50 text-red-900 placeholder:text-red-300 resize-none"
+                      />
+                    </div>
+                  )}
+                </div>
+                </div>
+              )}
+
+              <div className="flex justify-between gap-3 pt-6 border-t border-neutral-100 mt-2">
+                <button type="button" onClick={() => setShowInventoryModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs text-gray-500 hover:bg-neutral-50 uppercase tracking-wide">Cancel</button>
+                <button type="submit" disabled={isActionProcessing} className="w-1/2 py-2.5 bg-red-800 hover:bg-red-900 text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs disabled:opacity-50">
+                  {inventoryModalMode === 'LEND' ? 'Submit' : 'Confirm Return'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

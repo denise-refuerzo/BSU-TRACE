@@ -397,12 +397,81 @@ app.get('/api/resources/bookings', async (req, res) => {
 
 app.get('/api/resources/inventory', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT asd_id, asset_name, quantity FROM public.asset_details WHERE ast_id = 3`
-    );
+    const query = `
+      SELECT 
+        ad.asd_id, 
+        ad.asset_name, 
+        ad.quantity as capacity,
+        (ad.quantity - COALESCE(
+          (SELECT SUM(qty_borrowed) FROM public.equipment_ledgers el 
+           WHERE el.asd_id = ad.asd_id AND el.status = 'Borrowed'), 0
+        )) as current_stock
+      FROM public.asset_details ad 
+      WHERE ad.ast_id = 3
+      ORDER BY ad.asd_id ASC
+    `;
+    const result = await pool.query(query);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: "Failed to grab inventory quantities" });
+  }
+});
+
+// 2. PROCESS LENDING FORM
+app.post('/api/resources/inventory/lend', requireAuth, async (req, res) => {
+  const { asd_id, requestorName, department, purpose, quantityNeeded, duration } = req.body;
+  try {
+    // Basic validation to prevent borrowing more than exists
+    const stockCheck = await pool.query(`
+      SELECT (quantity - COALESCE((SELECT SUM(qty_borrowed) FROM public.equipment_ledgers WHERE asd_id = $1 AND status = 'Borrowed'), 0)) as current_stock 
+      FROM public.asset_details WHERE asd_id = $1
+    `, [asd_id]);
+    
+    if (stockCheck.rows[0].current_stock < quantityNeeded) {
+      return res.status(400).json({ error: "Not enough current stock available for this request." });
+    }
+
+    await pool.query(`
+      INSERT INTO public.equipment_ledgers (asd_id, requestor_name, department, purpose, qty_borrowed, expected_return, status, processed_by)
+      VALUES ($1, $2, $3, $4, $5, TIMEZONE('Asia/Manila', NOW()) + interval '1 hour' * $6, 'Borrowed', $7)
+    `, [asd_id, requestorName, department, purpose, quantityNeeded, parseInt(duration) || 24, req.user.u_id]);
+    
+    res.json({ message: "Equipment successfully logged as borrowed." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to process lending transaction." });
+  }
+});
+
+// 3. PROCESS RETURN FORM
+app.post('/api/resources/inventory/return', requireAuth, async (req, res) => {
+  const { asd_id, requestorName, quantityReturned, isDamaged, damageNotes } = req.body;
+  try {
+    const activeLog = await pool.query(`
+      SELECT log_id FROM public.equipment_ledgers 
+      WHERE asd_id = $1 AND LOWER(requestor_name) = LOWER($2) AND status = 'Borrowed'
+      ORDER BY borrowed_at ASC LIMIT 1
+    `, [asd_id, requestorName]);
+
+    if (activeLog.rows.length === 0) {
+      return res.status(404).json({ error: "No active borrowing record found for this requestor and item." });
+    }
+
+    // Determine values to inject based on the boolean flag
+    const condition = isDamaged ? 'Damaged' : 'Good';
+    const notes = isDamaged ? damageNotes : null;
+
+    await pool.query(`
+      UPDATE public.equipment_ledgers 
+      SET status = 'Returned', returned_at = TIMEZONE('Asia/Manila', NOW()), processed_by = $1,
+          condition_on_return = $3, damage_notes = $4
+      WHERE log_id = $2
+    `, [req.user.u_id, activeLog.rows[0].log_id, condition, notes]);
+
+    res.json({ message: "Equipment return successfully logged. Stock replenished." });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to process return transaction." });
   }
 });
 
@@ -452,6 +521,112 @@ app.post('/api/resources/book', async (req, res) => {
     res.status(500).json({ error: err.message || "Failed transactional database commitment sequence." });
   } finally {
     client.release();
+  }
+});
+
+// FETCH ALL MASTER ASSETS
+app.get('/api/resources/assets', async (req, res) => {
+  try {
+    const query = `
+      SELECT ad.asd_id, ad.asset_name, ad.quantity, at.asset_type, at.ast_id,
+      (
+        SELECT CASE
+          WHEN EXISTS (
+            SELECT 1 FROM public.asset_blackouts ab 
+            WHERE ab.asd_id = ad.asd_id AND TIMEZONE('Asia/Manila', NOW()) BETWEEN ab.start_time AND ab.end_time
+          ) THEN 'Maintenance'
+          WHEN EXISTS (
+            SELECT 1 FROM public.bookings b
+            JOIN public.gm_requirements gm ON b.booking_id = gm.booking_id
+            WHERE gm.asd_id = ad.asd_id AND b.status = 'Confirmed'
+            AND b.reservation_date = (TIMEZONE('Asia/Manila', NOW()))::date
+            AND (TIMEZONE('Asia/Manila', NOW()))::time BETWEEN gm.start_time AND gm.end_time
+          ) THEN 'Occupied'
+          WHEN EXISTS (
+            SELECT 1 FROM public.bookings b
+            JOIN public.vehicle_requirements vr ON b.booking_id = vr.booking_id
+            WHERE vr.asd_id = ad.asd_id AND b.status = 'Confirmed'
+            AND b.reservation_date = (TIMEZONE('Asia/Manila', NOW()))::date
+            AND (TIMEZONE('Asia/Manila', NOW()))::time BETWEEN vr.pick_up_time AND vr.drop_off_time
+          ) THEN 'Occupied'
+          ELSE 'Available'
+        END
+      ) as current_status
+      FROM public.asset_details ad
+      JOIN public.asset_type at ON ad.ast_id = at.ast_id
+      ORDER BY ad.asd_id ASC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching master assets:", err);
+    res.status(500).json({ error: "Failed to load institutional assets" });
+  }
+});
+
+// 2. FETCH SPECIFIC ASSET SCHEDULE (For the Edit Modal)
+app.get('/api/resources/assets/:id/schedule', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      SELECT b.reservation_date, b.purpose, b.status, u.full_name as requestor,
+             COALESCE(gm.start_time, vr.pick_up_time) as start_time,
+             COALESCE(gm.end_time, vr.drop_off_time) as end_time
+      FROM public.bookings b
+      JOIN public."User" u ON b.u_id = u.u_id
+      LEFT JOIN public.gm_requirements gm ON b.booking_id = gm.booking_id AND gm.asd_id = $1
+      LEFT JOIN public.vehicle_requirements vr ON b.booking_id = vr.booking_id AND vr.asd_id = $1
+      WHERE (gm.asd_id = $1 OR vr.asd_id = $1) 
+      AND b.status = 'Confirmed'
+      AND b.reservation_date >= (TIMEZONE('Asia/Manila', NOW()))::date
+      ORDER BY b.reservation_date ASC, start_time ASC
+    `;
+    const result = await pool.query(query, [id]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch schedule." });
+  }
+});
+
+// 3. EDIT ASSET
+app.put('/api/resources/assets/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { assetName, quantity } = req.body;
+  try {
+    await pool.query(
+      `UPDATE public.asset_details SET asset_name = $1, quantity = $2 WHERE asd_id = $3`,
+      [assetName.trim(), parseInt(quantity), id]
+    );
+    res.json({ message: 'Asset updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update asset" });
+  }
+});
+
+// 4. DELETE ASSET
+app.delete('/api/resources/assets/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`DELETE FROM public.asset_details WHERE asd_id = $1`, [id]);
+    res.json({ message: 'Asset deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: "Cannot delete asset. It may be tied to existing historical records." });
+  }
+});
+
+// ADD NEW MASTER ASSET
+app.post('/api/resources/assets', requireAuth, async (req, res) => {
+  const { assetName, assetTypeId, quantity } = req.body;
+  try {
+    // Note: assetTypeId maps to ast_id (1: Room, 2: Gym, 3: Furniture/Equipment, 4: Vehicle)
+    await pool.query(
+      `INSERT INTO public.asset_details (ast_id, asset_name, quantity) VALUES ($1, $2, $3)`,
+      [parseInt(assetTypeId), assetName.trim(), parseInt(quantity) || 1]
+    );
+    res.status(201).json({ message: 'Institutional Asset successfully registered!' });
+  } catch (err) {
+    console.error("Error adding asset:", err);
+    res.status(500).json({ error: "Failed to register new asset to the database" });
   }
 });
 
