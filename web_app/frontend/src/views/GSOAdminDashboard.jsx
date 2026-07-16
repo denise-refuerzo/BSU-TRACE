@@ -4,7 +4,7 @@ import Swal from 'sweetalert2';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
-  LayoutDashboard, Archive, ShoppingCart, BarChart3,History, Bell,  User,  Search, Filter, X,  QrCode, LogOut,Eye, GitBranch,Camera, KeyRound,ShieldCheck,Building, Landmark, Download, FileText, Plus, Calendar,  Lock, Edit, Trash2, Car
+  LayoutDashboard, Archive, ShoppingCart, BarChart3, History, Bell, User, Search, Filter, X, QrCode, LogOut, Eye, GitBranch, Camera, KeyRound, ShieldCheck, Building, Landmark, Download, FileText, Plus, Calendar, Lock, Edit, Trash2, Car, ChevronLeft, ChevronRight 
 } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
@@ -79,6 +79,8 @@ export default function GSOAdminDashboard() {
   const [assetsList, setAssetsList] = useState([]);
   const [equipmentInventory, setEquipmentInventory] = useState([]);
   const [assetBlackouts, setAssetBlackouts] = useState([]);
+  const todayObj = new Date();
+  const todayString = todayObj.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
 
   // Resources Modal Controllers
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
@@ -96,6 +98,27 @@ export default function GSOAdminDashboard() {
   const [showEditAssetModal, setShowEditAssetModal] = useState(false);
   const [selectedEditAsset, setSelectedEditAsset] = useState(null);
   const [assetSchedule, setAssetSchedule] = useState([]);
+
+  const [activeCalendarTab, setActiveCalendarTab] = useState('Gymnasium'); // 'Vehicle' | 'Multimedia Room' | 'Gymnasium'
+  const [blackoutForm, setBlackoutForm] = useState({ asd_id: '', start_time: '', end_time: '', reason: '' });
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
+
+  const fetchBlackouts = async () => {
+    try {
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/blackouts');
+      const data = await res.json();
+      if (res.ok) setAssetBlackouts(data);
+    } catch (err) { console.error(err); }
+  };
+  
+  // Add fetchBlackouts to your existing useEffect for the resources tab
+  useEffect(() => {
+    if (activeTab === 'resources') {
+      fetchMasterAssets();
+      fetchInventoryMetrics();
+      fetchBlackouts(); // <-- Added
+    }
+  }, [activeTab]);
 
   const [inventoryForm, setInventoryForm] = useState({
     requestorName: '', department: '', purpose: '', duration: '', quantityNeeded: '', 
@@ -559,6 +582,23 @@ const handleAddAssetSubmit = async (e) => {
     finally { setIsActionProcessing(false); }
   };
 
+  const handleApplyBlackout = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/blackouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(blackoutForm)
+      });
+      if (res.ok) {
+        minimalSwal.fire({ icon: 'success', title: 'Date Blocked', text: 'Asset availability updated.' });
+        setShowBlackoutModal(false);
+        setBlackoutForm({ asd_id: '', start_time: '', end_time: '', reason: '' });
+        fetchBlackouts(); // Refresh the calendar!
+      }
+    } catch (err) { console.error(err); }
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -893,30 +933,88 @@ const handleAddAssetSubmit = async (e) => {
 
         {/* BOTTOM ROW: Calendar Availability Control */}
         <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm mt-6">
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
-                <Calendar size={16} className="text-red-800" /> Calendar Availability Control
-              </h3>
-              <p className="text-xs text-neutral-500 font-medium mt-1">Block dates for maintenance or priority events.</p>
-              <button className="mt-3 px-4 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-sm flex items-center gap-2">
-                <Lock size={12} /> Block Dates
-              </button>
-            </div>
-            
-            {/* Facility Toggle */}
-            <div className="bg-neutral-100 p-1 rounded-xl flex font-bold text-[10px]">
-              <button className="px-4 py-2 rounded-lg text-neutral-500 hover:text-neutral-800 uppercase tracking-wider">Vehicle</button>
-              <button className="px-4 py-2 rounded-lg text-neutral-500 hover:text-neutral-800 uppercase tracking-wider">Multimedia Room</button>
-              <button className="px-4 py-2 rounded-lg bg-red-800 text-white shadow-sm uppercase tracking-wider">Gymnasium</button>
-            </div>
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
+              <Calendar size={16} className="text-red-800" /> Calendar Availability Control
+            </h3>
+            <p className="text-xs text-neutral-500 font-medium mt-1">Block dates for maintenance or priority events.</p>
+            <button onClick={() => setShowBlackoutModal(true)} className="mt-3 px-4 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-sm flex items-center gap-2">
+              <Lock size={12} /> Block Dates
+            </button>
           </div>
           
-          {/* Calendar Matrix will go here */}
-          <div className="min-h-[300px] border-2 border-dashed border-neutral-100 rounded-xl flex items-center justify-center text-neutral-400 text-xs font-bold bg-neutral-50/50">
-            [ Calendar Canvas Component ]
+          <div className="bg-neutral-100 p-1 rounded-xl flex font-bold text-[10px]">
+            {['Vehicle', 'Multimedia Room', 'Gymnasium'].map((tab) => (
+              <button 
+                key={tab}
+                onClick={() => setActiveCalendarTab(tab)}
+                className={`px-4 py-2 rounded-lg uppercase tracking-wider transition-colors ${activeCalendarTab === tab ? 'bg-red-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-800'}`}
+              >
+                {tab}
+              </button>
+            ))}
           </div>
         </div>
+  
+  {/* Calendar Rendering Logic */}
+  {(() => {
+    const year = currentCalendarDate.getFullYear();
+    const month = currentCalendarDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayIndex = new Date(year, month, 1).getDay();
+    const calendarDays = Array.from({ length: firstDayIndex }, () => null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    
+    // Map the Tab string to the actual database asset_name
+    const tabToAssetMap = { 'Vehicle': 'Van', 'Multimedia Room': 'Multimedia Room', 'Gymnasium': 'Gymnasium' };
+    const mappedAsset = tabToAssetMap[activeCalendarTab];
+
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center text-sm font-black text-neutral-900">
+          <span>{monthNames[month]} {year}</span>
+          <div className="flex gap-1 border rounded-lg p-1 bg-neutral-50">
+            <button onClick={() => setCurrentCalendarDate(new Date(year, month - 1, 1))} className="p-1 hover:bg-white rounded transition-colors"><ChevronLeft size={16} /></button>
+            <button onClick={() => setCurrentCalendarDate(new Date(year, month + 1, 1))} className="p-1 hover:bg-white rounded transition-colors"><ChevronRight size={16} /></button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 border rounded-lg p-2 bg-neutral-50 text-[10px] font-black text-center text-neutral-400">
+          {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(day => <div key={day}>{day}</div>)}
+        </div>
+        
+        <div className="grid grid-cols-7 gap-2">
+          {calendarDays.map((day, index) => {
+            if (!day) return <div key={index} className="bg-neutral-50/50 border border-dashed border-neutral-100 rounded-xl min-h-[90px]"></div>;
+            
+            const dayString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            
+            // Check if this specific day is inside a blackout range for the active asset
+            const activeBlock = assetBlackouts.find(blk => {
+              if (blk.asset_name !== mappedAsset) return false;
+              const start = new Date(blk.start_time).toISOString().split('T')[0];
+              const end = new Date(blk.end_time).toISOString().split('T')[0];
+              return dayString >= start && dayString <= end;
+            });
+
+            return (
+              <div key={index} className={`border rounded-xl p-2 min-h-[90px] flex flex-col justify-between transition-colors ${activeBlock ? 'bg-red-50/50 border-red-200' : 'bg-white border-neutral-200 hover:border-neutral-300'}`}>
+                <span className={`text-xs font-black block self-start ${activeBlock ? 'text-red-800' : 'text-neutral-400'}`}>{day}</span>
+                {activeBlock && (
+                  <div className="bg-white border border-red-200 p-1.5 rounded-lg text-center mt-1">
+                    <Lock size={12} className="mx-auto text-red-700 mb-0.5" />
+                    <span className="text-[8px] font-black uppercase text-red-800 leading-tight block">{activeBlock.reason}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  })()}
+</div>
 
       </div>
     )}
@@ -1548,10 +1646,15 @@ const handleAddAssetSubmit = async (e) => {
                     <input type="text" required value={inventoryForm.purpose} onChange={e => setInventoryForm({...inventoryForm, purpose: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                  <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Date</label>
-                      <input type="date" required className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
-                    </div>
+                      <input 
+                        type="date" 
+                        required 
+                        min={todayString} 
+                        className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" 
+                      />
+                  </div>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Duration (Hours)</label>
                       <input type="number" required value={inventoryForm.duration} onChange={e => setInventoryForm({...inventoryForm, duration: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
@@ -1635,7 +1738,63 @@ const handleAddAssetSubmit = async (e) => {
           </div>
         </div>
       )}
-
+      
+      {/* --- APPLY BLACKOUT DATES MODAL --- */}
+      {showBlackoutModal && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm flex items-center gap-2"><Lock size={16} className="text-red-800" /> Apply Facility Blackout</h3>
+              <button onClick={() => setShowBlackoutModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+            
+            <form onSubmit={handleApplyBlackout} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Target Asset Facility</label>
+                <select required value={blackoutForm.asd_id} onChange={e => setBlackoutForm({...blackoutForm, asd_id: e.target.value})} className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700 font-bold text-neutral-700">
+                  <option value="">-- Select Facility --</option>
+                  {assetsList.filter(a => a.ast_id !== 3).map(asset => (
+                    <option key={asset.asd_id} value={asset.asd_id}>{asset.asset_name} ({asset.asset_type})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Start Date</label>
+                  <input 
+                    type="date" 
+                    required 
+                    min={todayString}
+                    value={blackoutForm.start_time} 
+                    onChange={e => setBlackoutForm({...blackoutForm, start_time: e.target.value})} 
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">End Date</label>
+                  {/* Ensures end date cannot be before the selected start date */}
+                  <input 
+                    type="date" 
+                    required 
+                    min={blackoutForm.start_time || todayString} 
+                    value={blackoutForm.end_time} 
+                    onChange={e => setBlackoutForm({...blackoutForm, end_time: e.target.value})} 
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" 
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Reason for Blackout (Maintenance, Repair, Event)</label>
+                <input type="text" required value={blackoutForm.reason} onChange={e => setBlackoutForm({...blackoutForm, reason: e.target.value})} placeholder="e.g., Annual Maintenance" className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+              </div>
+              <div className="flex justify-between gap-3 pt-6 border-t border-neutral-100 mt-2">
+                <button type="button" onClick={() => setShowBlackoutModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs text-gray-500 hover:bg-neutral-50 uppercase tracking-wide">Cancel</button>
+                <button type="submit" className="w-1/2 py-2.5 bg-red-800 hover:bg-red-900 text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs">Confirm Block</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

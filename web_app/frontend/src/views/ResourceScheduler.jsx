@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, X, Lock } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
 export default function ResourceScheduler({ userId }) {
@@ -12,14 +12,16 @@ export default function ResourceScheduler({ userId }) {
   const [bookings, setBookings] = useState([]);
   const [inventory, setInventory] = useState([]);
   
-  // Set calendar base tracking to October 2026 to align with your project data logs context
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 9, 1)); 
+  // Set calendar to the current actual month
+  const [currentDate, setCurrentDate] = useState(new Date()); 
   
   // Modal Controllers
   const [showFormModal, setShowFormModal] = useState(false);
   
   // Get string representing todays current date format for strict past-date blocking checks
-  const todayString = new Date().toISOString().split('T')[0];
+  const todayObj = new Date();
+  const todayString = todayObj.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+  const currentTimeString = `${String(todayObj.getHours()).padStart(2, '0')}:${String(todayObj.getMinutes()).padStart(2, '0')}`;
 
   // Forms Tracking States
   const [form, setForm] = useState({
@@ -28,10 +30,21 @@ export default function ResourceScheduler({ userId }) {
     destination: '', passengerCount: '', serviceTypeId: '3', pickUpTime: '', dropOffTime: '' // Vehicle items
   });
 
+  const [blackouts, setBlackouts] = useState([]);
+
   useEffect(() => {
     fetchActiveReservations();
     fetchInventoryMetrics();
+    fetchBlackouts(); 
   }, [activeFacility]);
+
+  const fetchBlackouts = async () => {
+    try {
+      const res = await fetchWithAuth('http://localhost:5000/api/resources/blackouts');
+      const data = await res.json();
+      if (res.ok) setBlackouts(data);
+    } catch (err) { console.error(err); }
+  };
 
   const fetchActiveReservations = async () => {
     try {
@@ -155,41 +168,71 @@ export default function ResourceScheduler({ userId }) {
 
         {/* Dynamic Days Mapping Grid */}
         <div className="grid grid-cols-7 gap-2">
-          {calendarDays.map((day, index) => {
-            if (!day) return <div key={index} className="bg-neutral-50/50 border border-dashed border-neutral-100 rounded-xl min-h-[110px]"></div>;
-            
-            const dayString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-            const matches = bookings.filter(b => b.reservation_date.split('T')[0] === dayString && b.asset_name === activeFacility);
+        {calendarDays.map((day, index) => {
+          if (!day) return <div key={index} className="bg-neutral-50/50 border border-dashed border-neutral-100 rounded-xl min-h-[110px]"></div>;
+          
+          const dayString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const matches = bookings.filter(b => b.reservation_date.split('T')[0] === dayString && b.asset_name === activeFacility);
+          
+          // CHECK FOR ACTIVE ADMIN BLACKOUTS
+          const activeBlock = blackouts.find(blk => {
+            // Note: activeFacility maps directly to asset_name here (Van, Gymnasium, Multimedia Room)
+            if (blk.asset_name !== activeFacility) return false;
+            const start = new Date(blk.start_time).toISOString().split('T')[0];
+            const end = new Date(blk.end_time).toISOString().split('T')[0];
+            return dayString >= start && dayString <= end;
+          });
 
-            return (
-              <div key={index} className="bg-white border border-neutral-200 rounded-xl p-2 min-h-[110px] flex flex-col justify-between hover:border-neutral-300 transition-colors">
-                <span className="text-xs font-black text-neutral-400 block self-start">{day}</span>
+          return (
+            <div 
+              key={index} 
+              className={`border rounded-xl p-2 min-h-[110px] flex flex-col justify-between transition-colors ${
+                activeBlock 
+                  ? 'bg-red-50/50 border-red-200 cursor-not-allowed' 
+                  : 'bg-white border-neutral-200 hover:border-red-300 cursor-pointer'
+              }`}
+              onClick={() => {
+                if (!activeBlock) {
+                  setForm({ ...form, reservationDate: dayString });
+                  setShowFormModal(true); 
+                }
+              }}
+            >
+              <div className="flex justify-between items-start">
+                <span className={`text-xs font-black block ${
+                  activeBlock ? 'text-red-800' : form.reservationDate === dayString ? 'bg-red-800 text-white w-5 h-5 flex items-center justify-center rounded-full' : 'text-neutral-400'
+                }`}>
+                  {day}
+                </span>
+              </div>
+              
+              {/* If Blacked Out, show the Admin Override tag */}
+              {activeBlock ? (
+                <div className="bg-white border border-red-200 p-1.5 rounded-lg text-center mt-auto">
+                  <Lock size={12} className="mx-auto text-red-700 mb-0.5" />
+                  <span className="text-[8px] font-black uppercase text-red-800 leading-tight block">Admin Override: {activeBlock.reason}</span>
+                </div>
+              ) : (
                 <div className="flex-1 overflow-y-auto space-y-1 mt-1 max-h-[85px] scrollbar-thin">
                   {matches.map((b, idx) => {
-                    // DYNAMIC STATUS COLOR MAP RULES: "Reserved" -> Crimson, "Confirmed" -> Emerald Green
                     const isConfirmed = b.status?.toLowerCase() === 'confirmed' || b.status?.toLowerCase() === 'approved';
-                    
                     return (
                       <div key={idx} className={`p-1.5 rounded-lg border text-[10px] font-bold text-left leading-tight transition-colors ${
-                        isConfirmed 
-                          ? 'bg-green-50 border-green-200 text-green-800' 
-                          : 'bg-red-50 border-red-200 text-red-800'
+                        isConfirmed ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'
                       }`}>
                         <p className="truncate uppercase font-black">{b.purpose}</p>
                         <p className="text-[9px] opacity-80 mt-0.5 truncate">
-                          {b.booking_type === 'Vehicle' 
-                            ? `🚍 Dest: ${b.destination || 'Campus'}`
-                            : `⏱️ ${b.gm_start?.substring(0,5)} - ${b.gm_end?.substring(0,5)}`
-                          }
+                          {b.booking_type === 'Vehicle' ? `🚍 Dest: ${b.destination || 'Campus'}` : `⏱️ ${b.gm_start?.substring(0,5)} - ${b.gm_end?.substring(0,5)}`}
                         </p>
                         <span className="text-[8px] block opacity-60 font-medium truncate">By: {b.full_name}</span>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            );
-          })}
+              )}
+            </div>
+          );
+        })}
         </div>
       </div>
 
@@ -209,8 +252,7 @@ export default function ResourceScheduler({ userId }) {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-black text-neutral-900 tracking-tight">{item.quantity}</p>
-                <span className="text-[10px] text-neutral-400 block font-semibold uppercase">Total Available</span>
+              <p className="text-2xl font-black text-neutral-900 tracking-tight">{item.current_stock} <span className="text-sm text-neutral-400">/ {item.capacity}</span></p>                <span className="text-[10px] text-neutral-400 block font-semibold uppercase">Total Available</span>
               </div>
             </div>
           ))}
@@ -262,13 +304,27 @@ export default function ResourceScheduler({ userId }) {
               {activeFacility !== 'Van' ? (
                 <div className="space-y-4 pt-2 border-t border-dashed border-neutral-200 animate-in fade-in">
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                  <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Start Time</label>
-                      <input type="time" required value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} className="w-full border px-3 py-2 text-xs rounded-lg border-neutral-300 outline-none bg-white" />
+                      <input 
+                        type="time" 
+                        required 
+                        min={form.reservationDate === todayString ? currentTimeString : undefined}
+                        value={form.startTime} 
+                        onChange={e => setForm({...form, startTime: e.target.value})} 
+                        className="w-full border px-3 py-2 text-xs rounded-lg border-neutral-300 outline-none bg-white" 
+                      />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">End Time</label>
-                      <input type="time" required value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} className="w-full border px-3 py-2 text-xs rounded-lg border-neutral-300 outline-none bg-white" />
+                      <input 
+                        type="time" 
+                        required 
+                        min={form.startTime || (form.reservationDate === todayString ? currentTimeString : undefined)}
+                        value={form.endTime} 
+                        onChange={e => setForm({...form, endTime: e.target.value})} 
+                        className="w-full border px-3 py-2 text-xs rounded-lg border-neutral-300 outline-none bg-white" 
+                      />
                     </div>
                   </div>
                   <div>
@@ -303,13 +359,13 @@ export default function ResourceScheduler({ userId }) {
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                  <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Pick-up Time</label>
-                      {/* REQUIREMENT FIXED: Disables input conditionally based on active radio choices */}
                       <input 
                         type="time" 
                         required={form.serviceTypeId === '1' || form.serviceTypeId === '3'} 
                         disabled={form.serviceTypeId === '2'} 
+                        min={form.reservationDate === todayString ? currentTimeString : undefined}
                         value={form.pickUpTime} 
                         onChange={e => setForm({...form, pickUpTime: e.target.value})} 
                         className={`w-full border px-3 py-2 text-xs rounded-lg outline-none transition-all ${
@@ -323,6 +379,7 @@ export default function ResourceScheduler({ userId }) {
                         type="time" 
                         required={form.serviceTypeId === '2' || form.serviceTypeId === '3'} 
                         disabled={form.serviceTypeId === '1'} 
+                        min={form.pickUpTime || (form.reservationDate === todayString ? currentTimeString : undefined)}
                         value={form.dropOffTime} 
                         onChange={e => setForm({...form, dropOffTime: e.target.value})} 
                         className={`w-full border px-3 py-2 text-xs rounded-lg outline-none transition-all ${

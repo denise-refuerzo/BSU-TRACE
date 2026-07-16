@@ -1565,5 +1565,38 @@ app.get('/api/processor/documents/expected-count/:officeId', requireAuth, async 
   }
 });
 
+// FETCH ALL BLACKOUTS
+app.get('/api/resources/blackouts', async (req, res) => {
+  try {
+    // JOIN added so the frontend gets the asset_name directly
+    const query = `
+      SELECT ab.*, ad.asset_name 
+      FROM public.asset_blackouts ab
+      JOIN public.asset_details ad ON ab.asd_id = ad.asd_id
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch blackout records." });
+  }
+});
+
+// CREATE A NEW BLACKOUT
+app.post('/api/resources/blackouts', requireAuth, async (req, res) => {
+  const { asd_id, start_time, end_time, reason } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO public.asset_blackouts (asd_id, start_time, end_time, reason, blocked_by) 
+       VALUES ($1, $2, $3, $4, $5)`,
+      // We added parseInt() here to ensure the database gets a strict number
+      [parseInt(asd_id), start_time, end_time, reason, req.user.u_id] 
+    );
+    res.status(201).json({ message: "Asset successfully blocked." });
+  } catch (err) {
+    console.error("Blackout Insert Error:", err); // Added this so it's easier to spot in the terminal!
+    res.status(500).json({ error: "Failed to apply blackout date." });
+  }
+});
+
 const PORT = 5000;
 app.listen(PORT, () => console.log(`🚀 Core backend subsystem running on port ${PORT}`));
