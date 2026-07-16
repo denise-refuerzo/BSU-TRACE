@@ -23,7 +23,8 @@ import {
   ShieldCheck,
   Building,
   Landmark,
-  Download
+  Download,
+  FileText
 } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 
@@ -73,7 +74,10 @@ export default function GSOAdminDashboard() {
   // UI & Search States
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('All'); 
+  const [historyFilter, setHistoryFilter] = useState('All'); // ✅ Added for History
   const [dashboardPage, setDashboardPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);         // ✅ Added for History
+  const [isHistoryDetails, setIsHistoryDetails] = useState(false); // ✅ Added to lock modal actions for history logs
   const itemsPerPage = 5;
 
   // Hybrid Modal States
@@ -358,8 +362,9 @@ export default function GSOAdminDashboard() {
     finally { setIsActionProcessing(false); }
   };
 
-  const handleOpenDetails = (doc) => {
+  const handleOpenDetails = (doc, fromHistory = false) => {
     setSelectedDoc(doc);
+    setIsHistoryDetails(fromHistory); // ✅ Track if this is a historical view
     setShowSendBackForm(false);
     setShowAdHocForm(false);
     setReturnReason('');
@@ -388,6 +393,17 @@ export default function GSOAdminDashboard() {
   const isAwaitingScanIn = selectedDoc && !selectedDoc.time_in;
   const isInVerification = selectedDoc?.status?.toLowerCase() === 'in verification' || ((selectedDoc?.current_step_is_adhoc || selectedDoc?.is_adhoc) && selectedDoc?.current_office !== gsoOfficeName);
   const isActionAltered = selectedDoc && (selectedDoc.status?.toLowerCase() === 'signed' || selectedDoc.status?.toLowerCase() === 'completed' || selectedDoc.status?.toLowerCase() === 'action required' || selectedDoc.time_out);
+
+  // --- History Log Calculations ---
+  const filteredHistoryLogs = actionHistory.filter(log => {
+    const matchesSearch = log.title?.toLowerCase().includes(search.toLowerCase()) || 
+                          log.full_name?.toLowerCase().includes(search.toLowerCase()) || 
+                          log.qr_code?.toLowerCase().includes(search.toLowerCase());
+    return historyFilter !== 'All' ? (matchesSearch && log.action_type === historyFilter) : matchesSearch;
+  });
+
+  const currentHistoryPageRows = filteredHistoryLogs.slice((historyPage - 1) * itemsPerPage, historyPage * itemsPerPage);
+  const totalHistoryTabPages = Math.ceil(filteredHistoryLogs.length / itemsPerPage);
 
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
@@ -564,12 +580,12 @@ export default function GSOAdminDashboard() {
                                 doc.status?.toLowerCase() === 'signed' || doc.time_out ? 'bg-green-600' :
                                 'bg-amber-600'
                               }`}></span>
-                              {!doc.time_in ? 'Incoming' : doc.status || 'Pending'}
+                              {!doc.time_in ? 'Incoming' : doc.time_out ? 'Completed' : doc.status || 'Pending'}
                             </span>
                           </td>
                           <td className="p-4 font-semibold text-neutral-600">{doc.originating_office || 'University Unit'}</td>
                           <td className="p-4 text-center">
-                            <button onClick={() => handleOpenDetails(doc)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-600 inline-flex items-center"><Eye size={18} /></button>
+                            <button onClick={() => handleOpenDetails(doc, false)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-600 inline-flex items-center"><Eye size={18} /></button>
                           </td>
                         </tr>
                       ))}
@@ -591,8 +607,87 @@ export default function GSOAdminDashboard() {
             </div>
           )}
 
+    {activeTab === 'history' && (
+            <div className="max-w-7xl mx-auto bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left animate-in fade-in duration-200">
+              <div className="p-5 border-b border-neutral-100 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <h3 className="text-sm font-black text-neutral-950 tracking-tight">Audit Trail Ledger</h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1 border border-neutral-300 rounded-lg px-2 py-1.5 bg-neutral-50">
+                    <Filter size={14} className="text-neutral-400" />
+                    <select value={historyFilter} onChange={e => { setHistoryFilter(e.target.value); setHistoryPage(1); }} className="bg-transparent text-xs outline-none cursor-pointer font-bold text-neutral-600">
+                      <option value="All">All Actions</option>
+                      <option value="Scanned In">Scanned In</option>
+                      <option value="Scanned Out">Scanned Out</option>
+                      <option value="Approved & Signed">Approved & Signed</option>
+                      <option value="Ad-Hoc Detour Routed">Ad-Hoc Detour</option>
+                    </select>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-2.5 text-neutral-400" size={14} />
+                    <input type="text" placeholder="Search history records..." value={search} onChange={e => { setSearch(e.target.value); setHistoryPage(1); }} className="pl-9 pr-4 py-2 text-xs border border-neutral-300 rounded-lg outline-none w-56 bg-neutral-50 font-medium" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-50 text-neutral-400 border-b border-neutral-200 font-black uppercase text-[10px] tracking-wider">
+                      <th className="p-4">Timestamp</th>
+                      <th className="p-4">Action Event</th>
+                      <th className="p-4">Executed By</th>
+                      <th className="p-4">Document Title</th>
+                      <th className="p-4 text-center">Verification</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100 font-medium">
+                    {currentHistoryPageRows.map((log, index) => {
+                      const rawTimestamp = log.action_timestamp; 
+                      let formattedTime = 'N/A';
+                      
+                      if (rawTimestamp) {
+                        const localizedString = String(rawTimestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+                        const d = new Date(localizedString);
+                        formattedTime = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ', ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                      }
+
+                      return (
+                        <tr key={log.history_id || index} className="hover:bg-neutral-50/70 transition-colors">
+                          <td className="p-4 font-mono text-neutral-600">{formattedTime}</td>
+                          <td className="p-4">
+                            <span className={`px-2.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wide border ${
+                              log.action_type === 'Scanned In' ? 'bg-blue-50 text-blue-800 border-blue-100' :
+                              log.action_type === 'Scanned Out' ? 'bg-green-50 text-green-800 border-green-100' :
+                              log.action_type === 'Ad-Hoc Detour Routed' ? 'bg-purple-50 text-purple-800 border-purple-100' : 'bg-amber-50 text-amber-800 border-amber-100'
+                            }`}>{log.action_type}</span>
+                          </td>
+                          <td className="p-4 text-neutral-900 font-bold">{log.full_name}</td>
+                          <td className="p-4 text-neutral-700 font-semibold">{log.title}</td>
+                          <td className="p-4 text-center">
+                            <button onClick={() => handleOpenDetails(log, true)} className="p-1.5 hover:bg-neutral-100 rounded-lg text-red-800 inline-flex items-center"><Eye size={16} /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredHistoryLogs.length === 0 && <div className="p-12 text-center text-neutral-400 font-medium">📜 No logging entries match criteria filters.</div>}
+              </div>
+
+              {totalHistoryTabPages > 1 && (
+                <div className="p-4 border-t border-neutral-100 bg-neutral-50 flex items-center justify-between text-xs px-6">
+                  <span className="text-neutral-500 font-medium">Showing page <b>{historyPage}</b> of {totalHistoryTabPages}</span>
+                  <div className="flex gap-1">
+                    <button disabled={historyPage === 1} onClick={() => setHistoryPage(prev => prev - 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40">Previous</button>
+                    <button disabled={historyPage === totalHistoryTabPages} onClick={() => setHistoryPage(prev => prev + 1)} className="px-3 py-1.5 border rounded-lg bg-white font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40">Next</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* PLACEHOLDER TABS FOR OTHERS TO KEEP NAVIGATION CLEAN */}
-          {(activeTab === 'resources' || activeTab === 'procurement' || activeTab === 'analytics' || activeTab === 'history') && (
+          {(activeTab === 'resources' || activeTab === 'procurement' || activeTab === 'analytics' ) && (
             <div className="max-w-7xl mx-auto flex items-center justify-center h-64 border-2 border-dashed border-neutral-200 rounded-xl bg-white text-neutral-400 font-bold">
               {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module - System Architecture Loading...
             </div>
@@ -713,13 +808,15 @@ export default function GSOAdminDashboard() {
 
       </div>
 
-      {/* --- HYBRID SMART MODAL --- */}
-      {showDetailsModal && selectedDoc && (() => {
+    {/* --- HYBRID SMART MODAL --- */}
+    {showDetailsModal && selectedDoc && (() => {
         const docTitle = selectedDoc.title || 'N/A';
         const docProcess = selectedDoc.process_name || 'Administrative Request';
         const docStatus = selectedDoc.status || 'Active Path';
         const docQr = selectedDoc.qr_code || 'N/A';
         const docOrigin = selectedDoc.originating_office || selectedDoc.origin || 'University Unit';
+        const requestorName = selectedDoc.requestor_name || 'N/A'; // ✅ Added Requestor Name
+        const nextOffice = selectedDoc.next_office || 'End of Route / Finished'; // ✅ Added Next Office Stop
 
         return (
           <div className="fixed inset-0 bg-neutral-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-[100] animate-in fade-in duration-150">
@@ -737,21 +834,63 @@ export default function GSOAdminDashboard() {
                     <h4 className="text-xl font-black text-neutral-900 leading-tight mt-1">{docTitle}</h4>
                   </div>
                   
+                  {/* Updated Grid Section */}
                   <div className="grid grid-cols-2 gap-4 border-b border-neutral-100 pb-4">
-                    <div><span className="text-[9px] font-bold uppercase text-neutral-400 block">Form Type</span><p className="font-bold text-neutral-700 text-xs mt-1">{docProcess}</p></div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block">Form Type</span>
+                      <p className="font-bold text-neutral-700 text-xs mt-1">{docProcess}</p>
+                    </div>
                     <div>
                       <span className="text-[9px] font-bold uppercase text-neutral-400 block">Current Status</span>
                       <span className="px-2.5 py-0.5 bg-neutral-100 border rounded font-black text-[9px] uppercase mt-1 inline-block">{docStatus}</span>
                     </div>
-                    <div><span className="text-[9px] font-bold uppercase text-neutral-400 block">Originating Office</span><p className="font-bold text-neutral-700 mt-1 text-xs">{docOrigin}</p></div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block">Originating Office</span>
+                      <p className="font-bold text-neutral-700 mt-1 text-xs">{docOrigin}</p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block">Requestor Name</span>
+                      <p className="font-bold text-neutral-950 mt-1 text-xs">{requestorName}</p>
+                    </div>
                     <div>
                       <span className="text-[9px] font-bold uppercase text-neutral-400 block">Time In Arrival</span>
-                      <p className="font-mono text-xs font-bold mt-1 text-neutral-600">{selectedDoc.time_in ? new Date(selectedDoc.time_in).toLocaleTimeString('en-US') : <span className="text-blue-600">Awaiting Scan-In</span>}</p>
+                      <p className="font-mono text-xs font-bold mt-1 text-neutral-600">
+                        {selectedDoc.time_in ? new Date(selectedDoc.time_in).toLocaleTimeString('en-US') : <span className="text-blue-600">Awaiting Scan-In</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block">Time Out Departure</span>
+                      <p className="font-mono text-xs font-bold mt-1 text-neutral-600">
+                        {selectedDoc.time_out ? new Date(selectedDoc.time_out).toLocaleTimeString('en-US') : <span className="text-amber-600">Still at GSO Station</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block">Next Office Stop</span>
+                      <p className="font-bold text-red-800 mt-1 text-xs">🏢 {nextOffice}</p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold uppercase text-neutral-400 block flex items-center gap-1">
+                        Est. Completion (EDC) 
+                        <span className="text-[8px] bg-purple-100 text-purple-700 font-black px-1 rounded">ML Placeholder</span>
+                      </span>
+                      <p className="font-bold text-purple-800 mt-1 text-xs">
+                        🕒 {selectedDoc.edc ? new Date(selectedDoc.edc).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Calculating (Awaiting ML Inference...)'}
+                      </p>
                     </div>
                   </div>
 
                   {/* Smart Conditional Workflow Banners */}
-                  {isAwaitingScanIn ? (
+                  {isHistoryDetails || selectedDoc.time_out ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3.5 items-start">
+                      <span className="text-xl mt-0.5">ℹ️</span>
+                      <div className="text-xs text-left">
+                        <p className="font-black text-blue-900 uppercase tracking-wide">Vault History View Only</p>
+                        <p className="text-blue-700 font-medium mt-1 leading-normal">
+                          This document step has been locked into the history vault. Active signatures or workflow re-routing permissions are disabled.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isAwaitingScanIn ? (
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex gap-3 text-sm">
                       <span>🛑</span>
                       <div>
@@ -815,7 +954,7 @@ export default function GSOAdminDashboard() {
 
               {/* Action Footer */}
               <div className="p-4 border-t bg-[#FDFBF9] flex justify-end gap-2 px-6">
-                {!isAwaitingScanIn && !isInVerification && !isActionAltered && (
+              {!isAwaitingScanIn && !isInVerification && !isActionAltered && !isHistoryDetails && (
                   <>
                     <button type="button" onClick={() => { setShowSendBackForm(!showSendBackForm); setShowAdHocForm(false); }} className="px-5 py-2 border bg-white hover:bg-neutral-50 rounded-xl font-bold text-xs text-neutral-600 transition-all">{showSendBackForm ? 'Cancel Revision' : 'Send Back'}</button>
                     <button type="button" disabled={isActionProcessing} onClick={handleSignDocument} className="px-6 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl uppercase tracking-wider shadow-md">Sign File</button>

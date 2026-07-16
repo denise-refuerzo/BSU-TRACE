@@ -731,7 +731,7 @@ export default function ProcessorDashboard() {
                               <span className={`w-1.5 h-1.5 rounded-full ${
                                 doc.status?.toLowerCase() === 'completed' ? 'bg-green-600' : doc.status?.toLowerCase() === 'in verification' ? 'bg-red-600' : 'bg-blue-500'
                               }`}></span>
-                              {doc.status || 'Incoming'}
+                              {!doc.time_in ? 'Incoming' : doc.time_out ? 'Completed' : doc.status || 'Pending'}
                             </span>
                           </td>
                           <td className="p-4 text-neutral-600 font-semibold">{doc.next_office || 'None (Final Stop)'}</td>

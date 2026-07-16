@@ -174,7 +174,7 @@ app.put('/api/accounts/:userId', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Rejection: This username identifier is already registered to another user account.' });
     }
 
-    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3) && officeId 
+    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3 || parseInt(accountType) === 4) && officeId 
       ? parseInt(officeId) 
       : null;
 
@@ -355,7 +355,7 @@ app.post('/api/accounts', requireAuth, async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     
     
-    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3) && officeId 
+    const assignedOfficeId = (parseInt(accountType) === 2 || parseInt(accountType) === 3 || parseInt(accountType) === 4) && officeId 
       ? parseInt(officeId) 
       : null;
 

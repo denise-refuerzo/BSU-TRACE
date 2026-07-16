@@ -646,7 +646,7 @@ export default function SigneeDashboard() {
                           <span className={`inline-flex items-center gap-1.5 font-bold ${
                             doc.status?.toLowerCase() === 'completed' || doc.status?.toLowerCase() === 'signed' ? 'text-green-600' : doc.status?.toLowerCase() === 'action required' ? 'text-blue-600' : 'text-red-700'
                           }`}>
-                            • {doc.status || 'Active Path'}
+                            {!doc.time_in ? 'Incoming' : doc.time_out ? 'Completed' : doc.status || 'Pending'}
                           </span>
                         </td>
                         <td className="p-4 font-semibold text-neutral-500">{doc.next_office || 'Final Stop'}</td>
