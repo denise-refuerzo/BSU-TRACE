@@ -108,6 +108,13 @@ export default function ResourceScheduler({ userId }) {
     Array.from({ length: daysInMonth }, (_, i) => i + 1)
   );
 
+  // Refresh data if another part of the app updates the state
+  useEffect(() => {
+    const handleRefresh = () => fetchActiveReservations();
+    window.addEventListener('refreshReservations', handleRefresh);
+    return () => window.removeEventListener('refreshReservations', handleRefresh);
+  }, []);
+
   return (
     <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-150">
       
@@ -128,7 +135,7 @@ export default function ResourceScheduler({ userId }) {
                 activeFacility === fac ? 'bg-red-800 text-white shadow-sm' : 'text-neutral-500 hover:text-neutral-800'
               }`}
             >
-              {fac === 'Van' ? '🚍 Vehicles' : fac}
+              {fac === 'Van' ? 'Vehicles' : fac}
             </button>
           ))}
         </div>
@@ -172,7 +179,26 @@ export default function ResourceScheduler({ userId }) {
           if (!day) return <div key={index} className="bg-neutral-50/50 border border-dashed border-neutral-100 rounded-xl min-h-[110px]"></div>;
           
           const dayString = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const matches = bookings.filter(b => b.reservation_date.split('T')[0] === dayString && b.asset_name === activeFacility);
+          const matches = bookings.filter(b => {
+            const dateObj = new Date(b.reservation_date);
+            const localDateString = dateObj.toLocaleDateString('en-CA', { 
+              year: 'numeric', 
+              month: '2-digit', 
+              day: '2-digit' 
+            }).replace(/\//g, '-');
+            const isDateMatch = localDateString === dayString;
+            
+            let isAssetMatch = false;
+            if (activeFacility === 'Van') {
+              isAssetMatch = b.booking_type === 'Vehicle';
+            } else if (activeFacility === 'Multimedia Room') {
+              isAssetMatch = b.booking_type === 'Room';
+            } else if (activeFacility === 'Gymnasium') {
+              isAssetMatch = b.booking_type === 'Gymnasium';
+            }
+            
+            return isDateMatch && isAssetMatch;
+          });
           
           // CHECK FOR ACTIVE ADMIN BLACKOUTS
           const activeBlock = blackouts.find(blk => {

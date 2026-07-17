@@ -490,6 +490,38 @@ app.post('/api/resources/book', async (req, res) => {
     if (assetRes.rows.length === 0) throw new Error("Target university asset resource not registered.");
     const asdId = assetRes.rows[0].asd_id;
 
+    // =========================================================
+    // OVERLAP PREVENTION LOGIC
+    // =========================================================
+    if (bookingType === 'Room' || bookingType === 'Gymnasium') {
+      const overlapCheck = await client.query(`
+        SELECT 1 FROM public.bookings b
+        JOIN public.gm_requirements gm ON b.booking_id = gm.booking_id
+        WHERE b.reservation_date = $1 AND gm.asd_id = $2 AND b.status IN ('Confirmed', 'Reserved')
+        AND gm.start_time < $4 AND gm.end_time > $3
+      `, [reservationDate, asdId, startTime, endTime]);
+      
+      if (overlapCheck.rows.length > 0) {
+        throw new Error("This facility is already booked during this time frame.");
+      }
+    } else if (bookingType === 'Vehicle') {
+      const finalizedPickUp = pickUpTime && pickUpTime.trim() !== "" ? pickUpTime : "00:00:00";
+      const finalizedDropOff = dropOffTime && dropOffTime.trim() !== "" ? dropOffTime : "00:00:00";
+      
+      const overlapCheck = await client.query(`
+        SELECT 1 FROM public.bookings b
+        JOIN public.vehicle_requirements vr ON b.booking_id = vr.booking_id
+        WHERE b.reservation_date = $1 AND vr.asd_id = $2 AND b.status IN ('Confirmed', 'Reserved')
+        AND vr.pick_up_time < $4 AND vr.drop_off_time > $3
+      `, [reservationDate, asdId, finalizedPickUp, finalizedDropOff]);
+
+      if (overlapCheck.rows.length > 0) {
+        throw new Error("This vehicle is already scheduled for transit during this time frame.");
+      }
+    }
+    // =========================================================
+
+    // Insert the booking
     const bookingRes = await client.query(
       `INSERT INTO public.bookings (u_id, booking_type, department, reservation_date, purpose, status)
        VALUES ($1, $2, $3, $4, $5, 'Reserved') RETURNING booking_id`,
@@ -1595,6 +1627,173 @@ app.post('/api/resources/blackouts', requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Blackout Insert Error:", err); // Added this so it's easier to spot in the terminal!
     res.status(500).json({ error: "Failed to apply blackout date." });
+  }
+});
+
+// FETCH ALL PROCUREMENT RESERVATIONS
+app.get('/api/procurement/reservations', requireAuth, async (req, res) => {
+  try {
+    const query = `
+      SELECT b.booking_id, b.booking_type, b.reservation_date, b.purpose, b.status, 
+             b.created_at, 
+             CASE 
+                WHEN b.status = 'Confirmed' THEN b.updated_at 
+                ELSE NULL 
+             END as updated_at,
+             u.full_name as requestor,
+             COALESCE(gm.start_time, vr.pick_up_time) as start_time,
+             COALESCE(gm.end_time, vr.drop_off_time) as end_time,
+             ad.asset_name
+      FROM public.bookings b
+      JOIN public."User" u ON b.u_id = u.u_id
+      LEFT JOIN public.gm_requirements gm ON b.booking_id = gm.booking_id
+      LEFT JOIN public.vehicle_requirements vr ON b.booking_id = vr.booking_id
+      LEFT JOIN public.asset_details ad ON (gm.asd_id = ad.asd_id OR vr.asd_id = ad.asd_id)
+      ORDER BY b.reservation_date DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch procurement reservations." });
+  }
+});
+
+// FETCH LOGISTICS HISTORY (Equipment Ledgers)
+app.get('/api/procurement/logistics', requireAuth, async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        el.log_id,
+        ad.asset_name, 
+        el.requestor_name, 
+        el.qty_borrowed, 
+        el.borrowed_at, 
+        el.returned_at,
+        el.status,
+        el.condition_on_return,
+        el.damage_notes
+      FROM public.equipment_ledgers el
+      JOIN public.asset_details ad ON el.asd_id = ad.asd_id
+      ORDER BY el.borrowed_at DESC
+    `;
+    const result = await pool.query(query);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch logistics history." });
+  }
+});
+
+// GET & SYNC BOOKING CHECKLIST
+app.get('/api/procurement/checklists/:bookingId/:type', requireAuth, async (req, res) => {
+  const { bookingId, type } = req.params;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // 1. Check if this booking already has checklist items
+    const existingChecklist = await client.query('SELECT * FROM public.booking_checklists WHERE booking_id = $1', [bookingId]);
+    
+    if (existingChecklist.rows.length === 0) {
+      // 2. If empty, generate them from the global template
+      const templates = await client.query('SELECT item_name FROM public.checklist_templates WHERE booking_type = $1', [type]);
+      if (templates.rows.length > 0) {
+        for (let t of templates.rows) {
+          await client.query(
+            'INSERT INTO public.booking_checklists (booking_id, item_name, is_checked) VALUES ($1, $2, false)',
+            [bookingId, t.item_name]
+          );
+        }
+      }
+    }
+    
+    // 3. Return the checklist state
+    const currentChecklist = await client.query('SELECT * FROM public.booking_checklists WHERE booking_id = $1 ORDER BY check_id ASC', [bookingId]);
+    await client.query('COMMIT');
+    res.json(currentChecklist.rows);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: "Failed to fetch checklist." });
+  } finally {
+    client.release();
+  }
+});
+
+// UPDATE CHECKLIST STATUS & AUTO-CONFIRM
+app.put('/api/procurement/checklists/:checkId', requireAuth, async (req, res) => {
+  const { checkId } = req.params;
+  const { isChecked, bookingId } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Update specific item
+    await client.query('UPDATE public.booking_checklists SET is_checked = $1 WHERE check_id = $2', [isChecked, checkId]);
+    
+    // Check if ALL items for this booking are now ticked off
+    const allItems = await client.query('SELECT is_checked FROM public.booking_checklists WHERE booking_id = $1', [bookingId]);
+    const allChecked = allItems.rows.every(item => item.is_checked === true);
+    
+    // Auto-update booking status if requirements are met
+// Auto-update booking status if requirements are met
+  if (allChecked && allItems.rows.length > 0) {
+    await client.query("UPDATE public.bookings SET status = 'Confirmed', updated_at = timezone('Asia/Manila', now()) WHERE booking_id = $1", [bookingId]);
+  } else {
+    await client.query("UPDATE public.bookings SET status = 'Reserved' WHERE booking_id = $1", [bookingId]);
+  }
+
+    await client.query('COMMIT');
+    res.json({ message: "Checklist updated", allChecked });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: "Failed to update checklist status." });
+  } finally {
+    client.release();
+  }
+});
+
+// ==========================================
+// MASTER CHECKLIST TEMPLATES ENDPOINTS
+// ==========================================
+
+// GET Master Templates by Facility Type
+app.get('/api/procurement/templates/:type', requireAuth, async (req, res) => {
+  try {
+    const { type } = req.params;
+    const result = await pool.query(
+      'SELECT template_id, item_name, booking_type FROM public.checklist_templates WHERE booking_type = $1 ORDER BY template_id ASC', 
+      [type]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch master checklist templates." });
+  }
+});
+
+// POST New Master Template Item
+app.post('/api/procurement/templates', requireAuth, async (req, res) => {
+  try {
+    const { bookingType, itemName } = req.body;
+    await pool.query(
+      'INSERT INTO public.checklist_templates (booking_type, item_name) VALUES ($1, $2)', 
+      [bookingType, itemName]
+    );
+    res.status(201).json({ message: "Template item successfully added." });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add template item." });
+  }
+});
+
+// DELETE Master Template Item
+app.delete('/api/procurement/templates/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    await pool.query(
+      'DELETE FROM public.checklist_templates WHERE template_id = $1', 
+      [id]
+    );
+    res.json({ message: "Template item permanently removed." });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete template item." });
   }
 });
 

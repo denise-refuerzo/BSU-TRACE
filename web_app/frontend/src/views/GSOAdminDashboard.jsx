@@ -103,6 +103,46 @@ export default function GSOAdminDashboard() {
   const [blackoutForm, setBlackoutForm] = useState({ asd_id: '', start_time: '', end_time: '', reason: '' });
   const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date());
 
+  // Procurement & Modal States
+  const [showChecklistMakerModal, setShowChecklistMakerModal] = useState(false);
+  const [activeChecklistTab, setActiveChecklistTab] = useState('Vehicle');
+  
+  // Print Logs States
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printTargetTab, setPrintTargetTab] = useState('Vehicle'); 
+  const [printStartDate, setPrintStartDate] = useState('');
+  const [printEndDate, setPrintEndDate] = useState('');
+
+  // --- Procurement Data States ---
+  const [reservationsList, setReservationsList] = useState([]);
+  const [logisticsList, setLogisticsList] = useState([]);
+
+  // Procurement Search, Filter, and Pagination States
+  const [procSearch, setProcSearch] = useState({ vehicle: '', multimedia: '', gym: '', logistics: '' });
+  const [procFilter, setProcFilter] = useState({ vehicle: 'All', multimedia: 'All', gym: 'All', logistics: 'All' });
+  const [procPage, setProcPage] = useState({ vehicle: 1, multimedia: 1, gym: 1, logistics: 1 });
+  const itemsPerProcPage = 5;
+
+  const fetchProcurementData = async () => {
+    try {
+      const resBookings = await fetchWithAuth('http://localhost:5000/api/procurement/reservations');
+      if (resBookings.ok) {
+        setReservationsList(await resBookings.json());
+      }
+      const resLogistics = await fetchWithAuth('http://localhost:5000/api/procurement/logistics');
+      if (resLogistics.ok) {
+        setLogisticsList(await resLogistics.json());
+      }
+    } catch (err) { console.error("Error fetching procurement data:", err); }
+  };
+
+  // Trigger fetch when Procurement tab is opened
+  useEffect(() => {
+    if (activeTab === 'procurement') {
+      fetchProcurementData();
+    }
+  }, [activeTab]);
+
   const fetchBlackouts = async () => {
     try {
       const res = await fetchWithAuth('http://localhost:5000/api/resources/blackouts');
@@ -598,6 +638,254 @@ const handleAddAssetSubmit = async (e) => {
       }
     } catch (err) { console.error(err); }
   };
+
+  // --- Procurement Data Processing ---
+  const processProcurementData = (type, dataArray, searchKey, filterKey, pageKey) => {
+    let filtered = dataArray;
+    
+    // 1. Filter by Reservation Type (for the bookings table)
+    if (type !== 'Logistics') {
+      filtered = filtered.filter(item => item.booking_type === type);
+    }
+
+    // 2. Apply Search
+    if (procSearch[searchKey]) {
+      const lowerSearch = procSearch[searchKey].toLowerCase();
+      filtered = filtered.filter(item => 
+        (item.requestor && item.requestor.toLowerCase().includes(lowerSearch)) ||
+        (item.requestor_name && item.requestor_name.toLowerCase().includes(lowerSearch)) ||
+        (item.asset_name && item.asset_name.toLowerCase().includes(lowerSearch))
+      );
+    }
+
+    // 3. Apply Status Filter
+    if (procFilter[filterKey] !== 'All') {
+      filtered = filtered.filter(item => item.status === procFilter[filterKey]);
+    }
+
+    // 4. Calculate Pagination
+    const totalPages = Math.ceil(filtered.length / itemsPerProcPage) || 1;
+    const currentPage = procPage[pageKey];
+    const paginatedData = filtered.slice((currentPage - 1) * itemsPerProcPage, currentPage * itemsPerProcPage);
+
+    return { filteredData: filtered, paginatedData, totalPages };
+  };
+
+  const vehicleData = processProcurementData('Vehicle', reservationsList, 'vehicle', 'vehicle', 'vehicle');
+  const multimediaData = processProcurementData('Room', reservationsList, 'multimedia', 'multimedia', 'multimedia');
+  const gymData = processProcurementData('Gymnasium', reservationsList, 'gym', 'gym', 'gym');
+  const logData = processProcurementData('Logistics', logisticsList, 'logistics', 'logistics', 'logistics');
+
+  // --- Active Checklist Modal States ---
+  const [showActiveChecklistModal, setShowActiveChecklistModal] = useState(false);
+  const [activeChecklistBooking, setActiveChecklistBooking] = useState(null);
+  const [activeChecklistItems, setActiveChecklistItems] = useState([]);
+
+  // Fetch the specific checklist for a reservation
+  const handleViewChecklist = async (booking) => {
+    setActiveChecklistBooking(booking);
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/procurement/checklists/${booking.booking_id}/${booking.booking_type}`);
+      if (res.ok) {
+        setActiveChecklistItems(await res.json());
+        setShowActiveChecklistModal(true);
+      }
+    } catch (err) { console.error("Error fetching checklist:", err); }
+  };
+
+  // Toggle individual checklist items and trigger auto-confirm checks
+  const handleToggleChecklistItem = async (checkId, currentStatus) => {
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/procurement/checklists/${checkId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isChecked: !currentStatus, bookingId: activeChecklistBooking.booking_id })
+      });
+      if (res.ok) {
+        // Update the local UI instantly so the checkmark appears
+        setActiveChecklistItems(prev => prev.map(item => 
+          item.check_id === checkId ? { ...item, is_checked: !currentStatus } : item
+        ));
+
+        window.dispatchEvent(new Event('refreshReservations'));
+        
+        // Refresh the main tables in the background so the status updates if it hit 100%
+        fetchProcurementData(); 
+      }
+    } catch (err) { console.error("Error updating checklist:", err); }
+  };
+
+  // --- Master Checklist States & Functions ---
+  const [masterChecklistItems, setMasterChecklistItems] = useState([]);
+  const [newChecklistName, setNewChecklistName] = useState('');
+
+  // Fetch templates when modal opens or tab changes
+  useEffect(() => {
+    if (showChecklistMakerModal) {
+      const fetchTemplates = async () => {
+        const typeMapping = { 'Vehicle': 'Vehicle', 'Multimedia Room': 'Room', 'Gymnasium': 'Gymnasium' };
+        const targetType = typeMapping[activeChecklistTab];
+        try {
+          // Assuming your backend has an endpoint for templates by facility type
+          const res = await fetchWithAuth(`http://localhost:5000/api/procurement/templates/${targetType}`);
+          if (res.ok) setMasterChecklistItems(await res.json());
+        } catch (err) { console.error("Error fetching templates:", err); }
+      };
+      fetchTemplates();
+    }
+  }, [showChecklistMakerModal, activeChecklistTab]);
+
+  const handleAddMasterChecklistItem = async (e) => {
+    e.preventDefault();
+    if (!newChecklistName.trim()) return;
+
+    const typeMapping = { 'Vehicle': 'Vehicle', 'Multimedia Room': 'Room', 'Gymnasium': 'Gymnasium' };
+    const targetType = typeMapping[activeChecklistTab];
+
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/procurement/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingType: targetType, itemName: newChecklistName })
+      });
+      if (res.ok) {
+        setNewChecklistName('');
+        // Re-fetch to update the list
+        const updated = await fetchWithAuth(`http://localhost:5000/api/procurement/templates/${targetType}`);
+        setMasterChecklistItems(await updated.json());
+      }
+    } catch (err) { console.error("Error adding template:", err); }
+  };
+
+  const handleDeleteMasterChecklistItem = async (templateId) => {
+    try {
+      const res = await fetchWithAuth(`http://localhost:5000/api/procurement/templates/${templateId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setMasterChecklistItems(prev => prev.filter(item => item.template_id !== templateId));
+      }
+    } catch (err) { console.error("Error deleting template:", err); }
+  };
+
+  // --- PDF Export Generation ---
+  const handleGeneratePDF = () => {
+    let dataToPrint = [];
+    
+    // Filter logic based on selected tab and dates
+    if (printTargetTab === 'Logistics History') {
+      dataToPrint = logisticsList.filter(log => {
+        const logDate = new Date(log.borrowed_at).toISOString().split('T')[0];
+        const afterStart = printStartDate ? logDate >= printStartDate : true;
+        const beforeEnd = printEndDate ? logDate <= printEndDate : true;
+        return afterStart && beforeEnd;
+      });
+    } else {
+      const typeMap = { 'Vehicle': 'Vehicle', 'Multimedia Room': 'Room', 'Gymnasium': 'Gymnasium' };
+      dataToPrint = reservationsList.filter(res => {
+        const isCorrectType = res.booking_type === typeMap[printTargetTab];
+        const resDate = new Date(res.reservation_date).toISOString().split('T')[0];
+        const afterStart = printStartDate ? resDate >= printStartDate : true;
+        const beforeEnd = printEndDate ? resDate <= printEndDate : true;
+        return isCorrectType && afterStart && beforeEnd;
+      });
+    }
+
+    if (dataToPrint.length === 0) {
+      return minimalSwal.fire({ icon: 'warning', title: 'No Records', text: 'No records found for the selected date range.' });
+    }
+
+    // Build the HTML for the print window
+    const printWindow = window.open('', '_blank');
+    
+    let tableHeaders = '';
+    let tableRows = '';
+
+    if (printTargetTab === 'Logistics History') {
+      tableHeaders = `
+        <tr>
+          <th>Asset</th>
+          <th>Requestor</th>
+          <th>Qty</th>
+          <th>Lending Time</th>
+          <th>Return Time</th>
+          <th>Condition / Notes</th>
+        </tr>`;
+      
+      tableRows = dataToPrint.map(log => `
+        <tr>
+          <td><strong>${log.asset_name}</strong></td>
+          <td>${log.requestor_name}</td>
+          <td>${log.qty_borrowed}</td>
+          <td>${log.borrowed_at ? new Date(log.borrowed_at).toLocaleString() : 'N/A'}</td>
+          <td>${log.returned_at ? new Date(log.returned_at).toLocaleString() : 'Pending'}</td>
+          <td>
+          ${log.status === 'Returned'
+            ? (log.condition_on_return === 'Damaged' ? `<span style="color:red; font-weight:bold;">Damaged:</span> ${log.damage_notes || 'No notes provided'}` : 'Good Condition')
+            : 'Out / Borrowed'}
+          </td>
+        </tr>`).join('');
+    } else {
+      tableHeaders = `
+        <tr>
+          <th>Requestor</th>
+          <th>Purpose</th>
+          <th>Target Date & Time</th>
+          <th>System Request Made</th>
+          <th>Confirmed At</th>
+          <th>Status</th>
+        </tr>`;
+      
+      tableRows = dataToPrint.map(res => `
+        <tr>
+          <td><strong>${res.requestor || res.requestor_name || 'N/A'}</strong></td>
+          <td>${res.purpose}</td>
+          <td>${new Date(res.reservation_date).toLocaleDateString()} <br> <small>${res.start_time?.substring(0,5)} - ${res.end_time?.substring(0,5)}</small></td>
+          <td>${res.created_at ? new Date(res.created_at).toLocaleString() : 'N/A'}</td>
+          <td>${res.updated_at ? new Date(res.updated_at).toLocaleString() : 'Pending'}</td>
+          <td style="font-weight:bold; color: ${res.status === 'Confirmed' ? 'green' : '#d97706'}">${res.status}</td>
+        </tr>`).join('');
+    }
+
+    const htmlContent = `
+      <html>
+        <head>
+          <title>Exported Logs - ${printTargetTab}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; color: #333; }
+            .header { border-bottom: 2px solid #991b1b; padding-bottom: 10px; margin-bottom: 20px; }
+            .header h1 { margin: 0; color: #991b1b; font-size: 24px; }
+            .header p { margin: 5px 0 0 0; color: #666; font-size: 12px; }
+            table { w-full; border-collapse: collapse; margin-top: 10px; font-size: 12px; width: 100%; }
+            th { background-color: #f87171; color: white; text-align: left; padding: 10px; font-weight: bold; text-transform: uppercase; font-size: 10px; }
+            td { padding: 10px; border-bottom: 1px solid #e5e5e5; }
+            tr:nth-child(even) { background-color: #f9fafb; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>BSU GSO Procurement Logs</h1>
+            <p><strong>Category:</strong> ${printTargetTab}</p>
+            <p><strong>Date Filter:</strong> ${printStartDate || 'Beginning of records'} to ${printEndDate || 'Present'}</p>
+            <p><strong>Generated On:</strong> ${new Date().toLocaleString()}</p>
+          </div>
+          <table>
+            <thead>${tableHeaders}</thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    
+    // Allow styles to load before calling print
+    setTimeout(() => {
+      printWindow.print();
+    }, 250);
+  };
+
 
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
@@ -1098,8 +1386,182 @@ const handleAddAssetSubmit = async (e) => {
             </div>
           )}
 
+          {activeTab === 'procurement' && (
+            <div className="max-w-7xl mx-auto space-y-6 text-left animate-in fade-in duration-200">
+              
+              {/* HEADER SECTION WITH CENTRALIZED BUTTONS */}
+              <div className="flex justify-between items-start border-b border-neutral-200 pb-4">
+                <div>
+                  <h2 className="text-xl font-black text-neutral-900">Procurement Management</h2>
+                  <p className="text-xs text-neutral-500 font-medium mt-1">Manage physical documents and requirements for reservations.</p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowPrintModal(true)} 
+                    className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2 border border-neutral-200"
+                  >
+                    <Download size={14} /> Master Print Logs
+                  </button>
+                  <button 
+                    onClick={() => setShowChecklistMakerModal(true)} 
+                    className="px-4 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                  >
+                    <Edit size={14} /> Master Checklist
+                  </button>
+                </div>
+              </div>
+
+              {/* HELPER FUNCTION TO RENDER RESERVATION TABLES */}
+              {[
+                { title: 'Vehicle Reservations', icon: <Car size={16} className="text-red-800"/>, data: vehicleData, sKey: 'vehicle' },
+                { title: 'Multimedia Room', icon: <Building size={16} className="text-red-800"/>, data: multimediaData, sKey: 'multimedia' },
+                { title: 'Gymnasium Reservations', icon: <Landmark size={16} className="text-red-800"/>, data: gymData, sKey: 'gym' }
+              ].map((block, idx) => (
+                <div key={idx} className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
+                      {block.icon} {block.title}
+                    </h3>
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2 text-neutral-400" size={14} />
+                        <input type="text" placeholder="Search Requestor..." value={procSearch[block.sKey]} onChange={e => { setProcSearch({...procSearch, [block.sKey]: e.target.value}); setProcPage({...procPage, [block.sKey]: 1}); }} className="pl-8 pr-3 py-1.5 text-xs border rounded-lg bg-neutral-50 outline-none focus:ring-1 focus:ring-red-700 w-48" />
+                      </div>
+                      <select value={procFilter[block.sKey]} onChange={e => { setProcFilter({...procFilter, [block.sKey]: e.target.value}); setProcPage({...procPage, [block.sKey]: 1}); }} className="border border-neutral-300 rounded-lg px-2 py-1.5 text-xs font-bold text-neutral-700 bg-neutral-50 outline-none">
+                        <option value="All">All Status</option>
+                        <option value="Reserved">Pending / Reserved</option>
+                        <option value="Confirmed">Confirmed</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-neutral-200 rounded-xl">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="bg-neutral-50 border-b border-neutral-200 font-black uppercase text-[10px] text-neutral-600 tracking-wider">
+                          <th className="p-3 pl-4">Requestor</th>
+                          <th className="p-3">Purpose</th>
+                          <th className="p-3">Date & Time</th>
+                          <th className="p-3">Status</th>
+                          <th className="p-3 text-center pr-4">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100 font-medium">
+                        {block.data.paginatedData.map((res) => {
+                          const dateObj = new Date(res.reservation_date);
+                          return (
+                            <tr key={res.booking_id} className="hover:bg-neutral-50 transition-colors">
+                              <td className="p-3 pl-4 font-bold text-neutral-900">{res.requestor}</td>
+                              <td className="p-3 text-neutral-600 truncate max-w-[150px]">{res.purpose}</td>
+                              <td className="p-3 text-neutral-600">
+                                <div className="font-bold text-neutral-800">{dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                                <div className="text-[10px] text-neutral-500">{res.start_time?.substring(0,5)} - {res.end_time?.substring(0,5)}</div>
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-wide border ${res.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                                  {res.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-center pr-4">
+                              <button 
+                                  onClick={() => handleViewChecklist(res)}
+                                  className="px-3 py-1.5 bg-red-50 text-red-800 hover:bg-red-100 font-bold text-xs rounded-lg transition-colors border border-red-200"
+                                >
+                                  View Checklist
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {block.data.paginatedData.length === 0 && (
+                          <tr><td colSpan="5" className="p-6 text-center text-neutral-400 font-bold">No reservations found.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination Controls */}
+                  <div className="flex justify-between items-center mt-4 text-xs">
+                    <span className="text-neutral-500 font-bold">Showing {block.data.paginatedData.length} of {block.data.filteredData.length} records</span>
+                    <div className="flex gap-1">
+                      <button disabled={procPage[block.sKey] === 1} onClick={() => setProcPage({...procPage, [block.sKey]: procPage[block.sKey] - 1})} className="px-3 py-1 border rounded-lg bg-white disabled:opacity-50 hover:bg-neutral-50 font-bold text-neutral-600">Prev</button>
+                      <span className="px-3 py-1 border rounded-lg bg-neutral-100 font-black text-neutral-800">{procPage[block.sKey]} / {block.data.totalPages}</span>
+                      <button disabled={procPage[block.sKey] === block.data.totalPages} onClick={() => setProcPage({...procPage, [block.sKey]: procPage[block.sKey] + 1})} className="px-3 py-1 border rounded-lg bg-white disabled:opacity-50 hover:bg-neutral-50 font-bold text-neutral-600">Next</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* 4. LOGISTICS HISTORY */}
+              <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-sm font-black text-neutral-900 flex items-center gap-2">
+                    <Archive size={16} className="text-red-800"/> Logistics History
+                  </h3>
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2 text-neutral-400" size={14} />
+                      <input type="text" placeholder="Search Asset or Requestor..." value={procSearch.logistics} onChange={e => { setProcSearch({...procSearch, logistics: e.target.value}); setProcPage({...procPage, logistics: 1}); }} className="pl-8 pr-3 py-1.5 text-xs border rounded-lg bg-neutral-50 outline-none focus:ring-1 focus:ring-red-700 w-48" />
+                    </div>
+                    <select value={procFilter.logistics} onChange={e => { setProcFilter({...procFilter, logistics: e.target.value}); setProcPage({...procPage, logistics: 1}); }} className="border border-neutral-300 rounded-lg px-2 py-1.5 text-xs font-bold text-neutral-700 bg-neutral-50 outline-none">
+                      <option value="All">All Types</option>
+                      <option value="Borrowed">Lending (Borrowed)</option>
+                      <option value="Returned">Returned</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto border border-neutral-200 rounded-xl">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-neutral-50 border-b border-neutral-200 font-black uppercase text-[10px] text-neutral-600 tracking-wider">
+                        <th className="p-3 pl-4">Asset Name</th>
+                        <th className="p-3">Requestor</th>
+                        <th className="p-3">Qty</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 pr-4 text-right">Timestamp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100 font-medium">
+                      {logData.paginatedData.map((log) => {
+                        const dateObj = new Date(log.borrowed_at);
+                        return (
+                          <tr key={log.log_id} className="hover:bg-neutral-50 transition-colors">
+                            <td className="p-3 pl-4 font-bold text-neutral-900">{log.asset_name}</td>
+                            <td className="p-3 text-neutral-600">{log.requestor_name}</td>
+                            <td className="p-3 font-bold text-neutral-800">{log.qty_borrowed}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-wide border ${log.status === 'Returned' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-orange-50 text-orange-700 border-orange-200'}`}>
+                                {log.status}
+                              </span>
+                            </td>
+                            <td className="p-3 pr-4 text-right text-neutral-500 font-mono text-[10px]">
+                              {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {logData.paginatedData.length === 0 && (
+                        <tr><td colSpan="5" className="p-6 text-center text-neutral-400 font-bold">No logistics history found.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex justify-between items-center mt-4 text-xs">
+                  <span className="text-neutral-500 font-bold">Showing {logData.paginatedData.length} of {logData.filteredData.length} records</span>
+                  <div className="flex gap-1">
+                    <button disabled={procPage.logistics === 1} onClick={() => setProcPage({...procPage, logistics: procPage.logistics - 1})} className="px-3 py-1 border rounded-lg bg-white disabled:opacity-50 hover:bg-neutral-50 font-bold text-neutral-600">Prev</button>
+                    <span className="px-3 py-1 border rounded-lg bg-neutral-100 font-black text-neutral-800">{procPage.logistics} / {logData.totalPages}</span>
+                    <button disabled={procPage.logistics === logData.totalPages} onClick={() => setProcPage({...procPage, logistics: procPage.logistics + 1})} className="px-3 py-1 border rounded-lg bg-white disabled:opacity-50 hover:bg-neutral-50 font-bold text-neutral-600">Next</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* PLACEHOLDER TABS FOR OTHERS TO KEEP NAVIGATION CLEAN */}
-          {( activeTab === 'procurement' || activeTab === 'analytics' ) && (
+          {(  activeTab === 'analytics' ) && (
             <div className="max-w-7xl mx-auto flex items-center justify-center h-64 border-2 border-dashed border-neutral-200 rounded-xl bg-white text-neutral-400 font-bold">
               {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module - System Architecture Loading...
             </div>
@@ -1795,6 +2257,228 @@ const handleAddAssetSubmit = async (e) => {
           </div>
         </div>
       )}
+
+      {/* --- GLOBAL MASTER CHECKLIST MAKER MODAL --- */}
+      {showChecklistMakerModal && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm flex items-center gap-2">
+                <Edit size={16} className="text-red-800" /> Master Checklist Configuration
+              </h3>
+              <button onClick={() => setShowChecklistMakerModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+
+            <div className="p-5 flex flex-col h-[50vh]">
+              {/* Reservation Target Tabs */}
+              <div className="bg-neutral-100 p-1 rounded-xl flex font-bold text-[10px] mb-4 flex-shrink-0">
+                {['Vehicle', 'Multimedia Room', 'Gymnasium'].map((tab) => (
+                  <button 
+                    key={tab}
+                    onClick={() => setActiveChecklistTab(tab)}
+                    className={`w-1/3 py-2 rounded-lg uppercase tracking-wider transition-colors ${
+                      activeChecklistTab === tab ? 'bg-white text-red-800 shadow-sm' : 'text-neutral-500 hover:text-neutral-800'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+
+              {/* Global List Editor */}
+              <div className="flex-1 overflow-y-auto space-y-2 border border-neutral-200 bg-neutral-50 rounded-xl p-4">
+                <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-3 block">
+                  {activeChecklistTab} Required Documents
+                </p>
+                
+                {masterChecklistItems.length === 0 ? (
+                  <div className="text-center p-4 text-neutral-400 text-xs font-bold">No requirements set.</div>
+                ) : (
+                  masterChecklistItems.map(item => (
+                    <div key={item.template_id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-neutral-200 shadow-sm animate-in fade-in">
+                      <span className="text-xs font-bold text-neutral-700">{item.item_name}</span>
+                      <button 
+                        onClick={() => handleDeleteMasterChecklistItem(item.template_id)}
+                        className="text-red-600 hover:text-red-800 hover:bg-red-50 p-1.5 rounded-md transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Add New Item Input */}
+              <form onSubmit={handleAddMasterChecklistItem} className="mt-4 flex gap-2 flex-shrink-0">
+                <input 
+                  type="text" 
+                  value={newChecklistName}
+                  onChange={(e) => setNewChecklistName(e.target.value)}
+                  placeholder="Type new document requirement..." 
+                  className="flex-1 px-3 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-red-700 outline-none"
+                />
+                <button 
+                  type="submit" 
+                  className="px-4 py-2 bg-neutral-900 hover:bg-black text-white font-bold text-xs rounded-lg uppercase tracking-wide transition-colors"
+                >
+                  Add
+                </button>
+              </form>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- GLOBAL MASTER PRINT MODAL --- */}
+      {showPrintModal && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm flex items-center gap-2">
+                <Download size={16} className="text-neutral-700" /> Export Procurement Logs
+              </h3>
+              <button onClick={() => setShowPrintModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+
+            <div className="p-5 flex flex-col">
+              <label className="block text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2">Select Target Database</label>
+              
+              {/* Dynamic Tab Selection */}
+              <div className="bg-neutral-100 p-1 rounded-xl flex font-bold text-[10px] mb-4 flex-wrap">
+                {['Vehicle', 'Multimedia Room', 'Gymnasium', 'Logistics History'].map((tab) => (
+                  <button 
+                    key={tab}
+                    onClick={() => setPrintTargetTab(tab)}
+                    className={`flex-1 py-2 rounded-lg uppercase tracking-wider transition-colors min-w-[45%] m-0.5 ${
+                      printTargetTab === tab ? 'bg-white text-neutral-900 shadow-sm border border-neutral-200' : 'text-neutral-500 hover:text-neutral-800'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+
+              {/* Date Filter Inputs */}
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Start Date</label>
+                  <input 
+                    type="date" 
+                    value={printStartDate}
+                    onChange={(e) => setPrintStartDate(e.target.value)}
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-neutral-700 outline-none bg-neutral-50" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">End Date</label>
+                  <input 
+                    type="date" 
+                    value={printEndDate}
+                    onChange={(e) => setPrintEndDate(e.target.value)}
+                    className="w-full px-4 py-2 text-xs border border-neutral-300 rounded-lg focus:ring-1 focus:ring-neutral-700 outline-none bg-neutral-50" 
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-between gap-3 pt-6 border-t border-neutral-100 mt-6">
+                <button type="button" onClick={() => setShowPrintModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs text-gray-500 hover:bg-neutral-50 uppercase tracking-wide">Cancel</button>
+                <button 
+                    type="button" 
+                    onClick={handleGeneratePDF}
+                    className="w-1/2 py-2.5 bg-neutral-900 hover:bg-black text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs flex items-center justify-center gap-2"
+                  >
+                    <Download size={14} /> Generate PDF
+                  </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* --- INDIVIDUAL RESERVATION CHECKLIST MODAL --- */}
+      {showActiveChecklistModal && activeChecklistBooking && (
+        <div className="fixed inset-0 bg-neutral-950/40 backdrop-blur-xs flex items-center justify-center p-4 z-[120] animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border overflow-hidden flex flex-col text-left">
+            
+            <div className="p-4 border-b bg-[#FDFBF9] flex items-center justify-between">
+              <h3 className="font-bold text-neutral-900 text-sm flex items-center gap-2">
+                <FileText size={16} className="text-red-800" /> Booking Requirements
+              </h3>
+              <button onClick={() => setShowActiveChecklistModal(false)} className="text-neutral-400 hover:text-neutral-600"><X size={16} /></button>
+            </div>
+
+            <div className="p-5 flex flex-col">
+              {/* Booking Context Header */}
+              <div className="bg-neutral-50 border border-neutral-200 p-3 rounded-xl mb-4">
+                <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wider">Requestor</span>
+                <p className="font-bold text-neutral-900 text-sm">{activeChecklistBooking.requestor}</p>
+                <div className="flex justify-between items-end mt-2">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-neutral-400 tracking-wider block">Facility</span>
+                    <p className="text-xs font-bold text-neutral-700">{activeChecklistBooking.booking_type}</p>
+                  </div>
+                  <div>
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide border ${activeChecklistBooking.status === 'Confirmed' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                      {activeChecklistBooking.status}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] font-black uppercase text-neutral-400 tracking-wider mb-2 block">
+                Required Documents Checklist
+              </p>
+
+              {/* Dynamic Checklist Render */}
+              <div className="space-y-2 max-h-[40vh] overflow-y-auto">
+                {activeChecklistItems.length === 0 ? (
+                  <div className="text-center p-4 border border-dashed border-neutral-200 rounded-xl text-neutral-400 text-xs font-bold">
+                    No requirements configured for this facility type.
+                  </div>
+                ) : (
+                  activeChecklistItems.map((item) => (
+                    <label 
+                      key={item.check_id} 
+                      className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                        item.is_checked ? 'bg-green-50/50 border-green-200' : 'bg-white border-neutral-200 hover:bg-neutral-50'
+                      }`}
+                    >
+                      <div className="relative flex items-center justify-center">
+                        <input 
+                          type="checkbox" 
+                          checked={item.is_checked} 
+                          onChange={() => handleToggleChecklistItem(item.check_id, item.is_checked)}
+                          className="w-5 h-5 appearance-none border-2 border-neutral-300 rounded-md checked:border-green-600 checked:bg-green-600 transition-colors cursor-pointer"
+                        />
+                        {item.is_checked && <span className="absolute text-white pointer-events-none">✓</span>}
+                      </div>
+                      <span className={`text-xs font-bold ${item.is_checked ? 'text-green-800 line-through opacity-70' : 'text-neutral-700'}`}>
+                        {item.item_name}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-neutral-100">
+                <button 
+                  type="button" 
+                  onClick={() => setShowActiveChecklistModal(false)} 
+                  className="w-full py-2.5 bg-neutral-900 hover:bg-black text-white font-bold rounded-xl shadow-xs uppercase tracking-wide text-xs transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
