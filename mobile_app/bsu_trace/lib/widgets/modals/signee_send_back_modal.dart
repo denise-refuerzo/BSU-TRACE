@@ -1,71 +1,15 @@
 // lib/widgets/modals/signee_send_back_modal.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../../theme/app_theme.dart';
-import '../../config.dart';
-import '../../services/session_manager.dart';
 
-class SigneeSendBackModal extends StatefulWidget {
-  final Map<String, dynamic> document;
-  const SigneeSendBackModal({super.key, required this.document});
-
-  @override
-  State<SigneeSendBackModal> createState() => _SigneeSendBackModalState();
-}
-
-class _SigneeSendBackModalState extends State<SigneeSendBackModal> {
-  final TextEditingController _commentController = TextEditingController();
-  bool _isLoading = false;
-
-  Future<void> _submitSendBack() async {
-    if (_commentController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please provide a reason for the revision.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    final String qrCode = widget.document['qr_code'] ?? '';
-    final userId = SessionManager().userId;
-
-    try {
-      final response = await http.put(
-        Uri.parse('${AppConfig.baseUrl}/documents/$qrCode/send-back'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'reason': _commentController.text.trim(),
-          'signeeUserId': userId,
-        }),
-      );
-
-      if (response.statusCode == 200 && mounted) {
-        Navigator.pop(context); // Close Send Back Modal
-        Navigator.pop(context, true); // Close Details Modal and signal refresh
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Document returned for revision.')),
-        );
-      } else {
-        throw Exception('Failed to send back');
-      }
-    } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error connecting to server.')),
-        );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
+class SigneeSendBackModal extends StatelessWidget {
+  const SigneeSendBackModal({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      backgroundColor: const Color(0xFFFFFDFD),
+      backgroundColor: const Color(0xFFFFFDFD), // Soft warm white/pinkish
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -73,6 +17,7 @@ class _SigneeSendBackModalState extends State<SigneeSendBackModal> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // --- DRAG HANDLE ---
             Center(
               child: Container(
                 width: 40,
@@ -85,14 +30,12 @@ class _SigneeSendBackModalState extends State<SigneeSendBackModal> {
             ),
             const SizedBox(height: 24),
 
+            // --- HEADER ---
             Row(
               children: [
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
-                  child: const Icon(
-                    Icons.arrow_back,
-                    color: AppTheme.primaryRed,
-                  ),
+                  child: const Icon(Icons.arrow_back, color: AppTheme.primaryRed),
                 ),
                 const SizedBox(width: 16),
                 const Text(
@@ -106,25 +49,60 @@ class _SigneeSendBackModalState extends State<SigneeSendBackModal> {
               ],
             ),
             const SizedBox(height: 16),
+
+            // --- SUBTITLE ---
             const Text(
-              'Enter specific reason detailing why this documentation is being sent back to the originator for modifications.',
+              'Request revisions from the requestor or previous office.',
               style: TextStyle(fontSize: 13, color: Colors.black54),
             ),
             const SizedBox(height: 24),
 
-            // --- REASON TEXT FIELD (Replaces Dropdown) ---
+            // --- REASON DROPDOWN ---
             const Text(
-              'Reason for Return (Revision Notes Required)',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.black54,
+              'Return Reason',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
               ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  value: 'Incomplete Information',
+                  icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'Incomplete Information',
+                      child: Text('Incomplete Information', style: TextStyle(fontSize: 14)),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Missing Signatures',
+                      child: Text('Missing Signatures', style: TextStyle(fontSize: 14)),
+                    ),
+                    DropdownMenuItem(
+                      value: 'Incorrect Form',
+                      child: Text('Incorrect Form', style: TextStyle(fontSize: 14)),
+                    ),
+                  ],
+                  onChanged: (value) {},
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // --- COMMENTS TEXT FIELD ---
+            const Text(
+              'Comments/Instructions',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black54),
             ),
             const SizedBox(height: 8),
             TextField(
-              controller: _commentController,
-              maxLines: 6,
+              maxLines: 4,
               decoration: InputDecoration(
                 hintText: 'Be specific about required changes...',
                 hintStyle: const TextStyle(color: Colors.black38, fontSize: 14),
@@ -142,24 +120,25 @@ class _SigneeSendBackModalState extends State<SigneeSendBackModal> {
             ),
             const SizedBox(height: 32),
 
+            // --- SUBMIT BUTTON ---
             ElevatedButton(
-              onPressed: _isLoading ? null : _submitSendBack,
+              onPressed: () {
+                // Popping twice returns the user to the Pending Approvals list
+                Navigator.pop(context); // Close the "Send Back" modal
+                Navigator.pop(context); // Close the "Document Details" modal
+                
+                // Optional: Add a SnackBar here to confirm the action
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryRed,
                 padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
               ),
-              child: _isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text(
-                      'Return for Revision',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+              child: const Text(
+                'Return for Revision',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              ),
             ),
           ],
         ),

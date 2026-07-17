@@ -325,6 +325,23 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
 app.post('/api/documents', requireAuth, async (req, res) => {
   const { userId, title, processTypeId, edc } = req.body;
   try {
+    // 1. Fetch the Originator's Department ID (d_id)
+    const userRes = await pool.query('SELECT d_id FROM public."User" WHERE u_id = $1', [userId]);
+    const userDeptId = userRes.rows[0]?.d_id;
+
+    // 2. Map the Department ID to the specific College Office ID (o_id)
+    const departmentToOfficeMap = {
+        1: 11, // CICS (d_id 1) -> CICS Office (o_id 11)
+        2: 12, // CABEIHM -> CABEIHM Office
+        3: 13, // CAS -> CAS Office
+        4: 14, // CIT -> CE / CIT Office
+        5: 14, // CE -> CE / CIT Office
+        6: 24  // CTE -> CTE Office
+    };
+    
+    // Default to CICS if mapping fails
+    const assignedOfficeId = departmentToOfficeMap[userDeptId] || 11; 
+
     const uniqueQrPayload = `TRK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const docResult = await pool.query(
       `INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code, created_at) 
@@ -332,13 +349,30 @@ app.post('/api/documents', requireAuth, async (req, res) => {
       [processTypeId, userId, title, edc || null, uniqueQrPayload]
     );
     const newDoc = docResult.rows[0];
+    
     const routeResult = await pool.query(`SELECT r.stop_1, r.stop_2 FROM public.process_type pt JOIN public.route r ON pt.r_id = r.r_id WHERE pt.p_id = $1`, [processTypeId]);
     const route = routeResult.rows[0];
+    
     if (route) {
-      await pool.query(`INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id) VALUES ($1, 1, $2, $3)`, [newDoc.ini_id, route.stop_1, route.stop_2]);
+      // 3. The Dynamic Swap Logic
+      let firstStop = route.stop_1;
+      
+      // If the template uses the 999 Placeholder, swap it with the Originator's mapped office
+      if (firstStop === 999) {
+          firstStop = assignedOfficeId;
+      }
+
+      await pool.query(
+        `INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id) 
+         VALUES ($1, 1, $2, $3)`, 
+        [newDoc.ini_id, firstStop, route.stop_2]
+      );
     }
     res.status(201).json({ message: 'Document tracking active!', qrCode: uniqueQrPayload });
-  } catch (err) { res.status(500).json({ error: 'Failed' }); }
+  } catch (err) { 
+    console.error(err);
+    res.status(500).json({ error: 'Failed' }); 
+  }
 });
 
 app.post('/api/accounts', requireAuth, async (req, res) => {
@@ -874,10 +908,11 @@ app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
     const adhocData = adhocCheckRes.rows[0];
 
     const routeRes = await pool.query(`
-      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7
+      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7, u.d_id as originator_dept_id
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       JOIN public.route r ON pt.r_id = r.r_id
+      JOIN public."User" u ON idoc.u_id = u.u_id
       WHERE idoc.ini_id = $1
     `, [currentActiveStep.ini_id]);
 
@@ -905,7 +940,18 @@ app.post('/api/documents/scan-out', requireAuth, async (req, res) => {
       // ==========================================================
       // 2. NORMAL 7-STOP ROUTING LOGIC
       // ==========================================================
-      const sequence = [r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
+      let mappedStop1 = r.stop_1;
+      
+      // The Dynamic Swap: Translate 999 back into the Originator's actual office
+      if (mappedStop1 === 999) {
+          const departmentToOfficeMap = {
+              1: 11, 2: 12, 3: 13, 4: 14, 5: 14, 6: 24
+          };
+          mappedStop1 = departmentToOfficeMap[r.originator_dept_id] || 11;
+      }
+
+      // Build the sequence using mappedStop1 instead of the raw r.stop_1
+      const sequence = [mappedStop1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
       
       // Look for the office we are CURRENTLY scanning out of
       const currentIndex = sequence.indexOf(currentActiveStep.current_office_id);
@@ -1499,9 +1545,10 @@ app.get('/api/notifications/:userId/:roleId/:officeId', requireAuth, async (req,
       const query = `
         SELECT 
           h.history_id as id,
+          idoc.ini_id,  /* CRITICAL ADDITION: Pulls the document reference key */
           idoc.title,
           h.action_type as title_alert,
-          ('Action performed at ' || off.office_name) as message,
+          ('Action performed at ' || COALESCE(off.office_name, 'Origin Station')) as message,
           h.action_timestamp as time
         FROM public.office_action_history h
         JOIN public.initial_document idoc ON h.ini_id = idoc.ini_id
@@ -1512,6 +1559,7 @@ app.get('/api/notifications/:userId/:roleId/:officeId', requireAuth, async (req,
       const result = await pool.query(query, [userId]);
       alertRows = result.rows.map(row => ({
         id: row.id,
+        ini_id: row.ini_id, /* Passed cleanly down to client tracking layer */
         title: row.title_alert,
         message: `"${row.title}": ${row.message}`,
         time: row.time

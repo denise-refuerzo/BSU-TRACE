@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../../theme/app_theme.dart';
 import '../../config.dart';
-import '../../services/session_manager.dart';
 
 class DocumentScannerModal extends StatefulWidget {
   const DocumentScannerModal({super.key});
@@ -19,7 +18,7 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
 
   Future<void> _processScan(String action) async {
     final trackingId = _trackingIdController.text.trim();
-
+    
     if (trackingId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a Tracking ID.')),
@@ -31,29 +30,22 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
 
     try {
       final endpoint = action == 'in' ? 'scan-in' : 'scan-out';
-
-      // Grab the userId from the SessionManager
-      final userId = SessionManager().userId;
-
-      // Send the userId in the body of the PUT request
-      final response = await http.put(
-        Uri.parse('${AppConfig.baseUrl}/documents/$trackingId/$endpoint'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'processorUserId': userId}),
-      );
+      final response = await http.put(Uri.parse('${AppConfig.baseUrl}/documents/$trackingId/$endpoint'));
 
       if (response.statusCode == 200) {
         if (!mounted) return;
-        Navigator.pop(context, true);
+        
+        // Pass 'true' back to the parent screen to trigger a refresh
+        Navigator.pop(context, true); 
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              'Document $trackingId successfully scanned ${action.toUpperCase()}!',
-            ),
+            content: Text('Document $trackingId successfully scanned ${action.toUpperCase()}!'),
             backgroundColor: Colors.green.shade700,
           ),
         );
       } else {
+        // Parse custom error message from the backend
         String errorMessage = 'Error: Could not process document.';
         try {
           final errorData = json.decode(response.body);
@@ -61,16 +53,20 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
             errorMessage = errorData['error'];
           }
         } catch (_) {}
+        
         throw Exception(errorMessage);
       }
     } catch (e) {
       if (!mounted) return;
+      
+      // Clean up the error message for the user interface
       String displayError = e.toString().replaceAll('Exception: ', '');
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(displayError),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 4), // Give them time to read the reason
         ),
       );
     } finally {
@@ -101,11 +97,7 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
               children: [
                 const Text(
                   'Scan Document',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
                 ),
                 GestureDetector(
                   onTap: () => Navigator.pop(context),
@@ -130,30 +122,19 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
                     width: 160,
                     height: 160,
                     decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.3),
-                        width: 2,
-                      ),
+                      border: Border.all(color: Colors.white.withOpacity(0.3), width: 2),
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                   Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.qr_code_scanner,
-                        color: Colors.white.withOpacity(0.7),
-                        size: 50,
-                      ),
+                      Icon(Icons.qr_code_scanner, color: Colors.white.withOpacity(0.7), size: 50),
                       const SizedBox(height: 12),
                       Text(
                         'Camera Placeholder\n(Point at QR Code)',
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -161,20 +142,15 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
               ),
             ),
             const SizedBox(height: 24),
-
+            
             const Center(
               child: Text(
                 'OR enter manually:',
-                style: TextStyle(
-                  color: Colors.black54,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
-                ),
+                style: TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5),
               ),
             ),
             const SizedBox(height: 12),
-
+            
             // Tracking ID Input
             TextField(
               controller: _trackingIdController,
@@ -182,44 +158,26 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
                 labelText: 'Tracking ID',
                 hintText: 'e.g. TRK-171829...',
                 prefixIcon: const Icon(Icons.qr_code, color: Colors.black54),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                focusedBorder: const OutlineInputBorder(
-                  borderSide: BorderSide(color: AppTheme.primaryRed),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.primaryRed)),
               ),
             ),
             const SizedBox(height: 24),
-
+            
             if (_isLoading)
-              const Center(
-                child: CircularProgressIndicator(color: AppTheme.primaryRed),
-              )
+              const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
             else
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () => _processScan('in'),
-                      icon: const Icon(
-                        Icons.login,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      label: const Text(
-                        'Scan IN',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      icon: const Icon(Icons.login, color: Colors.white, size: 18),
+                      label: const Text('Scan IN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue.shade600,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
                   ),
@@ -227,24 +185,12 @@ class _DocumentScannerModalState extends State<DocumentScannerModal> {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: () => _processScan('out'),
-                      icon: const Icon(
-                        Icons.logout,
-                        color: Colors.white,
-                        size: 18,
-                      ),
-                      label: const Text(
-                        'Scan OUT',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      icon: const Icon(Icons.logout, color: Colors.white, size: 18),
+                      label: const Text('Scan OUT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green.shade600,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
                   ),

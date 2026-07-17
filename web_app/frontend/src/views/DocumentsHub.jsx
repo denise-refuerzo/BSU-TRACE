@@ -43,7 +43,13 @@ export default function DocumentsHub({
     if (match) {
       const stops = [];
       for (let i = 1; i <= 7; i++) {
-        if (match[`stop_${i}_name`]) stops.push(match[`stop_${i}_name`]);
+        let stopName = match[`stop_${i}_name`];
+        // THE FIX: Swap the placeholder with the document's actual starting office
+        if (stopName === 'ORIGINATING_COLLEGE_DYNAMIC') {
+          // If the document hasn't started yet, fall back to Origin Office
+          stopName = doc.current_office || 'Origin Office'; 
+        }
+        if (stopName) stops.push(stopName);
       }
       setActiveRouteStops(stops);
     } else {
@@ -80,6 +86,36 @@ export default function DocumentsHub({
     
     return (currentIndex / (stops.length - 1)) * 100;
   };
+  useEffect(() => {
+    const pendingRedirectId = localStorage.getItem('redirect_target_doc_id');
+    if (pendingRedirectId && documents.length > 0) {
+      const targetDoc = documents.find(d => d.ini_id === parseInt(pendingRedirectId));
+      if (targetDoc) {
+        handleSelectDocument(targetDoc);
+        // Automatically open up the modal detail overlays context frame cleanly
+        setActiveDetailsDoc(targetDoc);
+        setShowDetailsModal(true);
+      }
+      // Clean up tracking flags from browser cache completely
+      localStorage.removeItem('redirect_target_doc_id');
+    }
+  }, [documents]);
+
+  useEffect(() => {
+    const pendingRedirectId = localStorage.getItem('redirect_target_doc_id');
+    if (pendingRedirectId && documents.length > 0) {
+      const targetDoc = documents.find(d => d.ini_id === parseInt(pendingRedirectId, 10));
+      if (targetDoc) {
+        // Highlighting step locks tracking progress bar metrics updates dynamically
+        handleSelectDocument(targetDoc);
+        // Fires up the inner step audit view window modal layout automatically
+        setActiveDetailsDoc(targetDoc);
+        setShowDetailsModal(true);
+      }
+      // Clean target flags from runtime registry completely to protect loops
+      localStorage.removeItem('redirect_target_doc_id');
+    }
+  }, [documents]);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-150">

@@ -165,7 +165,12 @@ export default function ProcessorDashboard() {
         setIncomingDocs(data);
         if (data.length > 0) {
           setNotifications([
-            { id: 1, title: "New Document Routing", message: `Document "${data[0].title}" entered your office queue. Action required.`, time: "2h ago" }
+            { 
+              id: 1, 
+              title: "New Document Routing", 
+              message: `Document "${data[0].title}" entered your office queue. Action required.`, 
+              time: data[0].created_at // Enforces real db timestamp tracking[cite: 5]
+            }
           ]);
         }
       }
@@ -464,6 +469,33 @@ export default function ProcessorDashboard() {
   const completedProcessingCount = pipelineDocs.filter(d => d.time_out !== null && d.time_out !== undefined).length;
   const inVerificationCount = pipelineDocs.filter(d => d.status?.toLowerCase() === 'in verification' && (d.time_out === null || d.time_out === undefined)).length;
 
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return 'Just now';
+    
+    // Clean PostgreSQL offset characters if present
+    const localizedString = String(timestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+    const now = new Date();
+    const past = new Date(localizedString);
+    const msPerMinute = 60 * 1000;
+    const msPerHour = msPerMinute * 60;
+    const msPerDay = msPerHour * 24;
+    
+    const elapsed = now - past;
+    
+    if (elapsed < msPerMinute) {
+       return 'Just now';
+    } else if (elapsed < msPerHour) {
+       const minutes = Math.round(elapsed / msPerMinute);
+       return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;   
+    } else if (elapsed < msPerDay) {
+       const hours = Math.round(elapsed / msPerHour);
+       return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;   
+    } else {
+       const days = Math.round(elapsed / msPerDay);
+       return `${days} ${days === 1 ? 'day' : 'days'} ago`;   
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -528,8 +560,17 @@ export default function ProcessorDashboard() {
                   <div className="p-4 border-b border-neutral-100 bg-[#FDFBF9] font-bold text-xs uppercase text-neutral-900 tracking-wide">Notifications</div>
                   <div className="max-h-64 overflow-y-auto divide-y divide-neutral-100">
                     {notifications.map(n => (
-                      <div key={n.id} className="p-4 text-xs"><p className="font-bold text-neutral-900">{n.title}</p><p className="text-neutral-500 mt-1">{n.message}</p></div>
-                    ))}
+                        <div key={n.id} className="p-4 text-xs border-b last:border-b-0">
+                          <div className="flex justify-between items-start gap-2">
+                            <p className="font-bold text-neutral-900">{n.title}</p>
+                            {/* Added your relative time span here */}
+                            <span className="text-[10px] text-neutral-400 whitespace-nowrap">
+                              {formatRelativeTime(n.time)}
+                            </span>
+                          </div>
+                          <p className="text-neutral-500 mt-1">{n.message}</p>
+                        </div>
+                      ))}
                   </div>
                 </div>
               )}

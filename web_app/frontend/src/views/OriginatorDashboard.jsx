@@ -70,7 +70,12 @@ export default function OriginatorDashboard() {
       if (match) {
         const stops = [];
         for (let i = 1; i <= 7; i++) {
-          if (match[`stop_${i}_name`]) stops.push(match[`stop_${i}_name`]);
+          let stopName = match[`stop_${i}_name`];
+          // THE FIX: Swap the placeholder
+          if (stopName === 'ORIGINATING_COLLEGE_DYNAMIC') {
+            stopName = activeDoc.current_office || 'Origin Unit';
+          }
+          if (stopName) stops.push(stopName);
         }
         setRecentDocStops(stops);
       } else {
@@ -107,15 +112,27 @@ export default function OriginatorDashboard() {
       if (res.ok) {
         const alertCollection = data.map(n => ({
           id: n.id,
+          ini_id: n.ini_id, // Captures document ID matching link
           title: n.title,
           message: n.message,
-          time: new Date(n.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+          time: n.time // Keep raw timestamp string for relative helper matching
         }));
         setNotifications(alertCollection);
       }
     } catch (err) { 
       console.error("Error retrieving notifications:", err); 
     }
+  };
+
+  const handleNotificationClick = (notif) => {
+    setShowNotifications(false);
+    if (!notif.ini_id) return;
+
+    // Cache the intended target document identifier to the browser engine session
+    localStorage.setItem('redirect_target_doc_id', String(notif.ini_id));
+    
+    // Switch the view instantly over to your documents workspace hub
+    setActiveTab('documents');
   };
 
   const fetchUserProfile = async () => {
@@ -260,6 +277,33 @@ export default function OriginatorDashboard() {
     ? (JSON.stringify(profile) !== JSON.stringify(initialProfile) && profile.fullName.trim() !== '' && profile.email.trim() !== '')
     : false;
 
+    const formatRelativeTime = (timestamp) => {
+      if (!timestamp) return 'Just now';
+      
+      // Clean PostgreSQL offset characters if present
+      const localizedString = String(timestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+      const now = new Date();
+      const past = new Date(localizedString);
+      const msPerMinute = 60 * 1000;
+      const msPerHour = msPerMinute * 60;
+      const msPerDay = msPerHour * 24;
+      
+      const elapsed = now - past;
+      
+      if (elapsed < msPerMinute) {
+         return 'Just now';
+      } else if (elapsed < msPerHour) {
+         const minutes = Math.round(elapsed / msPerMinute);
+         return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;   
+      } else if (elapsed < msPerDay) {
+         const hours = Math.round(elapsed / msPerHour);
+         return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;   
+      } else {
+         const days = Math.round(elapsed / msPerDay);
+         return `${days} ${days === 1 ? 'day' : 'days'} ago`;   
+      }
+    };
+    
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       <div className="w-64 bg-[#2D1F1E] text-neutral-300 flex flex-col justify-between p-4 flex-shrink-0">
@@ -304,8 +348,23 @@ export default function OriginatorDashboard() {
                   <div className="p-4 border-b border-neutral-100 bg-[#FDFBF9] font-bold text-xs uppercase text-neutral-900">Notifications</div>
                   <div className="max-h-64 overflow-y-auto divide-y divide-neutral-100">
                     {notifications.map(n => (
-                      <div key={n.id} className="p-4 text-xs text-left"><p className="font-bold text-neutral-900">{n.title}</p><p className="text-neutral-500 mt-1">{n.message}</p></div>
+                      <div 
+                        key={n.id} 
+                        onClick={() => handleNotificationClick(n)}
+                        className="p-4 text-xs text-left hover:bg-neutral-50 cursor-pointer transition-colors border-b last:border-b-0"
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <p className="font-bold text-neutral-900">{n.title}</p>
+                          <span className="text-[10px] text-neutral-400 whitespace-nowrap">
+                            {formatRelativeTime(n.time)}
+                          </span>
+                        </div>
+                        <p className="text-neutral-500 mt-1">{n.message}</p>
+                      </div>
                     ))}
+                    {notifications.length === 0 && (
+                      <div className="p-4 text-xs text-neutral-400 text-center font-bold">📭 No active updates.</div>
+                    )}
                   </div>
                 </div>
               )}

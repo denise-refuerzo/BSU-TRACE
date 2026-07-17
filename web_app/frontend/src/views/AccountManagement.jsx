@@ -64,6 +64,11 @@ export default function AccountManagement() {
       submissionFormPayload.officeId = null;
     }
 
+    // Clean out departmentId if not an Originator role to ensure database mapping alignment
+    if (form.accountType !== 1) {
+      submissionFormPayload.departmentId = null;
+    }
+
     try {
       const response = await fetchWithAuth('http://localhost:5000/api/accounts', {
         method: 'POST',
@@ -107,6 +112,12 @@ export default function AccountManagement() {
             payloadOfficeId = null;
           }
 
+          // Force null state if changed away from Originator
+          let payloadDeptId = selectedUser.d_id;
+          if (selectedUser.a_id !== 1) {
+            payloadDeptId = null;
+          }
+
           const response = await fetchWithAuth(`http://localhost:5000/api/accounts/${selectedUser.u_id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -115,7 +126,7 @@ export default function AccountManagement() {
               fullName: selectedUser.full_name,
               email: selectedUser.uni_email,
               accountType: selectedUser.a_id,
-              departmentId: selectedUser.d_id,
+              departmentId: payloadDeptId,
               officeId: payloadOfficeId,
               isActive: selectedUser.is_active // 🟢 Passed soft active state toggle to backend schema query maps
             })
@@ -158,7 +169,6 @@ export default function AccountManagement() {
           <nav className="space-y-1 text-sm text-left">
             <button type="button" onClick={() => navigate('/admin/dashboard')} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors">📊 Dashboard</button>
             <button type="button" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-neutral-800 text-white font-medium">👥 Accounts</button>
-            {/* 🛡️ Clicking this navigates directly to your independent Section 3 center */}
             <button type="button" onClick={() => navigate('/admin/matrix')} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors">🛡️ Roles & Matrix</button>
           </nav>
         </div>
@@ -230,7 +240,7 @@ export default function AccountManagement() {
                   </select>
                 </div>
 
-                {/* SCROLL CONTAINER (max height maps ~6 rows max footprint layout wrapper) */}
+                {/* SCROLL CONTAINER */}
                 <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm max-h-[362px] overflow-y-auto">
                   <table className="w-full text-left border-collapse text-xs relative">
                     <thead className="sticky top-0 bg-neutral-50 z-10 shadow-xs">
@@ -261,8 +271,10 @@ export default function AccountManagement() {
                           <td className="p-3 text-gray-500">
                             {user.office_name ? (
                               <span className="text-red-800 font-semibold font-sans">🏬 {user.office_name}</span>
-                            ) : (
+                            ) : user.department_name ? (
                               <span>📁 Dept: {user.department_name}</span>
+                            ) : (
+                              <span className="text-gray-400 italic">No Sector Bound</span>
                             )}
                           </td>
                           <td className="p-3 text-center">
@@ -337,16 +349,19 @@ export default function AccountManagement() {
                     <div>
                       <label className="block text-[11px] font-bold text-gray-500 uppercase mb-1">Department Scope</label>
                       <select 
-                        required={form.accountType !== 2 && form.accountType !== 3 && form.accountType !== 4} 
+                        required={form.accountType === 1} 
                         value={form.departmentId} 
                         onChange={e => setForm({...form, departmentId: e.target.value ? parseInt(e.target.value) : ''})}
-                        className="w-full border border-neutral-300 bg-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-700 outline-none"
+                        disabled={form.accountType !== 1 && form.accountType !== ''}
+                        className={`w-full border border-neutral-300 bg-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-red-700 outline-none ${form.accountType !== 1 && form.accountType !== '' ? 'bg-neutral-100 opacity-60 cursor-not-allowed' : ''}`}
                       >
-                        <option value="">Select campus department...</option>
-                        <option value="1">CICS</option>
-                        <option value="2">CABEIHM</option>
-                        <option value="3">CAS</option>
-                        <option value="4">CIT</option>
+                        <option value="">Select campus college...</option>
+                        <option value="1">College of Informatics and Computing Sciences</option>
+                        <option value="2">College of Accountancy, Business, Economics and International Hospitality Management</option>
+                        <option value="3">College of Arts and Sciences</option>
+                        <option value="4">College of Industrial Technology</option>
+                        <option value="5">College of Engineering</option>
+                        <option value="6">College of Teacher Education</option>
                       </select>
                     </div>
                   </div>
@@ -355,7 +370,6 @@ export default function AccountManagement() {
                     <div className="animate-in fade-in slide-in-from-top-2 duration-200">
                       <label className="block text-[11px] font-black text-red-800 uppercase mb-1 tracking-wider">Assigned Office Workspace (Required for routing)</label>
                       
-                      {/* GSO Admin Dynamic Render Check */}
                       {form.accountType === 4 ? (
                         <div className="w-full border-2 border-red-200 bg-red-50 rounded-lg px-3 py-2.5 text-sm font-semibold text-red-800 shadow-xs flex items-center justify-between">
                           <span>General Services Office (GSO)</span>
@@ -368,7 +382,7 @@ export default function AccountManagement() {
                         >
                           <option value="">-- Choose Assigned Campus Branch Office Stop --</option>
                           {offices
-                            .filter(off => !off.name.includes('General Services Office') && !off.name.includes('GSO')) // Filter out GSO for Signee/Processor
+                            .filter(off => !off.name.includes('General Services Office') && !off.name.includes('GSO'))
                             .map((off) => (
                             <option key={off.id} value={off.id}>{off.name}</option>
                           ))}
@@ -460,14 +474,18 @@ export default function AccountManagement() {
                 <div>
                   <label className="block text-[10px] uppercase text-gray-400 font-bold mb-1">Department Sector Linkage</label>
                   <select 
-                    value={selectedUser.d_id}
-                    onChange={e => setSelectedUser({...selectedUser, d_id: parseInt(e.target.value)})}
-                    className="w-full border border-neutral-300 bg-white rounded-lg px-2 py-2 outline-none"
+                    value={selectedUser.d_id || ''}
+                    disabled={selectedUser.a_id !== 1}
+                    onChange={e => setSelectedUser({...selectedUser, d_id: e.target.value ? parseInt(e.target.value) : null})}
+                    className={`w-full border border-neutral-300 bg-white rounded-lg px-2 py-2 outline-none ${selectedUser.a_id !== 1 ? 'bg-neutral-100 opacity-60' : ''}`}
                   >
-                    <option value="1">CICS</option>
-                    <option value="2">CABEIHM</option>
-                    <option value="3">CAS</option>
-                    <option value="4">CIT</option>
+                    <option value="">No Location Assigned</option>
+                    <option value="1">College of Informatics and Computing Sciences</option>
+                    <option value="2">College of Accountancy, Business, Economics and International Hospitality Management</option>
+                    <option value="3">College of Arts and Sciences</option>
+                    <option value="4">College of Industrial Technology</option>
+                    <option value="5">College of Engineering</option>
+                    <option value="6">College of Teacher Education</option>
                   </select>
                 </div>
               </div>
@@ -476,7 +494,6 @@ export default function AccountManagement() {
                 <div className="p-3 bg-red-50 border border-red-100 rounded-xl">
                   <label className="block text-[10px] uppercase text-red-800 font-black mb-1">Assigned Branch Destination Office Block</label>
                   
-                  {/* GSO Admin Edit Interceptor */}
                   {selectedUser.a_id === 4 ? (
                     <div className="w-full border border-red-200 bg-white rounded-lg px-2 py-2 font-bold text-red-800 flex items-center justify-between">
                       <span>General Services Office (GSO)</span>

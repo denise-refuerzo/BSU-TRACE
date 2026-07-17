@@ -266,6 +266,34 @@ const handleAddAssetSubmit = async (e) => {
     } catch (err) { console.error("Expected incoming sync error:", err); }
   };
 
+  const fetchGSOCombinedNotificationFeeds = async (officeId) => {
+    if (!officeId) return;
+    try {
+      // 1. Fetch live parameters for Incoming Processor alerts
+      const procRes = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/2/${officeId}`);
+      const procData = await procRes.json();
+  
+      // 2. Fetch live parameters for Pending Signee alerts
+      const signRes = await fetchWithAuth(`http://localhost:5000/api/notifications/${userId}/3/${officeId}`);
+      const signData = await signRes.json();
+  
+      if (procRes.ok && signRes.ok) {
+        // Merge, unify payloads, and map database parameters cleanly
+        const combined = [
+          ...procData.map(n => ({ ...n, roleSource: 'Processor' })),
+          ...signData.map(n => ({ ...n, roleSource: 'Signee' }))
+        ];
+  
+        // Sort chronologically by newest time elements first
+        combined.sort((a, b) => new Date(b.time) - new Date(a.time));
+  
+        setNotifications(combined.slice(0, 10)); // Keep the top 10 most recent alerts
+      }
+    } catch (err) {
+      console.error("Error aggregating combined GSO alerts trail:", err);
+    }
+  };
+
   const fetchPipelineDocs = async (officeId) => {
     if (!officeId) return;
     try {
@@ -886,6 +914,32 @@ const handleAddAssetSubmit = async (e) => {
     }, 250);
   };
 
+  const formatRelativeTime = (timestamp) => {
+    if (!timestamp) return 'Just now';
+    
+    // Clean PostgreSQL offset characters if present
+    const localizedString = String(timestamp).replace(/(\+00:00|\+00|Z)$/i, '');
+    const now = new Date();
+    const past = new Date(localizedString);
+    const msPerMinute = 60 * 1000;
+    const msPerHour = msPerMinute * 60;
+    const msPerDay = msPerHour * 24;
+    
+    const elapsed = now - past;
+    
+    if (elapsed < msPerMinute) {
+       return 'Just now';
+    } else if (elapsed < msPerHour) {
+       const minutes = Math.round(elapsed / msPerMinute);
+       return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;   
+    } else if (elapsed < msPerDay) {
+       const hours = Math.round(elapsed / msPerHour);
+       return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;   
+    } else {
+       const days = Math.round(elapsed / msPerDay);
+       return `${days} ${days === 1 ? 'day' : 'days'} ago`;   
+    }
+  };
 
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
@@ -930,20 +984,54 @@ const handleAddAssetSubmit = async (e) => {
         
         {/* TOP HEADER */}
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-end shadow-sm flex-shrink-0 relative">
-          <div className="flex items-center gap-4 text-neutral-600">
-            <div className="relative" ref={notificationRef}>
-              <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 rounded-full hover:bg-neutral-100 relative transition-colors">
-                <Bell size={20} />
-                {notifications.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>}
-              </button>
-            </div>
-            
-            <button onClick={() => setActiveTab('profile')} className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-neutral-100 transition-colors border">
-              <User size={16} />
-              <span className="text-xs font-bold text-neutral-800">GSO Admin Portal</span>
-            </button>
+  <div className="flex items-center gap-4 text-neutral-600">
+    
+    {/* THE BELL CONTROLLER WRAPPER */}
+    <div className="relative" ref={notificationRef}>
+      <button 
+        onClick={() => setShowNotifications(!showNotifications)} 
+        className="p-2 rounded-full hover:bg-neutral-100 relative transition-colors"
+      >
+        <Bell size={20} />
+        {notifications.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-red-600 rounded-full"></span>}
+      </button>
+
+      {/* PASTE THE DROPDOWN CODE BLOCK DIRECTLY HERE BELOW THE BUTTON */}
+      {showNotifications && (
+        <div className="absolute right-0 mt-2 w-80 bg-white border border-neutral-200 rounded-2xl shadow-xl z-50 overflow-hidden text-left">
+          <div className="p-4 border-b border-neutral-100 bg-[#FDFBF9] font-bold text-xs uppercase text-neutral-900 tracking-wide">Notifications</div>
+          <div className="max-h-64 overflow-y-auto divide-y divide-neutral-100">
+            {notifications.map(n => (
+              <div key={n.id} className="p-4 text-xs border-b last:border-b-0 hover:bg-neutral-50/50 transition-colors">
+                <div className="flex justify-between items-start gap-2">
+                  <div>
+                    <p className="font-bold text-neutral-900">{n.title}</p>
+                    <span className="text-[8px] bg-red-50 text-red-800 border px-1 rounded uppercase font-black tracking-tight mt-0.5 inline-block">
+                      {n.roleSource || 'System'}
+                    </span>
+                  </div>
+                  {/* Added relative time tracker span segment */}
+                  <span className="text-[10px] text-neutral-400 whitespace-nowrap">
+                    {formatRelativeTime(n.time)}
+                  </span>
+                </div>
+                <p className="text-neutral-500 mt-1.5 font-medium leading-relaxed">{n.message}</p>
+              </div>
+            ))}
+            {notifications.length === 0 && (
+              <div className="p-6 text-center text-neutral-400 font-bold text-xs">📭 No active system notifications.</div>
+            )}
           </div>
-        </header>
+        </div>
+      )}
+    </div>
+    
+    <button onClick={() => setActiveTab('profile')} className="flex items-center gap-2 px-3 py-1.5 rounded-full hover:bg-neutral-100 transition-colors border">
+      <User size={16} />
+      <span className="text-xs font-bold text-neutral-800">GSO Admin Portal</span>
+    </button>
+  </div>
+</header>
 
         <div className="flex-1 overflow-y-auto p-8">
           
