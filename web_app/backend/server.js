@@ -3,7 +3,7 @@ const cors = require('cors');
 const jwt = require('jwt-simple');
 const bcrypt = require('bcrypt');
 const pool = require('./db');
-const { sendResetCodeEmail } = require('./mailer');
+const { sendResetCodeEmail, sendTrackingAlertEmail } = require('./mailer');
 const crypto = require('crypto');
 require('dotenv').config();
 
@@ -137,6 +137,79 @@ const requireAuth = async (req, res, next) => {
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token.' });
+  }
+};
+
+// ==========================================
+// REAL-TIME POSTGRESQL NOTIFICATION LISTENER
+// ==========================================
+const initDatabaseListener = async () => {
+  try {
+    const client = await pool.connect();
+    await client.query('LISTEN document_status_email_channel');
+    console.log('Successfully listening to database channel: document_status_email_channel');
+
+    client.on('notification', async (msg) => {
+      if (msg.channel === 'document_status_email_channel') {
+        try {
+          const payload = JSON.parse(msg.payload); // Contains { ini_id, s_id }
+          const { ini_id, s_id } = payload;
+
+          // STRICT FILTER: Only proceed if status is 4 (Action Required) or 5 (Completed)
+          if (s_id !== 4 && s_id !== 5) {
+            return; 
+          }
+
+          console.log(`🔔 Received strict DB trigger payload: Document ID ${ini_id}, Status ID ${s_id}`);
+
+          const query = `
+            SELECT 
+              i.title, 
+              u.uni_email, 
+              u.full_name, 
+              s.current_status
+            FROM public.initial_document i
+            JOIN public."User" u ON i.u_id = u.u_id
+            JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+            JOIN public.status s ON pd.s_id = s.s_id
+            WHERE i.ini_id = $1 AND pd.s_id = $2
+            ORDER BY pd.pd_id DESC
+            LIMIT 1;
+          `;
+          
+          const result = await pool.query(query, [ini_id, s_id]);
+
+          if (result.rows.length > 0) {
+            const { title, uni_email, full_name, current_status } = result.rows[0];
+
+            let bodyText = '';
+            
+            if (s_id === 4) { // Action Required / Halted
+              bodyText = `Your document "${title}" requires your immediate attention. It has been marked as "Action Required" / Halted. Please check the administrative remarks frame to complete any necessary structural file revisions and re-submit.`;
+            } else if (s_id === 5) { // Completed
+              bodyText = `Great news! Your document "${title}" has finished its entire institutional verification sequence and is now officially finalized and marked as "Completed".`;
+            }
+
+            // Fire via your local nodemailer transporter utility
+            await sendTrackingAlertEmail(uni_email, full_name, title, current_status, bodyText);
+          } else {
+            console.log(`⚠️ Database lookup returned 0 rows for Document ID ${ini_id} with Status ID ${s_id}. Verification skipped.`);
+          }
+        } catch (err) {
+          console.error('Error processing database notification payload:', err);
+        }
+      }
+    });
+
+    client.on('error', (err) => {
+      console.error('Database listener client crashed. Reconnecting...', err);
+      client.release();
+      setTimeout(initDatabaseListener, 5000);
+    });
+
+  } catch (error) {
+    console.error('Failed to initialize database notification listener. Retrying in 5s...', error);
+    setTimeout(initDatabaseListener, 5000);
   }
 };
 
@@ -1846,4 +1919,7 @@ app.delete('/api/procurement/templates/:id', requireAuth, async (req, res) => {
 });
 
 const PORT = 5000;
-app.listen(PORT, () => console.log(`🚀 Core backend subsystem running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Core backend subsystem running on port ${PORT}`);
+  initDatabaseListener();
+});
