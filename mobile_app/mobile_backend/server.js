@@ -1868,6 +1868,9 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
     }
 });
 
+const pool = require('./db'); // Pull your existing PG connection pool
+const { sendResetCodeEmail } = require('./mailer'); // Re-use your configured mailer setup
+
 async function startNotificationWorker() {
   try {
     const client = await pool.connect();
