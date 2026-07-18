@@ -903,16 +903,32 @@ app.post('/api/documents', async (req, res) => {
     let firstOfficeId, secondOfficeId;
     let processIdToUse = p_id;
     
+    // Fetch the Originator's Department ID to handle dynamic routing
+    const userRes = await pool.query('SELECT d_id FROM public."User" WHERE u_id = $1', [u_id]);
+    const userDeptId = userRes.rows[0]?.d_id;
+
+    // Map the Department ID to the specific College Office ID (o_id)
+    const departmentToOfficeMap = {
+        1: 11, // CICS -> CICS Office
+        2: 12, // CABEIHM -> CABEIHM Office
+        3: 13, // CAS -> CAS Office
+        4: 14, // CIT -> CE / CIT Office
+        5: 14, // CE -> CE / CIT Office
+        6: 24  // CTE -> CTE Office
+    };
+    
+    // Default to CICS if mapping fails
+    const assignedOfficeId = departmentToOfficeMap[userDeptId] || 11;
+
     // Accept either 'route' or 'stops' array from the frontend
     const customRoute = route || stops;
 
     if (customRoute && Array.isArray(customRoute) && customRoute.length > 0) {
-      // 1. The user explicitly defined a custom routing order (e.g., [10, 11])
+      // 1. The user explicitly defined a custom routing order
       firstOfficeId = customRoute[0];
       secondOfficeId = customRoute.length > 1 ? customRoute[1] : null;
 
       // 2. Insert this unique route sequence into the route table to persist it
-      // Note: stop_2 uses a fallback to satisfy the NOT NULL constraint if a 1-stop route is passed
       const routeInsert = await pool.query(
         `INSERT INTO public.route (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7) 
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING r_id`,
@@ -931,7 +947,7 @@ app.post('/api/documents', async (req, res) => {
 
       // 4. Create a unique process_type entry linking to the new custom route
       const processInsert = await pool.query(
-        `INSERT INTO public.process_type (r_id, process_name) VALUES ($1, $2) RETURNING p_id`,
+        'INSERT INTO public.process_type (r_id, process_name) VALUES ($1, $2) RETURNING p_id',
         [newRouteId, baseProcessName]
       );
       processIdToUse = processInsert.rows[0].p_id;
@@ -947,7 +963,14 @@ app.post('/api/documents', async (req, res) => {
         return res.status(404).json({ error: 'Process type not found' });
       }
 
+      // 5. The Dynamic Swap Logic
       firstOfficeId = processResult.rows[0].stop_1;
+      
+      // If the template uses the 999 Placeholder, swap it with the Originator's mapped office
+      if (firstOfficeId === 999) {
+          firstOfficeId = assignedOfficeId;
+      }
+      
       secondOfficeId = processResult.rows[0].stop_2;
     }
 
@@ -1196,9 +1219,8 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
   const { qrCode } = req.params;
 
   try {
-    // FIX: Specifically look for the step that is scanned IN, but not yet scanned OUT
     const docResult = await pool.query(`
-      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id
+      SELECT pd.pd_id, pd.time_in, pd.time_out, s.current_status, i.ini_id, pd.current_office_id
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.status s ON pd.s_id = s.s_id
@@ -1213,20 +1235,74 @@ app.put('/api/documents/:qrCode/scan-out', async (req, res) => {
       return res.status(404).json({ error: 'No active document found ready for scan-out.' });
     }
 
-    const { pd_id, current_status } = docResult.rows[0];
-    const statusLower = current_status.toLowerCase();
+    const currentActiveStep = docResult.rows[0];
+    const statusLower = currentActiveStep.current_status.toLowerCase();
 
     if (statusLower === 'in verification' || statusLower === 'pending') {
       return res.status(400).json({ error: 'Cannot scan out: Signee has not signed or acted upon this document yet.' });
     }
 
-    await pool.query(
-      `UPDATE public.processed_document 
-       SET time_out = timezone('Asia/Manila', now()),
-           s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
-       WHERE pd_id = $1`,
-      [pd_id]
-    );
+    // 1. Fetch the route and the Originator's Department ID
+    const routeRes = await pool.query(`
+      SELECT r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7, u.d_id as originator_dept_id
+      FROM public.initial_document idoc
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      JOIN public."User" u ON idoc.u_id = u.u_id
+      WHERE idoc.ini_id = $1
+    `, [currentActiveStep.ini_id]);
+
+    const r = routeRes.rows[0];
+    let mappedStop1 = r.stop_1;
+    
+    // 2. The Dynamic Swap: Translate 999 back into the Originator's actual office
+    if (mappedStop1 === 999) {
+        const departmentToOfficeMap = {
+            1: 11, 2: 12, 3: 13, 4: 14, 5: 14, 6: 24
+        };
+        mappedStop1 = departmentToOfficeMap[r.originator_dept_id] || 11;
+    }
+
+    // 3. Build the sequence array
+    const sequence = [mappedStop1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7].filter(Boolean);
+    const currentIndex = sequence.indexOf(currentActiveStep.current_office_id);
+
+    let nextStopToReceive = null;
+    let followingStop = null;
+
+    if (currentIndex !== -1 && currentIndex + 1 < sequence.length) {
+      nextStopToReceive = sequence[currentIndex + 1];
+      if (currentIndex + 2 < sequence.length) {
+        followingStop = sequence[currentIndex + 2];
+      }
+    }
+
+    // 4. Update the database
+    if (!nextStopToReceive) {
+      // Document is completely finished
+      await pool.query(
+        `UPDATE public.processed_document 
+         SET time_out = timezone('Asia/Manila', now()),
+             s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Completed' LIMIT 1)
+         WHERE pd_id = $1`,
+        [currentActiveStep.pd_id]
+      );
+    } else {
+      // Clock out of current office
+      await pool.query(
+        `UPDATE public.processed_document 
+         SET time_out = timezone('Asia/Manila', now()),
+             s_id = (SELECT s_id FROM public.status WHERE current_status ILIKE 'Verified' LIMIT 1)
+         WHERE pd_id = $1`,
+        [currentActiveStep.pd_id]
+      );
+
+      // Create next track sequence
+      await pool.query(`
+        INSERT INTO public.processed_document (ini_id, s_id, current_office_id, next_office_id, time_in)
+        VALUES ($1, (SELECT s_id FROM public.status WHERE current_status ILIKE 'Pending' LIMIT 1), $2, $3, NULL)
+      `, [currentActiveStep.ini_id, nextStopToReceive, followingStop]);
+    }
 
     res.status(200).json({ message: 'Document scanned OUT successfully.' });
   } catch (error) {
