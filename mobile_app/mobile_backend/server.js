@@ -30,6 +30,73 @@ const pool = new Pool({
 });
 
 // ==========================================
+// REAL-TIME POSTGRESQL NOTIFICATION LISTENER
+// ==========================================
+const initDatabaseListener = async () => {
+  try {
+    // A Pool connection can drop idle clients, so we need a dedicated client for LISTEN
+    const client = await pool.connect();
+    
+    // Start listening to the trigger channel
+    await client.query('LISTEN document_status_email_channel');
+    console.log('Successfully listening to database channel: document_status_email_channel');
+
+    // Handle notifications coming from pg_notify
+    client.on('notification', async (msg) => {
+      if (msg.channel === 'document_status_email_channel') {
+        try {
+          const payload = JSON.parse(msg.payload); // Contains { ini_id, s_id }
+          const { ini_id, s_id } = payload;
+
+          // 1. Fetch the document details and the creator's university email
+          const query = `
+            SELECT i.title, u.uni_email, u.full_name, s.current_status
+            FROM public.initial_document i
+            JOIN public."User" u ON i.u_id = u.u_id
+            JOIN public.status s ON s.s_id = $2
+            WHERE i.ini_id = $1
+          `;
+          const result = await pool.query(query, [ini_id, s_id]);
+
+          if (result.rows.length > 0) {
+            const { title, uni_email, full_name, current_status } = result.rows[0];
+
+            // 2. Draft dynamic subjects and messages based on s_id
+            let subject = `BSU-Trace Notification: Document Updated`;
+            let messageText = `Hello ${full_name},\n\nYour document "${title}" has been updated to status: ${current_status}.\n\nPlease check your mobile app for details.`;
+
+            if (s_id === 4) { // Action Required
+              subject = `🚨 Action Required: BSU-Trace Document Halted`;
+              messageText = `Hello ${full_name},\n\nYour document "${title}" requires your immediate attention. It has been marked as "Action Required" / Halted. \n\nPlease log in to the BSU-Trace app to view the revision notes and re-submit.`;
+            } else if (s_id === 5) { // Completed
+              subject = `🎉 BSU-Trace: Document Flow Completed!`;
+              messageText = `Hello ${full_name},\n\nGreat news! Your document "${title}" has finished its entire routing sequence and is now officially marked as "Completed".`;
+            }
+
+            // 3. Send via your proven Google HTTPS API helper
+            await sendSystemEmail(uni_email, subject, messageText);
+            console.log(`Automated alert email successfully dispatched to ${uni_email} for document ID: ${ini_id}`);
+          }
+        } catch (err) {
+          console.error('Error processing database notification payload:', err);
+        }
+      }
+    });
+
+    // Reconnect strategy if connection breaks
+    client.on('error', (err) => {
+      console.error('Database listener client crashed. Reconnecting...', err);
+      client.release();
+      setTimeout(initDatabaseListener, 5000);
+    });
+
+  } catch (error) {
+    console.error('Failed to initialize database notification listener. Retrying in 5s...', error);
+    setTimeout(initDatabaseListener, 5000);
+  }
+};
+
+// ==========================================
 // GOOGLE API OAUTH2 EMAIL SETUP
 // ==========================================
 const OAuth2 = google.auth.OAuth2;
