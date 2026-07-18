@@ -1868,6 +1868,70 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
     }
 });
 
+async function startNotificationWorker() {
+  try {
+    const client = await pool.connect();
+    
+    // Listen to the unique trigger channel created in SQL
+    await client.query('LISTEN document_status_email_channel');
+    console.log('Notification Worker listening for database status signals...');
+
+    // Catch the notification payload sent by PostgreSQL
+    client.on('notification', async (msg) => {
+      try {
+        const payload = JSON.parse(msg.payload);
+        const { ini_id, s_id } = payload;
+
+        // Query the document details along with the Originator's email data
+        const docQuery = await client.query(`
+          SELECT idoc.title, u.uni_email, u.full_name 
+          FROM public.initial_document idoc
+          JOIN public."User" u ON idoc.u_id = u.u_id
+          WHERE idoc.ini_id = $1
+        `, [ini_id]);
+
+        if (docQuery.rows.length === 0) return;
+        const { title, uni_email, full_name } = docQuery.rows[0];
+
+        // Format email template content depending on the targeted s_id change
+        let subject = '';
+        let messageText = '';
+
+        if (s_id === 5) {
+          subject = `🎉 Tracking Completed: ${title}`;
+          messageText = `Hello ${full_name},\n\nGreat news! Your document "${title}" has successfully finished its routing lifecycle and is marked as Completed.`;
+        } else if (s_id === 4) {
+          subject = `⚠️ Action Required / Halted: ${title}`;
+          messageText = `Hello ${full_name},\n\nYour document "${title}" has been halted at its current office checkpoint. Revision or corrections are required before routing can resume.`;
+        }
+
+        // Dispatch via your existing transactional mailer system
+        // Note: Check your mailer.js to ensure sendResetCodeEmail accepts these parameter positions
+        await sendResetCodeEmail(uni_email, subject, messageText);
+        console.log(`✉️  Status notification successfully emailed to ${uni_email} for "${title}"`);
+
+      } catch (err) {
+        console.error('Error handling notification email delivery:', err);
+      }
+    });
+
+    // Handle connection failures gracefully
+    client.on('error', (err) => {
+      console.error('Database connection error in Notification Worker:', err);
+      // Attempt reconnection after 5 seconds
+      setTimeout(startNotificationWorker, 5000); 
+    });
+
+  } catch (err) {
+    console.error('Failed to start Notification Worker:', err);
+    // Attempt reconnection if the initial pool connection fails
+    setTimeout(startNotificationWorker, 5000);
+  }
+}
+
+// Fire up the background thread worker instance
+startNotificationWorker();
+
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
