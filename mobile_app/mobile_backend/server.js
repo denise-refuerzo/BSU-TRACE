@@ -34,7 +34,7 @@ const pool = new Pool({
 // ==========================================
 const initDatabaseListener = async () => {
   try {
-    // A Pool connection can drop idle clients, so we need a dedicated client for LISTEN
+    // Acquire a persistent client connection explicitly for the LISTEN event sequence
     const client = await pool.connect();
     
     // Start listening to the trigger channel
@@ -48,34 +48,46 @@ const initDatabaseListener = async () => {
           const payload = JSON.parse(msg.payload); // Contains { ini_id, s_id }
           const { ini_id, s_id } = payload;
 
-          // 1. Fetch the document details and the creator's university email
+          console.log(`🔔 Received real-time DB trigger payload: Document ID ${ini_id}, Status ID ${s_id}`);
+
+          // REAL SOLUTION FIX: Properly chain initial_document to processed_document and status
           const query = `
-            SELECT i.title, u.uni_email, u.full_name, s.current_status
+            SELECT 
+              i.title, 
+              u.uni_email, 
+              u.full_name, 
+              s.current_status
             FROM public.initial_document i
             JOIN public."User" u ON i.u_id = u.u_id
-            JOIN public.status s ON s.s_id = $2
-            WHERE i.ini_id = $1
+            JOIN public.processed_document pd ON i.ini_id = pd.ini_id
+            JOIN public.status s ON pd.s_id = s.s_id
+            WHERE i.ini_id = $1 AND pd.s_id = $2
+            ORDER BY pd.pd_id DESC
+            LIMIT 1;
           `;
+          
           const result = await pool.query(query, [ini_id, s_id]);
 
           if (result.rows.length > 0) {
             const { title, uni_email, full_name, current_status } = result.rows[0];
 
-            // 2. Draft dynamic subjects and messages based on s_id
+            // Draft dynamic subjects and messages based on s_id
             let subject = `BSU-Trace Notification: Document Updated`;
             let messageText = `Hello ${full_name},\n\nYour document "${title}" has been updated to status: ${current_status}.\n\nPlease check your mobile app for details.`;
 
             if (s_id === 4) { // Action Required
               subject = `🚨 Action Required: BSU-Trace Document Halted`;
-              messageText = `Hello ${full_name},\n\nYour document "${title}" requires your immediate attention. It has been marked as "Action Required" / Halted. \n\nPlease log in to the BSU-Trace app to view the revision notes and re-submit.`;
+              messageText = `Hello ${full_name},\n\nYour document "${title}" requires your immediate attention. It has been marked as "Action Required" / Halted.\n\nPlease log in to the BSU-Trace app to view the revision notes and re-submit.`;
             } else if (s_id === 5) { // Completed
               subject = `🎉 BSU-Trace: Document Flow Completed!`;
               messageText = `Hello ${full_name},\n\nGreat news! Your document "${title}" has finished its entire routing sequence and is now officially marked as "Completed".`;
             }
 
-            // 3. Send via your proven Google HTTPS API helper
+            // Send via your proven Google HTTPS API helper
             await sendSystemEmail(uni_email, subject, messageText);
-            console.log(`Automated alert email successfully dispatched to ${uni_email} for document ID: ${ini_id}`);
+            console.log(`✉️ Automated alert email successfully dispatched to ${uni_email} for document title: "${title}"`);
+          } else {
+            console.log(`⚠️ Database lookup returned 0 rows for Document ID ${ini_id} with Status ID ${s_id}. Verification failed.`);
           }
         } catch (err) {
           console.error('Error processing database notification payload:', err);
@@ -284,22 +296,19 @@ app.post('/api/login', async (req, res) => {
     const sessionToken = crypto.randomBytes(32).toString('hex');
     await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, user.u_id]);
 
-    res.status(200).json({
+    // FIX: Send exactly ONE unified response package and return immediately
+    return res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id,
       two_fa_enabled: user.two_fa_enabled,
-      session_token: sessionToken // NEW: Send to the app
-    });
-
-    res.status(200).json({
-      u_id: user.u_id,
-      a_id: user.a_id,
-      two_fa_enabled: user.two_fa_enabled 
+      session_token: sessionToken 
     });
 
   } catch (error) {
     console.error('Login Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
@@ -2015,5 +2024,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`API Server running on port ${PORT}`);
 
-  startNotificationWorker();
+  initDatabaseListener();
 });
