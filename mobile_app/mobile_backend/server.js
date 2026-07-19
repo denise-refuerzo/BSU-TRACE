@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const { google } = require('googleapis');
 const crypto = require('crypto');
 const cors = require('cors');
-const { Pool } = require('pg');
+const { Pool, Client } = require('pg');
 const bcrypt = require('bcrypt');
 
 const app = express();
@@ -167,71 +167,6 @@ const sendSystemEmail = async (to, subject, text) => {
     },
   });
 };
-
-// ==========================================
-// BACKGROUND AUTOMATED EMAIL NOTIFICATION WORKER
-// ==========================================
-async function startNotificationWorker() {
-  let client;
-  try {
-    // Acquire a persistent client connection explicitly for the LISTEN event sequence
-    client = await pool.connect();
-    
-    // Unify tracking signals with the specific PostgreSQL notification trigger channel name
-    await client.query('LISTEN document_status_email_channel');
-    console.log('✉️ Asynchronous Notification Worker successfully connected to trigger channel...');
-
-    // Catch data updates broadcasted over the channel socket
-    client.on('notification', async (msg) => {
-      try {
-        const payload = JSON.parse(msg.payload);
-        const { ini_id, s_id } = payload;
-
-        // Perform lookups on document metadata fields mapped directly to the originating User entry email rules
-        const docQuery = await pool.query(`
-          SELECT idoc.title, u.uni_email, u.full_name 
-          FROM public.initial_document idoc
-          JOIN public."User" u ON idoc.u_id = u.u_id
-          WHERE idoc.ini_id = $1
-        `, [ini_id]);
-
-        if (docQuery.rows.length === 0) return;
-        const { title, uni_email, full_name } = docQuery.rows[0];
-
-        let emailSubject = '';
-        let emailText = '';
-
-        if (s_id === 5) {
-          emailSubject = `🎉 Tracking Completed: ${title}`;
-          emailText = `Hello ${full_name},\n\nGreat news! Your document "${title}" has successfully completed its entire routing path and is marked as Completed.\n\nThank you for utilizing BSU-Trace.`;
-        } else if (s_id === 4) {
-          emailSubject = `⚠️ Action Required / Halted: ${title}`;
-          emailText = `Hello ${full_name},\n\nYour document "${title}" has been halted at its current office pipeline step.\n\nRevision notes or correction metrics have been recorded. Please check your tracking screen dashboard to review updates and re-submit the workflow step.\n\nThank you,\nBSU-Trace Portal`;
-        }
-
-        if (emailSubject && emailText) {
-          // Send via the deployed OAuth2 Gmail engine setup block safely
-          await sendSystemEmail(uni_email, emailSubject, emailText);
-          console.log(`✉️ Real-time workflow email successfully dispatched to ${uni_email} for document link context: "${title}"`);
-        }
-      } catch (err) {
-        console.error('Error compiling transaction trigger payload data loop:', err);
-      }
-    });
-
-    // Gracefully capture database connection state drops
-    client.on('error', (err) => {
-      console.error('Persistent worker database channel drop:', err);
-      client.release();
-      setTimeout(startNotificationWorker, 5000); // Trigger robust reconnect attempt loop
-    });
-
-  } catch (error) {
-    console.error('Failed to instantiate back-end event notification worker connection thread:', error);
-    if (client) client.release();
-    setTimeout(startNotificationWorker, 5000);
-  }
-}
 
 // Add this near the very top of server.js with your other requires
 const { GoogleGenerativeAI } = require("@google/generative-ai");
