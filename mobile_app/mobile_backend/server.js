@@ -27,18 +27,18 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// 2. DIRECT CONNECTION: Used strictly for the background LISTEN trigger
-const listenClient = new Client({
-  connectionString: process.env.DATABASE_URL_DIRECT, 
-  ssl: { rejectUnauthorized: false }
-});
-
 // ==========================================
 // REAL-TIME POSTGRESQL NOTIFICATION LISTENER
 // ==========================================
 const initDatabaseListener = async () => {
+  // FIX: Create a brand new client instance every time this function runs
+  const listenClient = new Client({
+    connectionString: process.env.DATABASE_URL_DIRECT,
+    ssl: { rejectUnauthorized: false }
+  });
+
   try {
-    // Connect using the DIRECT client, bypassing the Neon transaction pool
+    // Connect using the newly minted DIRECT client
     await listenClient.connect();
     
     // Start listening to the trigger channel
@@ -97,19 +97,19 @@ const initDatabaseListener = async () => {
       }
     });
 
-    // Handle unexpected disconnects (like server reboots)
+    // Handle unexpected disconnects (like server reboots or network drops)
     listenClient.on('end', () => {
       console.log('Database listener client disconnected. Reconnecting...');
       setTimeout(initDatabaseListener, 5000);
     });
 
     listenClient.on('error', (err) => {
-      console.error('Database listener client crashed. Reconnecting...', err);
+      console.error('Database listener client crashed. Reconnecting...', err.message);
       setTimeout(initDatabaseListener, 5000);
     });
 
   } catch (error) {
-    console.error('Failed to initialize database notification listener. Retrying in 5s...', error);
+    console.error('Failed to initialize database notification listener. Retrying in 5s...', error.message);
     setTimeout(initDatabaseListener, 5000);
   }
 };
