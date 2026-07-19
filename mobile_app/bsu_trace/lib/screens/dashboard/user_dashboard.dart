@@ -155,17 +155,6 @@ class _UserDashboardScreenState extends State<UserDashboardScreen> {
                         children: [
                           const Text('Institutional Profile', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
-                          Row(children: [
-                            const Icon(Icons.person_outline, size: 16, color: Colors.black54), 
-                            const SizedBox(width: 4), 
-                            Text(_userName, style: const TextStyle(color: Colors.black54))
-                          ]),
-                          const SizedBox(height: 4),
-                          Row(children: [
-                            const Icon(Icons.work_outline, size: 16, color: Colors.black54), 
-                            const SizedBox(width: 4), 
-                            Text(_userRoleDept, style: const TextStyle(color: Colors.black54, fontSize: 12))
-                          ]),
                         ],
                       ),
                       Container(

@@ -21,12 +21,16 @@ const failed2FAAttempts = new Map();
 app.use(cors());
 app.use(express.json());
 
-// Neon PostgreSQL Connection Pool
+// 1. POOLED CONNECTION: Used for all standard API routes (Fast, transaction-based)
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false 
-  }
+  connectionString: process.env.DATABASE_URL_POOLED, 
+  ssl: { rejectUnauthorized: false }
+});
+
+// 2. DIRECT CONNECTION: Used strictly for the background LISTEN trigger
+const listenClient = new Client({
+  connectionString: process.env.DATABASE_URL_DIRECT, 
+  ssl: { rejectUnauthorized: false }
 });
 
 // ==========================================
@@ -34,23 +38,22 @@ const pool = new Pool({
 // ==========================================
 const initDatabaseListener = async () => {
   try {
-    // Acquire a persistent client connection explicitly for the LISTEN event sequence
-    const client = await pool.connect();
+    // Connect using the DIRECT client, bypassing the Neon transaction pool
+    await listenClient.connect();
     
     // Start listening to the trigger channel
-    await client.query('LISTEN document_status_email_channel');
+    await listenClient.query('LISTEN document_status_email_channel');
     console.log('Successfully listening to database channel: document_status_email_channel');
 
     // Handle notifications coming from pg_notify
-    client.on('notification', async (msg) => {
+    listenClient.on('notification', async (msg) => {
       if (msg.channel === 'document_status_email_channel') {
         try {
-          const payload = JSON.parse(msg.payload); // Contains { ini_id, s_id }
+          const payload = JSON.parse(msg.payload); 
           const { ini_id, s_id } = payload;
 
           console.log(`🔔 Received real-time DB trigger payload: Document ID ${ini_id}, Status ID ${s_id}`);
 
-          // REAL SOLUTION FIX: Properly chain initial_document to processed_document and status
           const query = `
             SELECT 
               i.title, 
@@ -66,24 +69,23 @@ const initDatabaseListener = async () => {
             LIMIT 1;
           `;
           
+          // Use the POOL for the actual data lookup to maintain performance
           const result = await pool.query(query, [ini_id, s_id]);
 
           if (result.rows.length > 0) {
             const { title, uni_email, full_name, current_status } = result.rows[0];
 
-            // Draft dynamic subjects and messages based on s_id
             let subject = `BSU-Trace Notification: Document Updated`;
             let messageText = `Hello ${full_name},\n\nYour document "${title}" has been updated to status: ${current_status}.\n\nPlease check your mobile app for details.`;
 
-            if (s_id === 4) { // Action Required
+            if (s_id === 4) { 
               subject = `🚨 Action Required: BSU-Trace Document Halted`;
               messageText = `Hello ${full_name},\n\nYour document "${title}" requires your immediate attention. It has been marked as "Action Required" / Halted.\n\nPlease log in to the BSU-Trace app to view the revision notes and re-submit.`;
-            } else if (s_id === 5) { // Completed
+            } else if (s_id === 5) { 
               subject = `🎉 BSU-Trace: Document Flow Completed!`;
               messageText = `Hello ${full_name},\n\nGreat news! Your document "${title}" has finished its entire routing sequence and is now officially marked as "Completed".`;
             }
 
-            // Send via your proven Google HTTPS API helper
             await sendSystemEmail(uni_email, subject, messageText);
             console.log(`✉️ Automated alert email successfully dispatched to ${uni_email} for document title: "${title}"`);
           } else {
@@ -95,10 +97,14 @@ const initDatabaseListener = async () => {
       }
     });
 
-    // Reconnect strategy if connection breaks
-    client.on('error', (err) => {
+    // Handle unexpected disconnects (like server reboots)
+    listenClient.on('end', () => {
+      console.log('Database listener client disconnected. Reconnecting...');
+      setTimeout(initDatabaseListener, 5000);
+    });
+
+    listenClient.on('error', (err) => {
       console.error('Database listener client crashed. Reconnecting...', err);
-      client.release();
       setTimeout(initDatabaseListener, 5000);
     });
 

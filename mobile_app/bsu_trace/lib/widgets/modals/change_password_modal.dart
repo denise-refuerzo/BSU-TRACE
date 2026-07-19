@@ -74,57 +74,60 @@ class _ChangePasswordModalState extends State<ChangePasswordModal> {
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Change Password', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: const Icon(Icons.close, color: Colors.black54),
-                  )
-                ],
-              ),
-              const SizedBox(height: 24),
-              
-              _buildPasswordField('Current Password', _currentPasswordController, _obscureCurrent, () {
-                setState(() => _obscureCurrent = !_obscureCurrent);
-              }),
-              const SizedBox(height: 16),
-              
-              _buildPasswordField('New Password', _newPasswordController, _obscureNew, () {
-                setState(() => _obscureNew = !_obscureNew);
-              }, validator: (val) {
-                if (val == null || val.length < 6) return 'Must be at least 6 characters';
-                return null;
-              }),
-              const SizedBox(height: 16),
-              
-              _buildPasswordField('Confirm New Password', _confirmPasswordController, _obscureNew, null, validator: (val) {
-                if (val != _newPasswordController.text) return 'Passwords do not match';
-                return null;
-              }),
-              const SizedBox(height: 32),
-
-              ElevatedButton(
-                onPressed: _isLoading ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryRed,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      // FIX: SingleChildScrollView added here to resolve the 57-pixel overflow
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Change Password', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Icon(Icons.close, color: Colors.black54),
+                    )
+                  ],
                 ),
-                child: _isLoading
-                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Update Password', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
-            ],
+                const SizedBox(height: 24),
+                
+                _buildPasswordField('Current Password', _currentPasswordController, _obscureCurrent, () {
+                  setState(() => _obscureCurrent = !_obscureCurrent);
+                }),
+                const SizedBox(height: 16),
+                
+                _buildPasswordField('New Password', _newPasswordController, _obscureNew, () {
+                  setState(() => _obscureNew = !_obscureNew);
+                }, validator: (val) {
+                  if (val == null || val.length < 6) return 'Must be at least 6 characters';
+                  return null;
+                }),
+                const SizedBox(height: 16),
+                
+                _buildPasswordField('Confirm New Password', _confirmPasswordController, _obscureNew, null, validator: (val) {
+                  if (val != _newPasswordController.text) return 'Passwords do not match';
+                  return null;
+                }),
+                const SizedBox(height: 32),
+
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryRed,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Update Password', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
           ),
         ),
       ),
