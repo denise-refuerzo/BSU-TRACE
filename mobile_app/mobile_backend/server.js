@@ -1875,6 +1875,38 @@ app.put('/api/process-types/:id/route', async (req, res) => {
   }
 });
 
+// ==========================================
+// 29. NOTIFICATIONS FOR ORIGINATOR
+// ==========================================
+app.get('/api/notifications/:userId', async (req, res) => {
+    const { userId } = req.params;
+    
+    try {
+        // Query every action on the originator's documents, including the actor's name
+        const query = `
+            SELECT 
+                oah.action_type, 
+                oah.action_timestamp, 
+                id.title AS document_title, 
+                o.office_name,
+                actor.full_name AS actor_name
+            FROM office_action_history oah
+            JOIN initial_document id ON oah.ini_id = id.ini_id
+            JOIN offices o ON oah.o_id = o.o_id
+            JOIN "User" actor ON oah.u_id = actor.u_id
+            WHERE id.u_id = $1
+            ORDER BY oah.action_timestamp DESC
+            LIMIT 20;
+        `;
+        
+        const result = await db.query(query, [userId]);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error('Error fetching notifications:', err);
+        res.status(500).json({ error: 'Failed to fetch notifications' });
+    }
+});
+
 // Request 2FA Recovery Code
 app.post('/api/auth/forgot-2fa', async (req, res) => {
     const { uni_email } = req.body;
