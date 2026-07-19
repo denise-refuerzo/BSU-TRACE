@@ -369,11 +369,11 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
                LIMIT 1
              ) as last_action,
              (
-               SELECT json_agg(json_build_object(
-                 'office_name', off2.office_name,
-                 'time_in', p2.time_in,
-                 'time_out', p2.time_out
-               ))
+              SELECT json_agg(json_build_object(
+                'office_name', off2.office_name,
+                'time_in', p2.time_in,
+                'time_out', p2.time_out
+              ) ORDER BY p2.pd_id ASC)
                FROM public.processed_document p2
                JOIN public.offices off2 ON p2.current_office_id = off2.o_id
                WHERE p2.ini_id = idoc.ini_id
@@ -1915,6 +1915,245 @@ app.delete('/api/procurement/templates/:id', requireAuth, async (req, res) => {
     res.json({ message: "Template item permanently removed." });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete template item." });
+  }
+});
+
+// =========================================================================
+// CHAT WITH OFFICES (INQUIRING ON URGENT DOCUMENTS) ENDPOINTS
+// =========================================================================
+
+// 1. GET ALL CHAT CHANNELS FOR A SPECIFIC DOCUMENT (Evaluates Lock states dynamically)
+app.get('/api/chat/document-channels/:iniId', requireAuth, async (req, res) => {
+  const { iniId } = req.params;
+  try {
+    const docStepsQuery = `
+      SELECT pd_id, s_id, current_office_id, next_office_id, time_in, time_out, is_adhoc, adhoc_return_office_id 
+      FROM public.processed_document 
+      WHERE ini_id = $1 
+      ORDER BY pd_id ASC;
+    `;
+    const stepsResult = await pool.query(docStepsQuery, [parseInt(iniId)]);
+    const steps = stepsResult.rows;
+
+    if (steps.length === 0) {
+      return res.json([]);
+    }
+
+    const officeChannels = {};
+    const now = new Date();
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const officeId = step.current_office_id;
+      
+      if (!officeChannels[officeId]) {
+        officeChannels[officeId] = { officeId, isLocked: true, statusMessage: 'Read-Only Archive' };
+      }
+
+      const isLastStep = (i === steps.length - 1);
+
+      if (isLastStep) {
+        if (step.time_out === null) {
+          officeChannels[officeId].isLocked = false;
+          officeChannels[officeId].statusMessage = 'Active Connection';
+        } else {
+          if (step.s_id === 4 || step.s_id === 5) {
+            const checkoutTime = new Date(step.time_out);
+            const hoursElapsed = (now - checkoutTime) / (1000 * 60 * 60);
+
+            if (hoursElapsed <= 24) {
+              officeChannels[officeId].isLocked = false;
+              officeChannels[officeId].statusMessage = `Interactive Grace Period (${Math.ceil(24 - hoursElapsed)}h remaining)`;
+            } else {
+              officeChannels[officeId].isLocked = true;
+              officeChannels[officeId].statusMessage = 'Closed (Grace Period Expired)';
+            }
+          } else {
+            const lookAheadNextStep = steps.find(s => s.current_office_id === step.next_office_id && s.pd_id > step.pd_id);
+            
+            if (lookAheadNextStep && lookAheadNextStep.time_in !== null) {
+              officeChannels[officeId].isLocked = true;
+              officeChannels[officeId].statusMessage = 'Read-Only Archive (Received by next station)';
+            } else if (step.next_office_id) {
+              officeChannels[officeId].isLocked = false;
+              officeChannels[officeId].statusMessage = 'Active Connection (In Transit)';
+            }
+          }
+        }
+
+        if (step.is_adhoc && step.time_out === null) {
+          const primaryOfficeId = step.adhoc_return_office_id;
+          if (officeChannels[primaryOfficeId]) {
+            officeChannels[primaryOfficeId].isLocked = false;
+            officeChannels[primaryOfficeId].statusMessage = 'Active Connection (Awaiting Detour Return)';
+          }
+        }
+      }
+    }
+
+    const finalChannels = [];
+    for (const oId of Object.keys(officeChannels)) {
+      const officeNameRes = await pool.query('SELECT office_name FROM public.offices WHERE o_id = $1', [parseInt(oId)]);
+      
+      // CHECK IF A CHAT ROOM ACTUALLY EXISTS AND HAS MESSAGES IN IT
+      const checkRoom = await pool.query(
+        `SELECT room_id FROM public.chat_rooms WHERE ini_id = $1 AND o_id = $2`,
+        [parseInt(iniId), parseInt(oId)]
+      );
+      
+      let hasChat = false;
+      if (checkRoom.rows.length > 0) {
+        const checkMessages = await pool.query(
+          `SELECT COUNT(message_id)::int FROM public.chat_messages WHERE room_id = $1`,
+          [checkRoom.rows[0].room_id]
+        );
+        hasChat = checkMessages.rows[0].count > 0;
+      }
+
+      finalChannels.push({
+        officeId: parseInt(oId),
+        officeName: officeNameRes.rows[0]?.office_name || `Office Station #${oId}`,
+        isLocked: officeChannels[oId].isLocked,
+        statusMessage: officeChannels[oId].statusMessage,
+        hasChat: hasChat
+      });
+    }
+
+    res.json(finalChannels);
+  } catch (err) {
+    console.error("Error evaluating chat layout channel rules:", err);
+    res.status(500).json({ error: 'Failed evaluating channel permission tables.' });
+  }
+});
+// 2. FETCH OR INITIALIZE ROOM ON-DEMAND (Only if originator initiates chat message)
+app.post('/api/chat/get-or-create-room', requireAuth, async (req, res) => {
+  const { iniId, officeId } = req.body;
+  try {
+    // Check if channel already exists to prevent duplicate tables instantiation
+    let roomRes = await pool.query(
+      'SELECT room_id FROM public.chat_rooms WHERE ini_id = $1 AND o_id = $2',
+      [parseInt(iniId), parseInt(officeId)]
+    );
+
+    if (roomRes.rows.length === 0) {
+      roomRes = await pool.query(
+        `INSERT INTO public.chat_rooms (ini_id, o_id, created_at) 
+         VALUES ($1, $2, TIMEZONE('Asia/Manila', NOW())) RETURNING room_id`,
+        [parseInt(iniId), parseInt(officeId)]
+      );
+    }
+
+    res.json({ roomId: roomRes.rows[0].room_id });
+  } catch (err) {
+    console.error("Error instantiating or resolving chat room nodes:", err);
+    res.status(500).json({ error: 'Failed chat room assignment initialization query structural loops.' });
+  }
+});
+
+// 3. GET MESSAGES STREAM FOR A SPECIFIC ROOM
+app.get('/api/chat/rooms/:roomId/messages', requireAuth, async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const messagesQuery = `
+      SELECT m.message_id, m.room_id, m.sender_id, m.message_text, m.sent_at, u.full_name as sender_name, a.account_type as role_name
+      FROM public.chat_messages m
+      JOIN public."User" u ON m.sender_id = u.u_id
+      JOIN public.account a ON u.a_id = a.a_id
+      WHERE m.room_id = $1
+      ORDER BY m.sent_at ASC;
+    `;
+    const result = await pool.query(messagesQuery, [parseInt(roomId)]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching historical stream messages loop:", err);
+    res.status(500).json({ error: 'Failed message log extraction routing block sequence.' });
+  }
+});
+
+// 4. POST NEW CHAT MESSAGE ENTRY
+app.post('/api/chat/messages', requireAuth, async (req, res) => {
+  const { roomId, messageText } = req.body;
+  const senderId = req.user.u_id; // Decoded cleanly from your JWT authentication layer middleware
+  try {
+    const result = await pool.query(
+      `INSERT INTO public.chat_messages (room_id, sender_id, message_text, sent_at)
+       VALUES ($1, $2, $3, TIMEZONE('Asia/Manila', NOW()))
+       RETURNING *`,
+      [parseInt(roomId), senderId, messageText.trim()]
+    );
+    
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("Failed submitting secure message tracking block node:", err);
+    res.status(500).json({ error: 'Structural breakdown committing message log row.' });
+  }
+});
+
+// 5. FETCH ACTIVE CURRENT PENDING DOCUMENTS LIST FOR USER CHAT SELECTION BAR
+app.get('/api/chat/active-documents-directory', requireAuth, async (req, res) => {
+  const userId = req.user.u_id;
+  const roleId = req.user.a_id;
+  try {
+    let query = '';
+    let params = [];
+
+    if (roleId === 1) {
+      query = `
+        SELECT DISTINCT ON (idoc.ini_id) idoc.ini_id, idoc.title, idoc.created_at
+        FROM public.initial_document idoc
+        WHERE idoc.u_id = $1
+        ORDER BY idoc.ini_id DESC;
+      `;
+      params = [userId];
+    } else if (roleId === 2) {
+      const userOfficeRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+      const officeId = userOfficeRes.rows[0]?.o_id;
+
+      if (!officeId) return res.json([]);
+
+      query = `
+        SELECT DISTINCT ON (idoc.ini_id) idoc.ini_id, idoc.title, idoc.created_at
+        FROM public.initial_document idoc
+        JOIN public.processed_document pd ON idoc.ini_id = pd.ini_id
+        WHERE pd.current_office_id = $1
+        ORDER BY idoc.ini_id DESC;
+      `;
+      params = [officeId];
+    } else {
+      return res.json([]);
+    }
+
+    const result = await pool.query(query, params);
+    const rows = result.rows;
+
+    const finalDirectory = [];
+    for (const doc of rows) {
+      // Look to see if any station channel under this document contains active records
+      const checkRooms = await pool.query(
+        `SELECT room_id FROM public.chat_rooms WHERE ini_id = $1`,
+        [doc.ini_id]
+      );
+      
+      let hasAnyChat = false;
+      if (checkRooms.rows.length > 0) {
+        const roomIds = checkRooms.rows.map(r => r.room_id);
+        const checkMsgs = await pool.query(
+          `SELECT COUNT(message_id)::int FROM public.chat_messages WHERE room_id = ANY($1)`,
+          [roomIds]
+        );
+        hasAnyChat = checkMsgs.rows[0].count > 0;
+      }
+
+      finalDirectory.push({
+        ...doc,
+        hasAnyChat: hasAnyChat
+      });
+    }
+
+    res.json(finalDirectory);
+  } catch (err) {
+    console.error("Error compilation active track selection hub array:", err);
+    res.status(500).json({ error: 'Failed extraction of operational document parameters directory loops.' });
   }
 });
 

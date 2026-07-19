@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import Swal from 'sweetalert2';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { QRCodeSVG } from 'qrcode.react';
-import { LayoutDashboard, FileText, History, Bell, User, Search, Filter, X, QrCode, LogOut, Camera, KeyRound, ShieldCheck, Building, Landmark } from 'lucide-react';
+import { LayoutDashboard, FileText, History, Bell, User, Search, Filter, X, QrCode, LogOut, Camera, KeyRound, ShieldCheck, Building, Landmark, MessageSquare } from 'lucide-react';
+import OfficeChatHub from './OfficeChatHub';
 import { fetchWithAuth } from '../api';
 
 const minimalSwal = Swal.mixin({
@@ -65,6 +66,7 @@ export default function ProcessorDashboard() {
   const [isAdHocProcessing, setIsAdHocProcessing] = useState(false);
 
   const [dashboardPage, setDashboardPage] = useState(1);
+  const [hasUnreadChats, setHasUnreadChats] = useState(false);
   const [pipelinePage, setPipelinePage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
   const itemsPerPage = 5;
@@ -77,6 +79,24 @@ export default function ProcessorDashboard() {
     }
     fetchProcessorMeta();
     fetchWorkflowTemplates();
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId || userId === 'undefined') return;
+
+    const checkChatBadgeStatus = async () => {
+      try {
+        const res = await fetchWithAuth('http://localhost:5000/api/chat/active-documents-directory');
+        const data = await res.json();
+        if (res.ok) {
+          setHasUnreadChats(data.some(d => d.hasAnyChat === true));
+        }
+      } catch (err) { console.error(err); }
+    };
+
+    checkChatBadgeStatus();
+    const chatInterval = setInterval(checkChatBadgeStatus, 15000);
+    return () => clearInterval(chatInterval);
   }, [userId]);
 
   useEffect(() => {
@@ -519,6 +539,14 @@ export default function ProcessorDashboard() {
             <button onClick={() => { setActiveTab('history'); setSearch(''); setHistoryFilter('All'); setHistoryPage(1); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'history' ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
               <History size={18} /> History
             </button>
+            <button onClick={() => { setActiveTab('messages'); setHasUnreadChats(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'messages' ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
+              <div className="flex items-center gap-3">
+                <MessageSquare size={18} /> Chat Inbox
+              </div>
+              {hasUnreadChats && (
+                <span className="w-2 h-2 bg-red-600 rounded-full mr-1 animate-pulse"></span>
+              )}
+            </button>
           </nav>
         </div>
 
@@ -799,6 +827,10 @@ export default function ProcessorDashboard() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'messages' && (
+            <OfficeChatHub userId={userId} roleId={2} officeId={processorOfficeId} />
           )}
 
           {activeTab === 'history' && (

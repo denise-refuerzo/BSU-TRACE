@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import { fetchWithAuth } from '../api';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -42,13 +42,26 @@ export default function DocumentsHub({
     const match = processTypes.find(p => p.process_name === doc.process_name);
     if (match) {
       const stops = [];
+      
+      // FIX THE DYNAMIC WRONG OVERRIDE LOOP
+      const departmentToOfficeMap = {
+        'College of Informatics and Computing Sciences': 'CICS Office',
+        'College of Accountancy, Business, Economics and International Hospitality Management': 'CABEIHM Office',
+        'College of Arts and Sciences': 'CAS Office',
+        'College of Industrial Technology': 'CE / CIT Office',
+        'College of Engineering': 'CE / CIT Office',
+        'College of Teacher Education': 'CTE Office'
+      };
+
       for (let i = 1; i <= 7; i++) {
         let stopName = match[`stop_${i}_name`];
-        // THE FIX: Swap the placeholder with the document's actual starting office
+        
         if (stopName === 'ORIGINATING_COLLEGE_DYNAMIC') {
-          // If the document hasn't started yet, fall back to Origin Office
-          stopName = doc.current_office || 'Origin Office'; 
+          // Look up where the document ACTUALLY originated using the history context
+          const originalDepartment = doc.department_name || localStorage.getItem('userDepartment');
+          stopName = departmentToOfficeMap[originalDepartment] || doc.current_office || 'Origin Office';
         }
+        
         if (stopName) stops.push(stopName);
       }
       setActiveRouteStops(stops);
@@ -166,11 +179,14 @@ export default function DocumentsHub({
             ></div>
 
             {activeRouteStops.map((stop, index) => {
-              const currentOfficeIdx = activeRouteStops.indexOf(selectedDoc.current_office);
-              const isCompletedAll = selectedDoc.status?.toLowerCase() === 'completed';
-              const isHalted = selectedDoc.status?.toLowerCase() === 'action required';
+              // Checks either the row highlight state or the default selected document context safely
+              const currentOfficeName = selectedDoc?.current_office;
+              const currentOfficeIdx = activeRouteStops.indexOf(currentOfficeName);
               
-              const isCurrent = stop === selectedDoc.current_office && !isCompletedAll;
+              const isCompletedAll = selectedDoc?.status?.toLowerCase() === 'completed';
+              const isHalted = selectedDoc?.status?.toLowerCase() === 'action required';
+              
+              const isCurrent = stop === currentOfficeName && !isCompletedAll;
               const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
               
               return (
@@ -187,6 +203,11 @@ export default function DocumentsHub({
                   }`}>
                     {stop}
                   </p>
+                  <span className="text-[9px] text-neutral-400 font-medium block mt-0.5 leading-tight">
+                    {isCurrent && isHalted ? 'Halted' : 
+                    isCurrent ? 'Under Review' : 
+                    isPast ? 'Cleared' : 'Awaiting'}
+                  </span>
                 </div>
               );
             })}
@@ -471,18 +492,24 @@ export default function DocumentsHub({
 
             <div className="p-4 border-t border-neutral-100 bg-neutral-50/50 flex justify-between items-center">
               <div className="flex gap-2">
+              <button 
+                  type="button" 
+                    onClick={() => {
+                      localStorage.setItem('redirect_target_doc_id', String(activeDetailsDoc.ini_id));
+                      window.location.reload(); 
+                    }}
+                    className="px-4 py-2 border border-red-200 bg-red-50 hover:bg-red-100 rounded-xl font-bold text-xs text-red-800 flex items-center gap-1.5 transition-colors"
+                  >
+                  <MessageSquare size={18} /> Chat regarding this file
+              </button>
                 <button type="button" className="px-4 py-2 border border-neutral-200 bg-white hover:bg-neutral-50 rounded-xl font-bold text-xs text-neutral-700 flex items-center gap-1.5 transition-colors">
-                  <Download size={14} /> Download Copy
-                </button>
-                <button type="button" className="px-4 py-2 bg-red-800 hover:bg-red-900 rounded-xl font-bold text-xs text-white flex items-center gap-1.5 shadow-sm transition-colors">
-                  <Printer size={14} /> Print Label
+                  <Download size={14} /> Download QR Code
                 </button>
               </div>
               <button onClick={() => setShowDetailsModal(false)} className="px-4 py-2 border rounded-xl text-xs font-bold text-gray-500 hover:bg-neutral-100 transition-colors">
                 Close
               </button>
             </div>
-
           </div>
         </div>
       )}

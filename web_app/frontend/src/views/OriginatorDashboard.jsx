@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X, QrCode, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import DocumentsHub from './DocumentsHub';
 import ResourceScheduler from './ResourceScheduler';
+import OfficeChatHub from './OfficeChatHub';
 import { fetchWithAuth } from '../api';
 
 export default function OriginatorDashboard() {
@@ -22,6 +23,7 @@ export default function OriginatorDashboard() {
   
   // Pagination State for Dashboard Ledger
   const [currentPage, setCurrentPage] = useState(1);
+  const [hasUnreadChats, setHasUnreadChats] = useState(false);
   const itemsPerPage = 5;
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -69,11 +71,22 @@ export default function OriginatorDashboard() {
       const match = processTypes.find(p => p.process_name === activeDoc.process_name);
       if (match) {
         const stops = [];
+        
+        const departmentToOfficeMap = {
+          'College of Informatics and Computing Sciences': 'CICS Office',
+          'College of Accountancy, Business, Economics and International Hospitality Management': 'CABEIHM Office',
+          'College of Arts and Sciences': 'CAS Office',
+          'College of Industrial Technology': 'CE / CIT Office',
+          'College of Engineering': 'CE / CIT Office',
+          'College of Teacher Education': 'CTE Office'
+        };
+
         for (let i = 1; i <= 7; i++) {
           let stopName = match[`stop_${i}_name`];
-          // THE FIX: Swap the placeholder
+          
           if (stopName === 'ORIGINATING_COLLEGE_DYNAMIC') {
-            stopName = activeDoc.current_office || 'Origin Unit';
+            // Locks the display value to your account profile unit statically
+            stopName = departmentToOfficeMap[profile.departmentName] || activeDoc.current_office || 'Origin Unit';
           }
           if (stopName) stops.push(stopName);
         }
@@ -82,7 +95,7 @@ export default function OriginatorDashboard() {
         setRecentDocStops([activeDoc.current_office || 'Origin Unit', activeDoc.next_office || 'Next Stop'].filter(Boolean));
       }
     }
-  }, [documents, processTypes]);
+  }, [documents, processTypes, profile.departmentName]);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -97,13 +110,40 @@ export default function OriginatorDashboard() {
   useEffect(() => {
     fetchLiveNotificationFeeds();
     const alertInterval = setInterval(fetchLiveNotificationFeeds, 10000);
-    return () => clearInterval(alertInterval);
+
+    // CHAT SIDEBAR RED BADGE STATUS CHECK
+    const checkChatBadgeStatus = async () => {
+      try {
+        const res = await fetchWithAuth('http://localhost:5000/api/chat/active-documents-directory');
+        const data = await res.json();
+        if (res.ok) {
+          const hasAnyActiveOngoingChat = data.some(d => d.hasAnyChat === true);
+          setHasUnreadChats(hasAnyActiveOngoingChat);
+        }
+      } catch (err) { console.error(err); }
+    };
+    checkChatBadgeStatus();
+    const chatBadgeInterval = setInterval(checkChatBadgeStatus, 15000);
+
+    return () => {
+      clearInterval(alertInterval);
+      clearInterval(chatBadgeInterval);
+    };
   }, [userId]);
 
   // Reset pagination when search or filter changes
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterStatus]);
+
+  // HANDLER FOR CHAT SHORTCUT REDIRECTS
+  useEffect(() => {
+    const pendingRedirectId = localStorage.getItem('redirect_target_doc_id');
+    // If a user clicked "Chat regarding this file", switch to the messages tab immediately
+    if (pendingRedirectId && activeTab !== 'messages') {
+      setActiveTab('messages');
+    }
+  }, [activeTab]);
 
   const fetchLiveNotificationFeeds = async () => {
     try {
@@ -325,6 +365,14 @@ export default function OriginatorDashboard() {
             <button onClick={() => setActiveTab('resources')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${activeTab === 'resources' ? 'bg-neutral-800 text-white font-medium' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
               <School size={18} /> School Resources
             </button>
+            <button onClick={() => { setActiveTab('messages'); setHasUnreadChats(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors ${activeTab === 'messages' ? 'bg-neutral-800 text-white font-medium' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}>
+                <div className="flex items-center gap-3">
+                  <MessageSquare size={18} /> Chat with Offices
+                </div>
+                {hasUnreadChats && (
+                  <span className="w-2 h-2 bg-red-600 rounded-full mr-1 animate-pulse"></span>
+                )}
+              </button>
           </nav>
         </div>
         <div className="border-t border-neutral-700 pt-4">
@@ -605,7 +653,9 @@ export default function OriginatorDashboard() {
               </div>
             </form>
           )}
-
+          {activeTab === 'messages' && (
+            <OfficeChatHub userId={userId} roleId={1} />
+          )}
           {activeTab === 'resources' && (
             <ResourceScheduler userId={userId} />
           )}
