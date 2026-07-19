@@ -444,48 +444,96 @@ export default function OriginatorDashboard() {
               </div>
 
               {mostRecentDoc && (
-              <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm text-left">
-                <h4 className="text-sm font-bold tracking-tight text-neutral-500 uppercase mb-4">
-                  Recent Document: <span className="text-neutral-900 font-extrabold uppercase">{mostRecentDoc.title}</span>
-                </h4>
-                <div className="relative flex items-center justify-between mt-6 px-4">
-                  <div className="absolute left-4 right-4 h-1 bg-neutral-200 top-3 -z-10"></div>
-                  <div 
-                    className="absolute left-4 h-1 bg-red-700 top-3 -z-10 transition-all duration-500 ease-in-out"
-                    style={{
-                      width: (() => {
-                        if (mostRecentDoc.status?.toLowerCase() === 'completed') return 'calc(100% - 32px)';
-                        const idx = recentDocStops.indexOf(mostRecentDoc.current_office);
-                        if (idx === -1 || recentDocStops.length <= 1) return '0%';
-                        return `calc(${(idx / (recentDocStops.length - 1)) * 100}% - 12px)`;
-                      })()
-                    }}
-                  ></div>
-                  
-                  {recentDocStops.map((stop, index) => {
-                    const currentOfficeIdx = recentDocStops.indexOf(mostRecentDoc.current_office);
-                    const isCompletedAll = mostRecentDoc.status?.toLowerCase() === 'completed';
-                    const isCurrent = stop === mostRecentDoc.current_office && !isCompletedAll;
-                    const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
+                <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm text-left">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="text-sm font-bold tracking-tight text-neutral-500 uppercase">
+                      Recent Document: <span className="text-neutral-900 font-extrabold uppercase">{mostRecentDoc.title}</span>
+                    </h4>
+                    {mostRecentDoc.history_logs?.some(l => (l.is_adhoc === true || String(l.is_adhoc) === 'true' || l.is_adhoc === 1) && !l.time_out) && (
+                      <span className="px-2 py-0.5 bg-purple-100 border border-purple-200 text-purple-800 rounded text-[9px] font-black uppercase tracking-wide">
+                        📍 AD-HOC DETOUR ACTIVE
+                      </span>
+                    )}
+                  </div>
 
-                    return (
-                      <div key={index} className="text-center flex flex-col items-center flex-1">
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
-                          isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
-                          isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
-                        }`}>
-                          {isPast && !isCurrent ? '✓' : index + 1}
-                        </div>
-                        <p className={`text-[11px] font-bold mt-2 truncate max-w-[130px] ${isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
-                          {stop}
-                        </p>
-                      </div>
-                    );
-                  })}
+                  {mostRecentDoc.history_logs?.some(l => (l.is_adhoc === true || String(l.is_adhoc) === 'true' || l.is_adhoc === 1) && !l.time_out) && (
+                    <div className="mb-5 p-3.5 bg-purple-50/60 border border-purple-200 rounded-xl text-xs text-purple-800 font-medium flex items-center gap-2">
+                      <span className="text-purple-600">⚡</span>
+                      <span>This document has been temporarily routed to <strong className="text-purple-900 underline">{mostRecentDoc.current_office}</strong> for an unscheduled ad-hoc verification detour. Standard routing pipeline will resume once cleared.</span>
+                    </div>
+                  )}
+
+                  <div className="relative flex items-center justify-between mt-6 px-4">
+                    <div className="absolute left-4 right-4 h-1 bg-neutral-200 top-3 -z-10"></div>
+                    
+                    {(() => {
+                      const historyLogs = mostRecentDoc.history_logs || [];
+                      const isAdhocLog = (l) => l && (l.is_adhoc === true || String(l.is_adhoc) === 'true' || l.is_adhoc === 1 || String(l.is_adhoc) === 't');
+                      
+                      let resultStops = [];
+                      let normalIndex = 0;
+                      for (let i = 0; i < historyLogs.length; i++) {
+                        const log = historyLogs[i];
+                        if (isAdhocLog(log)) {
+                          resultStops.push({ name: log.office_name, isAdhocNode: true, logRef: log });
+                        } else {
+                          if (normalIndex < recentDocStops.length) {
+                            resultStops.push({ name: recentDocStops[normalIndex], isAdhocNode: false, logRef: log });
+                            normalIndex++;
+                          }
+                        }
+                      }
+                      while (normalIndex < recentDocStops.length) {
+                        resultStops.push({ name: recentDocStops[normalIndex], isAdhocNode: false, logRef: null });
+                        normalIndex++;
+                      }
+
+                      let activeIndex = 0;
+                      for (let i = 0; i < resultStops.length; i++) {
+                         if (resultStops[i].logRef) activeIndex = i;
+                      }
+                      const percentage = resultStops.length <= 1 ? 0 : (Math.min(activeIndex, resultStops.length - 1) / (resultStops.length - 1)) * 100;
+
+                      return (
+                        <>
+                          <div 
+                            className={`absolute left-4 h-1 top-3 -z-10 transition-all duration-500 ease-in-out ${resultStops.some(n => n.isAdhocNode && n.logRef && !n.logRef.time_out) ? 'bg-purple-600' : 'bg-red-700'}`}
+                            style={{ width: `calc(${mostRecentDoc.status?.toLowerCase() === 'completed' ? 100 : percentage}% - 32px)` }}
+                          ></div>
+                          
+                          {resultStops.map((node, index) => {
+                            const isCompletedAll = mostRecentDoc.status?.toLowerCase() === 'completed';
+                            let isCurrent = false;
+                            let isPast = false;
+
+                            if (isCompletedAll) {
+                              isPast = true;
+                            } else if (node.logRef) {
+                              if (!node.logRef.time_out) isCurrent = true;
+                              else isPast = true;
+                            }
+
+                            return (
+                              <div key={index} className="text-center flex flex-col items-center flex-1">
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                                  isCurrent && node.isAdhocNode ? 'bg-purple-600 text-white ring-4 ring-purple-100 animate-pulse' :
+                                  isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
+                                  isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
+                                }`}>
+                                  {isPast && !isCurrent ? '✓' : node.isAdhocNode ? '⚡' : index - resultStops.slice(0, index).filter(n => n.isAdhocNode).length + 1}
+                                </div>
+                                <p className={`text-[11px] font-bold mt-2 truncate max-w-[130px] ${isCurrent && node.isAdhocNode ? 'text-purple-700 font-extrabold' : isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'}`}>
+                                  {node.name}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
-              </div>
-            )}
-
+              )}
               <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden text-left flex flex-col">
                 <div className="p-6 border-b border-neutral-100 flex items-center justify-between">
                   <div><h3 className="text-base font-bold text-neutral-950">Document Ledger Matrix</h3></div>

@@ -372,7 +372,8 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
               SELECT json_agg(json_build_object(
                 'office_name', off2.office_name,
                 'time_in', p2.time_in,
-                'time_out', p2.time_out
+                'time_out', p2.time_out,
+                'is_adhoc', p2.is_adhoc
               ) ORDER BY p2.pd_id ASC)
                FROM public.processed_document p2
                JOIN public.offices off2 ON p2.current_office_id = off2.o_id
@@ -385,7 +386,7 @@ app.get('/api/documents/:userId', requireAuth, async (req, res) => {
       LEFT JOIN public.offices next_o ON pdoc.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON pdoc.s_id = st.s_id
       WHERE idoc.u_id = $1 
-      ORDER BY idoc.ini_id DESC, pdoc.pd_id DESC;
+      ORDER BY idoc.ini_id DESC, (pdoc.time_out IS NULL) DESC, pdoc.pd_id DESC;
     `;
     const result = await pool.query(query, [req.params.userId]);
     res.json(result.rows);

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, Printer, AlertTriangle, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
-import { fetchWithAuth } from '../api';
+import { MoreVertical, Search, Filter, Plus, X, QrCode, FileText, Download, AlertTriangle, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 export default function DocumentsHub({ 
@@ -10,7 +9,6 @@ export default function DocumentsHub({
   setShowModal, 
   processTypes 
 }) {
-  const userName = localStorage.getItem('user') || 'Faculty User';
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [activeDetailsDoc, setActiveDetailsDoc] = useState(null); 
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -19,9 +17,11 @@ export default function DocumentsHub({
   const [filterStatus, setFilterStatus] = useState('All');
   const [activeRouteStops, setActiveRouteStops] = useState([]);
 
-  // Pagination State for Documents Hub
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 5;
+
+  // ROBUST ADHOC CHECKER: Covers PostgreSQL booleans, numeric bits, and string "true"
+  const isAdhocLog = (l) => l && (l.is_adhoc === true || String(l.is_adhoc) === 'true' || l.is_adhoc === 1);
 
   useEffect(() => {
     if (documents.length > 0 && !selectedDoc) {
@@ -32,7 +32,6 @@ export default function DocumentsHub({
     }
   }, [documents]);
 
-  // Reset pagination when search or filter changes
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterStatus]);
@@ -42,26 +41,14 @@ export default function DocumentsHub({
     const match = processTypes.find(p => p.process_name === doc.process_name);
     if (match) {
       const stops = [];
-      
-      // FIX THE DYNAMIC WRONG OVERRIDE LOOP
-      const departmentToOfficeMap = {
-        'College of Informatics and Computing Sciences': 'CICS Office',
-        'College of Accountancy, Business, Economics and International Hospitality Management': 'CABEIHM Office',
-        'College of Arts and Sciences': 'CAS Office',
-        'College of Industrial Technology': 'CE / CIT Office',
-        'College of Engineering': 'CE / CIT Office',
-        'College of Teacher Education': 'CTE Office'
-      };
-
       for (let i = 1; i <= 7; i++) {
         let stopName = match[`stop_${i}_name`];
         
+        // Preserve Dynamic Origin Office Layout mapping
         if (stopName === 'ORIGINATING_COLLEGE_DYNAMIC') {
-          // Look up where the document ACTUALLY originated using the history context
-          const originalDepartment = doc.department_name || localStorage.getItem('userDepartment');
-          stopName = departmentToOfficeMap[originalDepartment] || doc.current_office || 'Origin Office';
+          const firstNormalLog = doc.history_logs?.find(l => !isAdhocLog(l));
+          stopName = firstNormalLog?.office_name || doc.current_office || 'Origin Office';
         }
-        
         if (stopName) stops.push(stopName);
       }
       setActiveRouteStops(stops);
@@ -84,56 +71,70 @@ export default function DocumentsHub({
     return matchesSearch && matchesStatus;
   });
 
-  // Pagination Logic
   const indexOfLastDoc = currentPage * itemsPerPage;
   const indexOfFirstDoc = indexOfLastDoc - itemsPerPage;
   const currentDocs = filteredDocs.slice(indexOfFirstDoc, indexOfLastDoc);
   const totalPages = Math.ceil(filteredDocs.length / itemsPerPage);
 
-  const getCurrentProgressPercent = (doc, stops) => {
-    if (!doc || !stops || stops.length <= 1) return 0;
+  const getRenderStops = (doc, baseStops) => {
+    if (!doc || !baseStops) return [];
+    const historyLogs = doc.history_logs || [];
+    
+    let resultStops = [];
+    let normalIndex = 0;
+
+    // Loop through the actual timeline to inject ad-hoc nodes exactly where they happened
+    for (let i = 0; i < historyLogs.length; i++) {
+      const log = historyLogs[i];
+      if (isAdhocLog(log)) {
+        resultStops.push({ name: log.office_name, isAdhocNode: true, logRef: log });
+      } else {
+        if (normalIndex < baseStops.length) {
+          resultStops.push({ name: baseStops[normalIndex], isAdhocNode: false, logRef: log });
+          normalIndex++;
+        }
+      }
+    }
+
+    // Append remaining untouched route stops
+    while (normalIndex < baseStops.length) {
+      resultStops.push({ name: baseStops[normalIndex], isAdhocNode: false, logRef: null });
+      normalIndex++;
+    }
+    return resultStops;
+  };
+
+  const getCurrentProgressPercent = (doc, renderedNodes) => {
+    if (!doc || !renderedNodes || renderedNodes.length <= 1) return 0;
     if (doc.status?.toLowerCase() === 'completed') return 100;
     
-    const currentIndex = stops.indexOf(doc.current_office);
-    if (currentIndex === -1) return 0;
+    // Find the index of the furthest reached step
+    let activeIndex = 0;
+    for (let i = 0; i < renderedNodes.length; i++) {
+       if (renderedNodes[i].logRef) activeIndex = i;
+    }
     
-    return (currentIndex / (stops.length - 1)) * 100;
+    return (Math.min(activeIndex, renderedNodes.length - 1) / (renderedNodes.length - 1)) * 100;
   };
+
   useEffect(() => {
     const pendingRedirectId = localStorage.getItem('redirect_target_doc_id');
     if (pendingRedirectId && documents.length > 0) {
       const targetDoc = documents.find(d => d.ini_id === parseInt(pendingRedirectId));
       if (targetDoc) {
         handleSelectDocument(targetDoc);
-        // Automatically open up the modal detail overlays context frame cleanly
         setActiveDetailsDoc(targetDoc);
         setShowDetailsModal(true);
       }
-      // Clean up tracking flags from browser cache completely
       localStorage.removeItem('redirect_target_doc_id');
     }
   }, [documents]);
 
-  useEffect(() => {
-    const pendingRedirectId = localStorage.getItem('redirect_target_doc_id');
-    if (pendingRedirectId && documents.length > 0) {
-      const targetDoc = documents.find(d => d.ini_id === parseInt(pendingRedirectId, 10));
-      if (targetDoc) {
-        // Highlighting step locks tracking progress bar metrics updates dynamically
-        handleSelectDocument(targetDoc);
-        // Fires up the inner step audit view window modal layout automatically
-        setActiveDetailsDoc(targetDoc);
-        setShowDetailsModal(true);
-      }
-      // Clean target flags from runtime registry completely to protect loops
-      localStorage.removeItem('redirect_target_doc_id');
-    }
-  }, [documents]);
+  const renderTimelineNodes = getRenderStops(selectedDoc, activeRouteStops);
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto text-left animate-in fade-in duration-150">
       
-      {/* TOP TRACKER BAR SECTION */}
       {selectedDoc ? (
         <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm relative">
           <div className="flex justify-between items-start mb-6">
@@ -143,13 +144,27 @@ export default function DocumentsHub({
                 Currently viewing: <span className="text-red-800 font-bold font-mono">{selectedDoc.title}</span>
               </p>
             </div>
-            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-              selectedDoc.status?.toLowerCase() === 'completed' ? 'bg-green-50 text-green-700' : 
-              selectedDoc.status?.toLowerCase() === 'action required' ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-amber-50 text-amber-700'
-            }`}>
-              {selectedDoc.status || 'Active Path'}
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                selectedDoc.status?.toLowerCase() === 'completed' ? 'bg-green-50 text-green-700' : 
+                selectedDoc.status?.toLowerCase() === 'action required' ? 'bg-red-100 text-red-800 border border-red-200' : 'bg-amber-50 text-amber-700'
+              }`}>
+                {selectedDoc.status || 'Active Path'}
+              </span>
+              {selectedDoc.history_logs?.some(l => isAdhocLog(l) && !l.time_out) && (
+                <span className="px-2 py-0.5 bg-purple-100 border border-purple-200 text-purple-800 rounded-md text-[9px] font-black uppercase tracking-wide">
+                  📍 AD-HOC DETOUR ACTIVE
+                </span>
+              )}
+            </div>
           </div>
+
+          {selectedDoc.history_logs?.some(l => isAdhocLog(l) && !l.time_out) && (
+            <div className="mb-6 p-4 bg-purple-50/60 border border-purple-200 rounded-xl text-xs text-purple-800 font-medium flex items-center gap-2">
+              <span className="text-purple-600 text-sm">⚡</span>
+              <span>This document has been temporarily routed to <strong className="text-purple-900 underline">{selectedDoc.current_office}</strong> for an unscheduled ad-hoc verification detour. Standard routing pipeline will resume once cleared.</span>
+            </div>
+          )}
 
           {selectedDoc.status?.toLowerCase() === 'action required' && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3 text-xs text-red-800 font-medium">
@@ -173,38 +188,44 @@ export default function DocumentsHub({
             <div className="absolute left-6 right-6 h-1 bg-neutral-100 top-3 -z-10"></div>
             <div 
               className={`absolute left-6 h-1 top-3 -z-10 transition-all duration-500 ease-in-out ${
-                selectedDoc.status?.toLowerCase() === 'action required' ? 'bg-red-600' : 'bg-red-700'
+                selectedDoc.history_logs?.some(l => isAdhocLog(l) && !l.time_out) ? 'bg-purple-600' : 'bg-red-700'
               }`}
-              style={{ width: `calc(${getCurrentProgressPercent(selectedDoc, activeRouteStops)}% - 12px)` }}
+              style={{ width: `calc(${getCurrentProgressPercent(selectedDoc, renderTimelineNodes.map(n => n.name))}% - 12px)` }}
             ></div>
 
-            {activeRouteStops.map((stop, index) => {
-              // Checks either the row highlight state or the default selected document context safely
-              const currentOfficeName = selectedDoc?.current_office;
-              const currentOfficeIdx = activeRouteStops.indexOf(currentOfficeName);
-              
+            {renderTimelineNodes.map((node, index) => {
               const isCompletedAll = selectedDoc?.status?.toLowerCase() === 'completed';
               const isHalted = selectedDoc?.status?.toLowerCase() === 'action required';
               
-              const isCurrent = stop === currentOfficeName && !isCompletedAll;
-              const isPast = isCompletedAll || (currentOfficeIdx !== -1 && index <= currentOfficeIdx);
+              let isCurrent = false;
+              let isPast = false;
+
+              if (isCompletedAll) {
+                isPast = true;
+              } else if (node.logRef) {
+                if (!node.logRef.time_out) isCurrent = true;
+                else isPast = true;
+              }
               
               return (
                 <div key={index} className="text-center flex flex-col items-center flex-1">
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-xs ${
+                    isCurrent && node.isAdhocNode ? 'bg-purple-600 text-white ring-4 ring-purple-100 animate-pulse' :
                     isCurrent && isHalted ? 'bg-red-700 text-white ring-4 ring-red-100' :
                     isCurrent ? 'bg-red-700 text-white ring-4 ring-red-100 animate-pulse' :
+                    node.isAdhocNode ? 'bg-purple-200 text-purple-700' :
                     isPast ? 'bg-red-800 text-white' : 'bg-neutral-200 text-neutral-500'
                   }`}>
-                    {isCurrent && isHalted ? '✕' : isPast && !isCurrent ? '✓' : index + 1}
+                    {isCurrent && isHalted ? '✕' : isPast && !isCurrent ? '✓' : node.isAdhocNode ? '⚡' : index - renderTimelineNodes.slice(0, index).filter(n => n.isAdhocNode).length + 1}
                   </div>
                   <p className={`text-[11px] font-bold mt-2 truncate max-w-[120px] ${
-                    isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'
+                    isCurrent && node.isAdhocNode ? 'text-purple-700 font-extrabold' : isCurrent ? 'text-red-800 font-extrabold' : 'text-neutral-500'
                   }`}>
-                    {stop}
+                    {node.name}
                   </p>
                   <span className="text-[9px] text-neutral-400 font-medium block mt-0.5 leading-tight">
-                    {isCurrent && isHalted ? 'Halted' : 
+                    {isCurrent && node.isAdhocNode ? 'Currently in verification' :
+                    isCurrent && isHalted ? 'Halted' : 
                     isCurrent ? 'Under Review' : 
                     isPast ? 'Cleared' : 'Awaiting'}
                   </span>
@@ -225,6 +246,7 @@ export default function DocumentsHub({
         </div>
       )}
 
+      {/* RECENT SUBMISSIONS TABLE */}
       <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
         <div className="p-6 border-b border-neutral-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <h3 className="text-base font-bold text-neutral-950">Recent Submissions</h3>
@@ -413,7 +435,6 @@ export default function DocumentsHub({
                 </div>
 
                 <div className="bg-neutral-50 p-3 border border-neutral-200 rounded-xl flex flex-col items-center flex-shrink-0">
-                  {/* Small Document QR Code */}
                   <QRCodeSVG 
                     value={activeDetailsDoc.qr_code} 
                     size={80} 
@@ -426,66 +447,82 @@ export default function DocumentsHub({
 
               <div className="pt-4 border-t border-neutral-100 text-left">
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-4">Submission Route Status</span>
+                
                 <div className="relative pl-6 space-y-5">
                   <div className="absolute left-[6px] top-1.5 bottom-1.5 w-0.5 bg-neutral-200"></div>
                   
-                  {activeRouteStops.map((stop, i) => {
-                    const currentOfficeIdx = activeRouteStops.indexOf(activeDetailsDoc?.current_office);
-                    const isCompletedAll = activeDetailsDoc?.status?.toLowerCase() === 'completed';
-                    const isHalted = activeDetailsDoc?.status?.toLowerCase() === 'action required';
+                  {(() => {
+const detailsStopsNodes = getRenderStops(activeDetailsDoc, activeRouteStops);
                     
-                    const isCurrent = stop === activeDetailsDoc?.current_office && !isCompletedAll;
-                    const isPast = isCompletedAll || (currentOfficeIdx !== -1 && i <= currentOfficeIdx);
+return detailsStopsNodes.map((node, i) => {
+  const isCompletedAll = activeDetailsDoc?.status?.toLowerCase() === 'completed';
+  const isHalted = activeDetailsDoc?.status?.toLowerCase() === 'action required';
+  
+  let isCurrent = false;
+  let isPast = false;
 
-                    const stopLog = activeDetailsDoc?.history_logs?.find(log => log.office_name === stop);
-                    const formatTime = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : null;
-                    const timeIn = formatTime(stopLog?.time_in);
-                    const timeOut = formatTime(stopLog?.time_out);
+  if (isCompletedAll) {
+    isPast = true;
+  } else if (node.logRef) {
+    if (!node.logRef.time_out) isCurrent = true;
+    else isPast = true;
+  }
 
-                    return (
-                      <div key={i} className="relative flex flex-col">
-                        <div className={`absolute -left-[23px] top-0.5 w-3.5 h-3.5 rounded-full border-2 bg-white flex items-center justify-center transition-all z-10 ${
-                          isCurrent && isHalted ? 'border-red-600 bg-red-600 shadow-sm' :
-                          isCurrent ? 'border-red-700 bg-red-700 ring-4 ring-red-100' :
-                          isPast ? 'border-red-800 bg-red-800' : 'border-neutral-300'
-                        }`}>
-                          {isCurrent && isHalted ? '✕' : isPast && <div className="w-1 h-1 bg-white rounded-full"></div>}
-                        </div>
-                        
-                        <div className="flex justify-between items-start gap-4">
-                          <div>
-                            <p className={`text-xs font-bold leading-none ${
-                              isCurrent && isHalted ? 'text-red-700 font-black' : isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'
-                            }`}>
-                              {stop}
-                            </p>
-                            <span className="text-[10px] text-gray-400 mt-1.5 font-medium block">
-                              {isCurrent && isHalted ? '🛑 Route Halted Here for Revision Notes' : 
-                               isCurrent ? 'Under Active Review' : isPast ? 'Completed signature verification step' : 'Awaiting structural arrival queue'}
-                            </span>
+  const stopLog = node.logRef;
+  const formatTime = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : null;
+  const timeIn = formatTime(stopLog?.time_in);
+  const timeOut = formatTime(stopLog?.time_out);
+
+                      return (
+                        <div key={i} className="relative flex flex-col">
+                          <div className={`absolute -left-[23px] top-0.5 w-3.5 h-3.5 rounded-full border-2 bg-white flex items-center justify-center transition-all z-10 ${
+                            isCurrent && node.isAdhocNode ? 'border-purple-600 bg-purple-600 ring-4 ring-purple-100' :
+                            isCurrent && isHalted ? 'border-red-600 bg-red-600 shadow-sm' :
+                            isCurrent ? 'border-red-700 bg-red-700 ring-4 ring-red-100' :
+                            node.isAdhocNode ? 'border-purple-300 bg-purple-50' :
+                            isPast ? 'border-red-800 bg-red-800' : 'border-neutral-300'
+                          }`}>
+                            {isCurrent && isHalted ? '✕' : isCurrent && node.isAdhocNode ? '⚡' : isPast && <div className="w-1 h-1 bg-white rounded-full"></div>}
                           </div>
-
-                          {(timeIn || timeOut || isCurrent) && (
-                            <div className="text-right flex flex-col items-end gap-1 flex-shrink-0">
-                              {timeIn ? (
-                                <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
-                                  IN: {timeIn}
-                                </span>
-                              ) : (
-                                isCurrent && <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shadow-xs uppercase tracking-tight">Awaiting Scan In</span>
-                              )}
-                              
-                              {timeOut && (
-                                <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
-                                  OUT: {timeOut}
-                                </span>
-                              )}
+                          
+                          <div className="flex justify-between items-start gap-4">
+                            <div>
+                              <p className={`text-xs font-bold leading-none ${
+                                isCurrent && node.isAdhocNode ? 'text-purple-700 font-black' : isCurrent ? 'text-red-800 font-black' : isPast ? 'text-neutral-800' : 'text-neutral-400'
+                              }`}>
+                                {node.name}
+                              </p>
+                              <span className="text-[10px] text-gray-400 mt-1.5 font-medium block">
+                                {isCurrent && node.isAdhocNode ? '📍 Currently in verification (Ad-Hoc Detour)' :
+                                isCurrent && isHalted ? '🛑 Route Halted Here for Revision Notes' : 
+                                isCurrent ? 'Under Active Review' : 
+                                isPast ? 'Completed signature verification step' : 
+                                'Awaiting structural arrival queue'}
+                              </span>
                             </div>
-                          )}
+
+                            {(timeIn || timeOut || isCurrent) && (
+                              <div className="text-right flex flex-col items-end gap-1 flex-shrink-0">
+                                {timeIn ? (
+                                  <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
+                                    IN: {timeIn}
+                                  </span>
+                                ) : (
+                                  isCurrent && <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shadow-xs uppercase tracking-tight">Awaiting Scan In</span>
+                                )}
+                                
+                                {timeOut && (
+                                  <span className="text-[9px] font-mono font-bold text-neutral-600 bg-neutral-100/80 border border-neutral-200 px-1.5 py-0.5 rounded shadow-xs uppercase">
+                                    OUT: {timeOut}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </div>
@@ -523,7 +560,6 @@ export default function DocumentsHub({
               <p className="text-xs text-neutral-400 mt-1">Scan this token code to capture current tracking coordinates.</p>
             </div>
             <div className="bg-neutral-50 p-6 border rounded-xl flex flex-col items-center justify-center border-dashed">
-              {/* Enlarged Scannable QR Code */}
               <QRCodeSVG 
                 value={selectedDoc.qr_code} 
                 size={160} 
