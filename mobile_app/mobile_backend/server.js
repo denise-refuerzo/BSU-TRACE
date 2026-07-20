@@ -6,16 +6,19 @@ const crypto = require('crypto');
 const cors = require('cors');
 const { Pool, Client } = require('pg');
 const bcrypt = require('bcrypt');
-// ADD THESE TWO LINES:
+
+// 1. Require HTTP and Socket.IO
 const http = require('http');
 const { Server } = require('socket.io');
 
-// ADD THESE THREE LINES (Wraps Express in an HTTP Server and initializes Socket.IO):
+// 2. Initialize Express FIRST
+const app = express();
+
+// 3. Initialize HTTP Server and Socket.IO using 'app' SECOND
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
-const app = express();
 
 // ==========================================
 // IN-MEMORY TRACKER (No Database Column Required)
