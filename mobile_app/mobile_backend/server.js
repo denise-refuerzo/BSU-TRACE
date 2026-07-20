@@ -677,7 +677,7 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS (GSO Office-Specific Status)
+// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS (All Past, Present & Future GSO Route Documents)
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
   const userId = req.params.id;
@@ -696,7 +696,7 @@ app.get('/api/processors/:id/documents', async (req, res) => {
         i.title, 
         p.process_name AS form_type, 
         origin_o.office_name AS origin_office, 
-        COALESCE(s_office.current_status, 'AWAITING GSO ROUTE') AS status,
+        COALESCE(s_office.current_status, 'UPCOMING ROUTE') AS status,
         pd_office.time_in, 
         pd_office.time_out,
         pd_office.current_office_id,
@@ -706,11 +706,10 @@ app.get('/api/processors/:id/documents', async (req, res) => {
       LEFT JOIN public.process_type p ON i.p_id = p.p_id
       LEFT JOIN public.route r ON p.r_id = r.r_id
       LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
-      -- Pull the exact status/action log for THIS specific office (GSO)
+      -- Pull action log specifically for GSO if it has interacted with this document
       LEFT JOIN public.processed_document pd_office ON i.ini_id = pd_office.ini_id AND pd_office.current_office_id = $1
       LEFT JOIN public.status s_office ON pd_office.s_id = s_office.s_id
-      WHERE pd_office.current_office_id = $1
-         OR $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
          OR EXISTS (
            SELECT 1 FROM public.processed_document past_pd 
            WHERE past_pd.ini_id = i.ini_id AND past_pd.current_office_id = $1
