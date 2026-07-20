@@ -2124,20 +2124,25 @@ app.get('/api/chat/active-documents/:userId', async (req, res) => {
     const { userId } = req.params;
 
     try {
-        // Fetches documents belonging to the user that have started processing
         const query = `
-            SELECT DISTINCT i.ini_id, i.title, s.current_status as status
+            SELECT i.ini_id, i.title, s.current_status as status
             FROM initial_document i
             JOIN processed_document pd ON i.ini_id = pd.ini_id
             JOIN status s ON pd.s_id = s.s_id
             WHERE i.u_id = $1
+              AND pd.pd_id = (
+                  SELECT MAX(pd_id) 
+                  FROM processed_document 
+                  WHERE ini_id = i.ini_id
+              )
             ORDER BY i.ini_id DESC;
         `;
         const result = await pool.query(query, [userId]);
         res.json(result.rows);
     } catch (error) {
         console.error('Error fetching active documents:', error);
-        res.status(500).send('Server Error');
+        // Return the actual error to the frontend for easier debugging
+        res.status(500).json({ error: 'Server Error', details: error.message }); 
     }
 });
 
