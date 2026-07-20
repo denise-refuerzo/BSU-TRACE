@@ -236,15 +236,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
                         document: doc, 
                         icon: Icons.description_outlined,
                       )),
-                      
-                    const SizedBox(height: 24),
-                    const Text(
-                      'System Status',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia', color: Colors.black87),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildSystemStatus(),
-                    const SizedBox(height: 40),
                   ],
                 ),
               ),
@@ -378,32 +369,6 @@ class _SigneeDashboardScreenState extends State<SigneeDashboardScreen> {
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSystemStatus() {
-    return Container(
-      decoration: BoxDecoration(color: Colors.red.shade50.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
-      child: Column(
-        children: [
-          _buildStatusRow(Icons.lock_outline, 'Digital Seal', 'Active', isGreen: true), Divider(height: 1, color: Colors.red.shade100),
-          _buildStatusRow(Icons.cloud_queue, 'Cloud Storage', 'Connected', isGreen: true), Divider(height: 1, color: Colors.red.shade100),
-          _buildStatusRow(Icons.sync_alt, 'Audit Sync', 'Last: 2m ago', isGreen: false),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusRow(IconData icon, String title, String status, {required bool isGreen}) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.black54, size: 20), const SizedBox(width: 16), Expanded(child: Text(title, style: const TextStyle(color: Colors.black87, fontSize: 14))),
-          if (isGreen) Container(margin: const EdgeInsets.only(right: 6), width: 8, height: 8, decoration: const BoxDecoration(color: Colors.teal, shape: BoxShape.circle)),
-          Text(status, style: TextStyle(color: isGreen ? Colors.teal : Colors.black54, fontSize: 12, fontWeight: isGreen ? FontWeight.bold : FontWeight.normal)),
         ],
       ),
     );
