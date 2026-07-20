@@ -17,7 +17,6 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _is2faEnabled = false;
-  String? _new2faCode; // Stores the new PIN temporarily before saving
   bool _isLoading = true;
   bool _isSaving = false; 
   bool _forcePop = false; // Used to allow exiting after discarding changes
@@ -47,8 +46,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return _fullNameController.text.trim() != originalName ||
            _emailController.text.trim() != originalEmail ||
-           _is2faEnabled != original2fa ||
-           _new2faCode != null;
+           _is2faEnabled != original2fa;
   }
 
   @override
@@ -99,6 +97,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<String?> _showOTPVerificationModal() async {
+    final TextEditingController pinController = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Verify Identity', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('A verification code has been sent to your email to confirm this security change.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pinController,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              maxLength: 6,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 24, letterSpacing: 8.0),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: Colors.grey.shade100,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                counterText: '',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+            onPressed: () {
+              if (pinController.text.length == 6) {
+                Navigator.pop(context, pinController.text);
+              } else {
+                _showAlertDialog('Invalid PIN', 'Please enter a 6-digit PIN.');
+              }
+            },
+            child: const Text('Verify', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _fetchUserProfile() async {
     final userId = SessionManager().userId;
     if (userId == null) {
@@ -139,71 +187,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Show Modal to configure a new PIN
-  Future<void> _showSet2FAModal() async {
-    final TextEditingController pinController = TextEditingController();
-    
-    bool? result = await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Setup 2FA PIN', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Enter a 6-digit PIN to secure your account.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: pinController,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              maxLength: 6,
-              decoration: InputDecoration(
-                hintText: 'Enter PIN',
-                filled: true,
-                fillColor: Colors.red.shade50,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false), 
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey))
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-            onPressed: () {
-              if (pinController.text.length < 4) {
-                // Showing validation error in a dialog over the existing modal
-                _showAlertDialog('Invalid PIN', 'PIN must be at least 4 digits.', isError: true);
-                return;
-              }
-              Navigator.pop(context, true);
-            }, 
-            child: const Text('Confirm', style: TextStyle(color: Colors.white))
-          ),
-        ]
-      )
-    );
-
-    if (result == true) {
-      setState(() {
-        _is2faEnabled = true;
-        _new2faCode = pinController.text;
-      });
-    } else {
-      setState(() => _is2faEnabled = false);
-    }
-  }
-
-  Future<void> _saveProfileChanges() async {
+Future<void> _saveProfileChanges() async {
     final userId = SessionManager().userId;
     if (userId == null) return;
 
+    final original2fa = _parseBool(_userData!['two_fa_enabled']);
+    String? otpCode;
+
+    // 1. If 2FA state changed, request an OTP from the backend
+    if (_is2faEnabled != original2fa) {
+      setState(() => _isSaving = true);
+      try {
+        final otpResponse = await http.post(
+          Uri.parse('${AppConfig.baseUrl}/users/$userId/request-profile-otp'),
+        );
+        
+        if (otpResponse.statusCode != 200) {
+          setState(() => _isSaving = false);
+          _showAlertDialog('Error', 'Failed to send verification email.');
+          return;
+        }
+      } catch (e) {
+        setState(() => _isSaving = false);
+        _showAlertDialog('Error', 'Connection error while requesting OTP.');
+        return;
+      }
+      setState(() => _isSaving = false);
+
+      // 2. Show the modal to capture the user's PIN
+      otpCode = await _showOTPVerificationModal();
+      
+      // If the user cancelled the modal or provided an invalid string, abort the save
+      if (otpCode == null || otpCode.length != 6) {
+        return;
+      }
+    }
+
+    // 3. Proceed with the final save request
     setState(() => _isSaving = true);
 
     final String url = '${AppConfig.baseUrl}/users/$userId';
@@ -216,19 +236,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'full_name': _fullNameController.text.trim(),
           'uni_email': _emailController.text.trim(),
           'two_fa_enabled': _is2faEnabled,
-          'two_fa_code': _new2faCode, 
+          if (otpCode != null) 'otp': otpCode, // Dynamically append the OTP if it exists
         }),
       );
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        setState(() {
-          _new2faCode = null; // Clear the temporary code flag so unsaved changes = false
-          _forcePop = false;
-        });
+        setState(() => _forcePop = false);
         _showAlertDialog('Success', 'Profile updated successfully!', isError: false);
         _fetchUserProfile(); 
+      } else if (response.statusCode == 401) {
+        _showAlertDialog('Verification Failed', 'The PIN you entered was incorrect.');
       } else {
         _showAlertDialog('Error', 'Failed to update profile.');
       }
@@ -359,14 +378,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 value: _is2faEnabled,
                 activeThumbColor: AppTheme.primaryRed,
                 onChanged: (val) {
-                  if (val) {
-                    _showSet2FAModal();
-                  } else {
-                    setState(() {
-                      _is2faEnabled = false;
-                      _new2faCode = null; 
-                    });
-                  }
+                  // UPDATED: Simply toggle the state
+                  setState(() {
+                    _is2faEnabled = val;
+                  });
                 },
               ),
             ],

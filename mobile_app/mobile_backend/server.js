@@ -602,30 +602,69 @@ app.delete('/api/users/:id', async (req, res) => {
 });
 
 // ==========================================
-// 3. UPDATE USER PROFILE DETAILS ENDPOINT (Updated to save PIN)
+// 2.9 REQUEST OTP FOR PROFILE SECURITY CHANGES
+// ==========================================
+app.post('/api/users/:id/request-profile-otp', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userRes = await pool.query('SELECT uni_email FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const email = userRes.rows[0].uni_email;
+    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [generatedPin, userId]);
+    
+    await sendSystemEmail(
+      email,
+      'BSU-Trace Security Update',
+      `Your verification code to authorize changes to your 2FA settings is: ${generatedPin}. Do not share this with anyone.`
+    );
+    
+    res.status(200).json({ message: 'Verification code sent to email' });
+  } catch (error) {
+    console.error('Request Profile OTP Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
+// 3. UPDATE USER PROFILE DETAILS ENDPOINT
 // ==========================================
 app.put('/api/users/:id', async (req, res) => {
   const userId = req.params.id;
-  const { full_name, uni_email, two_fa_enabled, two_fa_code } = req.body;
+  const { full_name, uni_email, two_fa_enabled, otp } = req.body; 
 
   try {
-    // COALESCE ensures we don't overwrite an existing code with NULL if it isn't passed
+    // 1. Fetch the user's current security state
+    const userRes = await pool.query(
+      'SELECT two_fa_enabled, two_fa_code FROM public."User" WHERE u_id = $1', 
+      [userId]
+    );
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const currentUser = userRes.rows[0];
+
+    // 2. If the 2FA setting is being changed, enforce OTP validation
+    if (currentUser.two_fa_enabled !== two_fa_enabled) {
+      if (!otp || currentUser.two_fa_code !== otp) {
+        return res.status(401).json({ error: 'Invalid or missing verification code.' });
+      }
+    }
+
+    // 3. Update the profile and clear the temporary PIN to prevent reuse
     const query = `
       UPDATE public."User"
       SET full_name = $1, 
           uni_email = $2, 
           two_fa_enabled = $3,
-          two_fa_code = COALESCE($4, two_fa_code) 
-      WHERE u_id = $5
+          two_fa_code = NULL
+      WHERE u_id = $4
       RETURNING u_id
     `;
     
-    const values = [full_name, uni_email, two_fa_enabled, two_fa_code, userId];
-    const result = await pool.query(query, values);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    await pool.query(query, [full_name, uni_email, two_fa_enabled, userId]);
 
     res.status(200).json({ message: 'Profile updated successfully' });
 
