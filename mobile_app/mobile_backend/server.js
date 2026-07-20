@@ -2120,28 +2120,61 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
 });
 
 // 1. Fetch active documents for the Originator (Inquiry Hub)
-app.get('/api/chat/active-documents/:userId', async (req, res) => {
+app.get('/chat/active-documents/:userId', async (req, res) => {
     const { userId } = req.params;
 
     try {
-        const query = `
-            SELECT i.ini_id, i.title, s.current_status as status
-            FROM initial_document i
-            JOIN processed_document pd ON i.ini_id = pd.ini_id
-            JOIN status s ON pd.s_id = s.s_id
-            WHERE i.u_id = $1
-              AND pd.pd_id = (
-                  SELECT MAX(pd_id) 
-                  FROM processed_document 
-                  WHERE ini_id = i.ini_id
-              )
-            ORDER BY i.ini_id DESC;
-        `;
-        const result = await pool.query(query, [userId]);
+        const userRes = await pool.query('SELECT a_id, o_id FROM "User" WHERE u_id = $1', [userId]);
+        
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        const user = userRes.rows[0];
+        let query = '';
+        let queryParams = [];
+
+        if (user.a_id === 1) { 
+            // Originators see all documents they created
+            query = `
+                SELECT i.ini_id, i.title, s.current_status as status
+                FROM initial_document i
+                JOIN processed_document pd ON i.ini_id = pd.ini_id
+                JOIN status s ON pd.s_id = s.s_id
+                WHERE i.u_id = $1
+                  AND pd.pd_id = (
+                      SELECT MAX(pd_id) 
+                      FROM processed_document 
+                      WHERE ini_id = i.ini_id
+                  )
+                ORDER BY i.ini_id DESC;
+            `;
+            queryParams = [userId];
+            
+        } else {
+            // Processors, Signees, and Admins see documents currently in their office OR with active chats
+            query = `
+                SELECT DISTINCT i.ini_id, i.title, s.current_status as status
+                FROM initial_document i
+                JOIN processed_document pd ON i.ini_id = pd.ini_id
+                JOIN status s ON pd.s_id = s.s_id
+                LEFT JOIN chat_rooms cr ON i.ini_id = cr.ini_id
+                WHERE (pd.current_office_id = $1 OR cr.o_id = $1)
+                  AND pd.pd_id = (
+                      SELECT MAX(pd_id) 
+                      FROM processed_document 
+                      WHERE ini_id = i.ini_id
+                  )
+                ORDER BY i.ini_id DESC;
+            `;
+            queryParams = [user.o_id]; 
+        }
+
+        const result = await pool.query(query, queryParams);
         res.json(result.rows);
+        
     } catch (error) {
         console.error('Error fetching active documents:', error);
-        // Return the actual error to the frontend for easier debugging
         res.status(500).json({ error: 'Server Error', details: error.message }); 
     }
 });
@@ -2178,7 +2211,9 @@ app.get('/api/chat/channels/:iniId', async (req, res) => {
         console.error('Error fetching channels:', error);
         res.status(500).send('Server Error');
     }
-});// 1. REST Endpoint to load past chat messages when opening a room
+});
+
+// 1. REST Endpoint to load past chat messages when opening a room
 app.get('/chat/messages/:iniId/:oId', async (req, res) => {
     const { iniId, oId } = req.params;
     try {

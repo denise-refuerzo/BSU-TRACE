@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import '../widgets/app_bar_helper.dart';
-import 'chat_channels_screen.dart';
-import '../services/session_manager.dart';
-import '../config.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-
+import '../services/session_manager.dart';
+import '../config.dart';
+import 'chat_channels_screen.dart';
 
 class InquiryHubScreen extends StatefulWidget {
   @override
@@ -13,7 +11,8 @@ class InquiryHubScreen extends StatefulWidget {
 }
 
 class _InquiryHubScreenState extends State<InquiryHubScreen> {
-  List<dynamic> activeDocuments = []; // Populate via your API
+  List<dynamic> activeDocuments = [];
+  bool isLoading = true;
 
   @override
   void initState() {
@@ -21,7 +20,7 @@ class _InquiryHubScreenState extends State<InquiryHubScreen> {
     _fetchActiveDocuments();
   }
 
-Future<void> _fetchActiveDocuments() async {
+  Future<void> _fetchActiveDocuments() async {
     final userId = SessionManager().userId;
     final token = SessionManager().sessionToken;
 
@@ -35,46 +34,59 @@ Future<void> _fetchActiveDocuments() async {
         if (mounted) {
           setState(() {
             activeDocuments = json.decode(response.body);
+            isLoading = false;
           });
         }
       } else {
-        // THIS WILL SHOW YOU EXACTLY WHY IT IS FAILING
-        debugPrint('Failed to load documents: ${response.statusCode} | Body: ${response.body}');
+        debugPrint('Failed to load documents: ${response.statusCode}');
+        if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
       debugPrint('Error: $e');
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inquiry Hub')),
-      body: ListView.builder(
-        itemCount: activeDocuments.length,
-        itemBuilder: (context, index) {
-          final doc = activeDocuments[index];
-          return Card(
-            margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: ListTile(
-              title: Text(doc['title'], style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('Status: ${doc['status']}'),
-              trailing: Icon(Icons.chat_bubble_outline),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatChannelsScreen(
-                      iniId: doc['ini_id'],
-                      documentTitle: doc['title'],
-                    ),
-                  ),
-                );
-              },
-            ),
-          );
-        },
+      appBar: AppBar(
+        title: const Text('Inquiry Hub'),
       ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : activeDocuments.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No active document inquiries found.',
+                    style: TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: activeDocuments.length,
+                  itemBuilder: (context, index) {
+                    final doc = activeDocuments[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: ListTile(
+                        title: Text(doc['title'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text('Status: ${doc['status']}'),
+                        trailing: const Icon(Icons.chat_bubble_outline),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ChatChannelsScreen(
+                                iniId: doc['ini_id'],
+                                documentTitle: doc['title'],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
     );
   }
 }
