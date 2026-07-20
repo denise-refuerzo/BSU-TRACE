@@ -2214,7 +2214,9 @@ app.get('/chat/messages/:iniId/:oId', async (req, res) => {
     }
 });
 
-// 2. Socket.IO Real-Time & Persistence Handlers
+// ==========================================
+// SOCKET.IO REAL-TIME CHAT ENGINE
+// ==========================================
 io.on('connection', (socket) => {
     console.log('Client connected for chat:', socket.id);
 
@@ -2233,6 +2235,10 @@ io.on('connection', (socket) => {
         try {
             const { ini_id, o_id, sender_id, message_text, sent_at } = data;
             
+            // Fetch the sender's full name for real-time display
+            const userRes = await pool.query('SELECT full_name FROM public."User" WHERE u_id = $1', [sender_id]);
+            const sender_name = userRes.rows[0]?.full_name || 'User';
+
             // Check if chat_room already exists for this document + office pair
             let roomRes = await pool.query(
                 'SELECT room_id FROM chat_rooms WHERE ini_id = $1 AND o_id = $2',
@@ -2263,6 +2269,7 @@ io.on('connection', (socket) => {
                 message_id: msgRes.rows[0].message_id,
                 room_id: roomId,
                 sender_id,
+                sender_name,
                 message_text,
                 sent_at: sent_at || new Date()
             });
