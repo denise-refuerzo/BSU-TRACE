@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:qr_flutter/qr_flutter.dart'; // Import QrFlutter
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_bar_helper.dart';
 import '../widgets/app_drawer.dart';
@@ -29,6 +29,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   
   String _selectedStatus = 'All Status';
   String _searchQuery = '';
+
+  // Pagination state
+  int _currentPage = 1;
+  final int _itemsPerPage = 5; // Updated to 5 items per page
 
   String _resolveStatus(Map<String, dynamic> doc) {
     String dbStatus = (doc['status'] ?? '').toString().toLowerCase();
@@ -76,13 +80,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     super.dispose();
   }
 
-  Future<void> fetchDocuments() async {
+Future<void> fetchDocuments() async {
     final userId = SessionManager().userId;
     final role = SessionManager().currentRole;
     if (userId == null) return;
     
     String url = '${AppConfig.baseUrl}/documents';
-    if (role == UserRole.processor) {
+    
+    if (role == UserRole.processor || role == UserRole.admin) {
       url = '${AppConfig.baseUrl}/processors/$userId/documents';
     }
 
@@ -141,6 +146,15 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       return true;
     }).toList();
 
+    int totalPages = (filteredDocuments.length / _itemsPerPage).ceil();
+    if (totalPages == 0) totalPages = 1;
+    if (_currentPage > totalPages) _currentPage = totalPages;
+
+    List<dynamic> paginatedDocuments = filteredDocuments
+        .skip((_currentPage - 1) * _itemsPerPage)
+        .take(_itemsPerPage)
+        .toList();
+
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(title: const Text('Documents'), actions: buildAppBarActions(context)),
@@ -158,10 +172,14 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     const SizedBox(height: 16),
                     _buildFilterRow(),
                     const SizedBox(height: 24),
-                    if (filteredDocuments.isEmpty)
+                    
+                    if (paginatedDocuments.isEmpty)
                       const Padding(padding: EdgeInsets.only(top: 40), child: Text("No documents found.", style: TextStyle(color: Colors.grey)))
-                    else
-                      ...filteredDocuments.map((doc) => _buildDocumentCard(context, doc)),
+                    else ...[
+                      ...paginatedDocuments.map((doc) => _buildDocumentCard(context, doc)),
+                      if (filteredDocuments.length > _itemsPerPage) 
+                        _buildPaginationControls(totalPages),
+                    ],
                     const SizedBox(height: 80),
                   ],
                 ),
@@ -176,7 +194,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Widget _buildSearchBar() => TextField(
-        onChanged: (value) { setState(() { _searchQuery = value; }); },
+        onChanged: (value) { 
+          setState(() { 
+            _searchQuery = value; 
+            _currentPage = 1; 
+          }); 
+        },
         decoration: InputDecoration(
           hintText: 'Search Documents...',
           prefixIcon: const Icon(Icons.search, color: Colors.grey),
@@ -206,7 +229,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   }).toList(),
                   onChanged: (String? newValue) {
                     if (newValue != null) {
-                      setState(() { _selectedStatus = newValue; });
+                      setState(() { 
+                        _selectedStatus = newValue; 
+                        _currentPage = 1; 
+                      });
                     }
                   },
                 ),
@@ -226,6 +252,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 onChanged: (String? newValue) {
                   setState(() {
                     _isAscending = (newValue == 'Oldest');
+                    _currentPage = 1; 
                     fetchDocuments();
                   });
                 },
@@ -234,6 +261,50 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
         ],
       );
+
+  Widget _buildPaginationControls(int totalPages) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16.0, bottom: 24.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: _currentPage > 1 ? Colors.white : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: IconButton(
+              icon: Icon(Icons.chevron_left, color: _currentPage > 1 ? AppTheme.primaryRed : Colors.grey),
+              onPressed: _currentPage > 1
+                  ? () => setState(() => _currentPage--)
+                  : null,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            child: Text(
+              'Page $_currentPage of $totalPages',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: _currentPage < totalPages ? Colors.white : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: IconButton(
+              icon: Icon(Icons.chevron_right, color: _currentPage < totalPages ? AppTheme.primaryRed : Colors.grey),
+              onPressed: _currentPage < totalPages
+                  ? () => setState(() => _currentPage++)
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildDocumentCard(BuildContext context, Map<String, dynamic> document) {
     final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
@@ -293,7 +364,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ),
           const SizedBox(height: 12),
           
-          // --- REAL MINI QR CODE IN LIST ---
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [

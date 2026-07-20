@@ -677,7 +677,7 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS 
+// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS (Updated for GSO Route/History Scope)
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
   const userId = req.params.id;
@@ -689,15 +689,12 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // FIX: 
-    // 1. Sorts by pd_id to ensure "Awaiting Scan In" (NULL timestamps) appear at the very top.
-    // 2. Strictly tracks physical custody to prevent false-positive "Incoming" floods from custom routes.
     const query = `
       WITH RankedDocs AS (
         SELECT 
           i.ini_id, i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
           s.current_status AS status, pd.time_in, pd.time_out,
-          pd.current_office_id, pd.is_adhoc, pd.pd_id,
+          pd.current_office_id, pd.is_adhoc, pd.pd_id, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
@@ -725,6 +722,7 @@ app.get('/api/processors/:id/documents', async (req, res) => {
             WHERE all_pd.ini_id = RankedDocs.ini_id 
               AND all_pd.current_office_id = $1
           )
+          OR $1 IN (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7)
         )
       ORDER BY pd_id DESC;
     `;

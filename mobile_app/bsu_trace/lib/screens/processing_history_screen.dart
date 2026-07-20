@@ -26,6 +26,10 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
   String _searchQuery = '';
   String _selectedAction = 'All'; 
 
+  // Pagination state
+  int _currentPage = 1;
+  final int _itemsPerPage = 5; // 5 items per page
+
   @override
   void initState() {
     super.initState();
@@ -48,7 +52,9 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
     final String url = '${AppConfig.baseUrl}/users/$userId/processing-timeline';
 
     try {
+      debugPrint("Fetching from: $url");
       final response = await http.get(Uri.parse(url));
+      debugPrint("Response Status: ${response.statusCode}");
 
       if (response.statusCode == 200) {
         if (mounted) {
@@ -76,6 +82,13 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
             isLoading = false;
           });
         }
+      } else {
+        debugPrint("Server Error Body: ${response.body}");
+        if (mounted) {
+          setState(() {
+            isLoading = false; 
+          });
+        }
       }
     } catch (e) {
       debugPrint("Error fetching processing timeline: $e");
@@ -85,6 +98,8 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
 
   void _applyFilters() {
     setState(() {
+      _currentPage = 1; // Reset to page 1 when filters change
+      
       filteredEvents = timelineEvents.where((event) {
         final title = (event['title'] ?? '').toString().toLowerCase();
         final trackingId = (event['qr_code'] ?? '').toString().toLowerCase();
@@ -118,6 +133,17 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Calculate pagination metrics
+    int totalPages = (filteredEvents.length / _itemsPerPage).ceil();
+    if (totalPages == 0) totalPages = 1;
+    if (_currentPage > totalPages) _currentPage = totalPages;
+
+    // Slice the list for the current page
+    List<dynamic> paginatedEvents = filteredEvents
+        .skip((_currentPage - 1) * _itemsPerPage)
+        .take(_itemsPerPage)
+        .toList();
+
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
@@ -139,13 +165,16 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
                   _buildFilterDropdown(),
                   const SizedBox(height: 24),
                   
-                  if (filteredEvents.isEmpty)
+                  if (paginatedEvents.isEmpty)
                     const Padding(
                       padding: EdgeInsets.only(top: 40),
                       child: Text("No scanning records found.", style: TextStyle(color: Colors.grey)),
                     )
-                  else
-                    ...filteredEvents.map((event) => _buildRecordCard(event)),
+                  else ...[
+                    ...paginatedEvents.map((event) => _buildRecordCard(event)),
+                    if (filteredEvents.length > _itemsPerPage)
+                      _buildPaginationControls(totalPages),
+                  ],
                     
                   const SizedBox(height: 80),
                 ],
@@ -199,6 +228,50 @@ class _ProcessingHistoryScreenState extends State<ProcessingHistoryScreen> {
           ),
         ),
       );
+
+  Widget _buildPaginationControls(int totalPages) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16.0, bottom: 24.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: _currentPage > 1 ? Colors.white : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: IconButton(
+              icon: Icon(Icons.chevron_left, color: _currentPage > 1 ? AppTheme.primaryRed : Colors.grey),
+              onPressed: _currentPage > 1
+                  ? () => setState(() => _currentPage--)
+                  : null,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0),
+            child: Text(
+              'Page $_currentPage of $totalPages',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: _currentPage < totalPages ? Colors.white : Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: IconButton(
+              icon: Icon(Icons.chevron_right, color: _currentPage < totalPages ? AppTheme.primaryRed : Colors.grey),
+              onPressed: _currentPage < totalPages
+                  ? () => setState(() => _currentPage++)
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildRecordCard(Map<String, dynamic> event) {
     final String trackingId = event['qr_code'] ?? 'N/A';

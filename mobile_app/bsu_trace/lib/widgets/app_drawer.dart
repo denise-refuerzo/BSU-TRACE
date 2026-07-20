@@ -134,9 +134,20 @@ class AppDrawer extends StatelessWidget {
                 children: [
                   if (currentRole == UserRole.admin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_admin'),
+                    
+                    // GSO-Specific Document Processing
+                    buildNavItem(title: 'Scan In/Out', icon: Icons.qr_code_scanner, route: '/documents'),
+                    
+                    // GSO-Specific Signatures
+                    buildNavItem(title: 'Pending Signatures', icon: Icons.fact_check_outlined, route: '/signee_approvals'),
+                    
+                    // Original GSO Admin Routes
                     buildNavItem(title: 'School Resources', icon: Icons.school_outlined, route: '/scheduler'),
                     buildNavItem(title: 'Procurement', icon: Icons.shopping_cart_outlined, route: '/procurement'),
                     buildNavItem(title: 'Operational Analytics', icon: Icons.insert_chart_outlined, route: '/analytics'),
+                    buildNavItem(title: 'Scan History', icon: Icons.history, route: '/history'),
+                    buildNavItem(title: 'Signature History', icon: Icons.history_edu, route: '/signee_history'),
+                  ] else if (currentRole == UserRole.ictAdmin) ...[
                   ] else if (currentRole == UserRole.ictAdmin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_ict_admin'),
                     buildNavItem(title: 'Accounts', icon: Icons.people_outline, route: '/ict_admin_accounts'),
