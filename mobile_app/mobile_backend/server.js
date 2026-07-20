@@ -2119,6 +2119,62 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   }
 });
 
+// 1. Fetch active documents for the Originator (Inquiry Hub)
+app.get('/api/chat/active-documents/:userId', async (req, res) => {
+    const { userId } = req.params;
+
+    try {
+        // Fetches documents belonging to the user that have started processing
+        const query = `
+            SELECT DISTINCT i.ini_id, i.title, s.current_status as status
+            FROM initial_document i
+            JOIN processed_document pd ON i.ini_id = pd.ini_id
+            JOIN status s ON pd.s_id = s.s_id
+            WHERE i.u_id = $1
+            ORDER BY i.ini_id DESC;
+        `;
+        const result = await pool.query(query, [userId]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching active documents:', error);
+        res.status(500).send('Server Error');
+    }
+});
+
+// 2. Fetch office channels and evaluate locks (Chat Channels)
+app.get('/api/chat/channels/:iniId', async (req, res) => {
+    const { iniId } = req.params;
+
+    try {
+        const query = `
+            SELECT 
+                pd.current_office_id as o_id, 
+                o.office_name,
+                CASE 
+                    -- RULE 1: If it has been scanned out to the NEXT office (time_out is set) AND it is a normal forward route
+                    WHEN pd.time_out IS NOT NULL AND pd.s_id NOT IN (4, 5) THEN true
+                    
+                    -- RULE 2: Halted (4) or Completed (5) 24-Hour Grace Period
+                    WHEN pd.s_id IN (4, 5) AND pd.time_out IS NOT NULL THEN 
+                        (EXTRACT(EPOCH FROM (NOW() AT TIME ZONE 'Asia/Manila' - pd.time_out)) / 3600) > 24
+                    
+                    -- RULE 3: Otherwise, it's active
+                    ELSE false 
+                END as "isLocked"
+            FROM processed_document pd
+            JOIN offices o ON pd.current_office_id = o.o_id
+            WHERE pd.ini_id = $1
+            ORDER BY pd.pd_id ASC;
+        `;
+        
+        const result = await pool.query(query, [iniId]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching channels:', error);
+        res.status(500).send('Server Error');
+    }
+});
+
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================

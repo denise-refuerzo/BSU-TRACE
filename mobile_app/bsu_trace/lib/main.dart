@@ -25,7 +25,8 @@ import 'screens/signee_signature_history_screen.dart';
 import 'screens/dashboard/ict_admin_dashboard.dart';
 import 'screens/ict_admin_accounts_screen.dart';
 import 'screens/ict_admin_roles_screen.dart';
-
+import 'screens/inquiry_hub_screen.dart';
+ //
 // ADDED: Global key for the Navigator to allow SessionManager to force redirects
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -91,6 +92,11 @@ class BsuPortalApp extends StatelessWidget {
             '/ict_admin_roles': (context) => const RouteGuard(
               allowedRoles: [UserRole.ictAdmin],
               child: IctAdminRolesScreen(),
+            ),
+            // Inside your MaterialApp's routes or onGenerateRoute
+            '/inquiry_hub': (context) => RouteGuard(
+                  allowedRoles: [UserRole.user], // Restricts to Originators
+                  child: InquiryHubScreen(),
             ),
           },
         );

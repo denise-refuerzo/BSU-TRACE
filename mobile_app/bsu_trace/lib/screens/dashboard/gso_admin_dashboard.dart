@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
 import '../../config.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
-import '../../widgets/modals/admin_document_details_modal.dart';
 import '../../widgets/modals/document_scanner_modal.dart';
 import '../../services/session_manager.dart';
 import '../../models/user_role.dart';
@@ -20,23 +18,16 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _isLoading = true;
-
-  // GSO Office Specific Document Metrics
   int _totalDocuments = 0;
   int _incomingCount = 0;
   int _pendingCount = 0;
   int _archivedCount = 0;
   int _completedCount = 0;
-
-  // GSO Module Pending Reservation Stats
-  int _pendingVehicles = 0;
-  int _pendingGymnasium = 0;
-  int _pendingMultimedia = 0;
-
-  // Filtered GSO Documents List & Pagination State
-  List<dynamic> _gsoDocuments = [];
-  int _currentPage = 1;
-  final int _rowsPerPage = 5;
+  int _vehicleReservationsCount = 0;
+  int _gymReservationsCount = 0;
+  int _multimediaReservationsCount = 0;
+  int _chairsCount = 0;
+  int _tablesCount = 0;
 
   @override
   void initState() {
@@ -50,71 +41,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final session = SessionManager();
       final token = session.sessionToken;
       final userId = session.userId;
-
       if (userId == null) return;
-
-      // 1. Fetch comprehensive GSO dashboard data from backend endpoint
       final gsoResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/gso/$userId/dashboard-data'),
         headers: {'Authorization': 'Bearer $token'},
       );
-
-      // 2. Fetch all bookings for GSO reservation cards
       final bookingsResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/scheduler/bookings'),
         headers: {'Authorization': 'Bearer $token'},
       );
-
+      final inventoryResponse = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/scheduler/inventory'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
       if (gsoResponse.statusCode == 200) {
         final data = jsonDecode(gsoResponse.body);
         final metrics = data['metrics'] ?? {};
-        final List<dynamic> documents = data['documents'] ?? [];
-
         if (mounted) {
           setState(() {
             _totalDocuments = metrics['total_documents'] ?? 0;
             _incomingCount = metrics['incoming'] ?? 0;
             _pendingCount = metrics['pending'] ?? 0;
-            _archivedCount = metrics['archived_action_required'] ?? 0;
+            _archivedCount = metrics['archived'] ?? 0;
             _completedCount = metrics['completed'] ?? 0;
-            _gsoDocuments = documents;
-            _currentPage = 1; // Reset to page 1 on refresh
           });
         }
       }
-
       if (bookingsResponse.statusCode == 200) {
         final List<dynamic> bookings = jsonDecode(bookingsResponse.body);
-
-        int vehicles = bookings.where((b) => 
-          b['booking_type']?.toString().toLowerCase() == 'vehicle' && 
-          b['status']?.toString().toLowerCase() == 'reserved'
-        ).length;
-
-        int gymnasium = bookings.where((b) => 
-          b['booking_type']?.toString().toLowerCase() == 'gymnasium' && 
-          b['status']?.toString().toLowerCase() == 'reserved'
-        ).length;
-
-        int multimedia = bookings.where((b) => 
-          (b['booking_type']?.toString().toLowerCase() == 'room' || 
-           b['booking_type']?.toString().toLowerCase() == 'multimedia room') && 
-          b['status']?.toString().toLowerCase() == 'reserved'
-        ).length;
-
+        int vehicles = bookings.where((b) => b['booking_type']?.toString().toLowerCase() == 'vehicle').length;
+        int gym = bookings.where((b) => b['booking_type']?.toString().toLowerCase() == 'gymnasium').length;
+        int multimedia = bookings.where((b) => b['booking_type']?.toString().toLowerCase() == 'room' || b['booking_type']?.toString().toLowerCase() == 'multimedia room').length;
         if (mounted) {
           setState(() {
-            _pendingVehicles = vehicles;
-            _pendingGymnasium = gymnasium;
-            _pendingMultimedia = multimedia;
+            _vehicleReservationsCount = vehicles;
+            _gymReservationsCount = gym;
+            _multimediaReservationsCount = multimedia;
+          });
+        }
+      }
+      if (inventoryResponse.statusCode == 200) {
+        final List<dynamic> inventory = jsonDecode(inventoryResponse.body);
+        int chairs = 0;
+        int tables = 0;
+        for (var item in inventory) {
+          String name = item['asset_name']?.toString().toLowerCase() ?? '';
+          int totalQty = item['total'] ?? item['capacity'] ?? 0;
+          if (name.contains('chair')) {
+            chairs = totalQty;
+          } else if (name.contains('table')) {
+            tables = totalQty;
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _chairsCount = chairs;
+            _tablesCount = tables;
           });
         }
       }
     } catch (e) {
-      debugPrint('Error fetching GSO dashboard data: $e');
+      debugPrint('Error fetching GSO dashboard metrics: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to load GSO dashboard data.')),
+          const SnackBar(content: Text('Failed to load GSO dashboard metrics.')),
         );
       }
     } finally {
@@ -126,16 +116,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // GATEKEEPER
     final role = SessionManager().currentRole;
-    if (role != UserRole.admin && role != UserRole.admin) {
+    if (role != UserRole.admin) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
       });
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-
     return Scaffold(
+      backgroundColor: AppTheme.scaffoldBg,
       appBar: AppBar(
         title: const Text('GSO Dashboard'),
         actions: buildAppBarActions(context),
@@ -152,7 +141,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // --- DOCUMENT METRICS ROW ---
+                    const Text(
+                      'DOCUMENT METRICS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryRed,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -162,10 +160,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 24),
-
-                    // --- GSO FUNCTIONAL MODULES SECTION ---
                     const Text(
-                      'GSO MODULES & RESERVATIONS',
+                      'FACILITY & ASSET COUNTS',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -174,11 +170,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildGsoModulesGrid(context),
-                    const SizedBox(height: 24),
-
-                    // --- GSO ROUTED DOCUMENTS TABLE ---
-                    _buildRecentDocumentsTable(context),
+                    _buildReservationsAndInventoryGrid(),
                   ],
                 ),
               ),
@@ -295,341 +287,88 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
-  Widget _buildGsoModulesGrid(BuildContext context) {
+  Widget _buildReservationsAndInventoryGrid() {
     return Column(
       children: [
         Row(
           children: [
-            _buildGsoCard(
-              context,
-              '$_pendingVehicles',
-              'VEHICLES',
-              Icons.directions_bus,
-              Colors.blue.shade50,
-              Colors.blue,
-              '/vehicle_reservations',
-            ),
+            _buildCountCard('$_vehicleReservationsCount', 'VEHICLE RESERVATIONS', Icons.directions_bus, Colors.blue.shade700),
             const SizedBox(width: 12),
-            _buildGsoCard(
-              context,
-              '$_pendingGymnasium',
-              'GYMNASIUM',
-              Icons.sports_basketball,
-              Colors.orange.shade50,
-              Colors.orange,
-              '/gymnasium_reservations',
-            ),
+            _buildCountCard('$_gymReservationsCount', 'GYM RESERVATIONS', Icons.sports_basketball, Colors.orange.shade700),
           ],
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            _buildGsoCard(
-              context,
-              '$_pendingMultimedia',
-              'MULTIMEDIA',
-              Icons.co_present,
-              Colors.purple.shade50,
-              Colors.purple,
-              '/multimedia_room',
-            ),
+            _buildCountCard('$_multimediaReservationsCount', 'MULTIMEDIA RESERVATIONS', Icons.co_present, Colors.purple.shade700),
             const SizedBox(width: 12),
-            _buildGsoCard(
-              context,
-              'Manage',
-              'ASSET REGISTRY',
-              Icons.inventory,
-              Colors.green.shade50,
-              Colors.green,
-              '/asset_registry',
-            ),
+            _buildCountCard('$_chairsCount', 'STACKABLE CHAIRS', Icons.chair, Colors.teal.shade700),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _buildCountCard('$_tablesCount', 'FOLDING TABLES', Icons.table_restaurant, Colors.brown.shade700),
+            const Expanded(child: SizedBox()),
           ],
         ),
       ],
     );
   }
 
-  Widget _buildGsoCard(
-    BuildContext context,
-    String value,
-    String label,
-    IconData icon,
-    Color bgColor,
-    Color iconColor,
-    String route,
-  ) {
+  Widget _buildCountCard(String value, String label, IconData icon, Color color) {
     return Expanded(
-      child: InkWell(
-        onTap: () {
-          Navigator.pushNamed(context, route).then((_) => _fetchDashboardData());
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.red.shade100),
-          ),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
-                child: Icon(icon, size: 22, color: iconColor),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                value,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentDocumentsTable(BuildContext context) {
-    final int totalPages = _gsoDocuments.isEmpty 
-        ? 1 
-        : (_gsoDocuments.length / _rowsPerPage).ceil();
-
-    if (_currentPage > totalPages) {
-      _currentPage = totalPages;
-    }
-
-    final startIndex = (_currentPage - 1) * _rowsPerPage;
-    final paginatedDocs = _gsoDocuments.skip(startIndex).take(_rowsPerPage).toList();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.red.shade100),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'GSO Routed Documents & Actions',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                ),
-                Text(
-                  'Page $_currentPage of $totalPages',
-                  style: const TextStyle(color: Colors.grey, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.red.shade50,
-            child: Row(
-              children: const [
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'TITLE & QR',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'GSO STATUS',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    'ACTION',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                )
-              ],
-            ),
-          ),
-          if (_gsoDocuments.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(32.0),
-              child: Text(
-                'No documents routed through GSO found.',
-                style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
-              ),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.red.shade100),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.red.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
             )
-          else
-            ...paginatedDocs.map((doc) => _buildDocRow(
-                  context,
-                  doc,
-                )),
-          
-          if (_gsoDocuments.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 24, color: color),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.chevron_left, size: 20),
-                    onPressed: _currentPage > 1
-                        ? () => setState(() => _currentPage--)
-                        : null,
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  
-                  ...List.generate(totalPages, (index) {
-                    final pageNum = index + 1;
-                    final isSelected = pageNum == _currentPage;
-                    return GestureDetector(
-                      onTap: () => setState(() => _currentPage = pageNum),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppTheme.primaryRed : Colors.transparent,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '$pageNum',
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.black87,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right, size: 20),
-                    onPressed: _currentPage < totalPages
-                        ? () => setState(() => _currentPage++)
-                        : null,
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ],
               ),
-            )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDocRow(BuildContext context, dynamic doc) {
-    final title = doc['title'] ?? 'Unknown';
-    final qrCode = doc['qr_code'] ?? 'N/A';
-    final status = doc['status'] ?? 'PENDING';
-    
-    Color badgeColor = Colors.orange;
-    Color badgeBg = Colors.orange.shade50;
-    if (status.toString().toLowerCase() == 'completed') {
-      badgeColor = Colors.green;
-      badgeBg = Colors.green.shade50;
-    } else if (status.toString().toLowerCase() == 'signed' || status.toString().toLowerCase() == 'approved' || status.toString().toLowerCase() == 'verified') {
-      badgeColor = Colors.blue;
-      badgeBg = Colors.blue.shade50;
-    } else if (status.toString().toLowerCase() == 'action required' || status.toString().toLowerCase() == 'archived') {
-      badgeColor = Colors.red;
-      badgeBg = Colors.red.shade50;
-    } else if (status.toString().toLowerCase() == 'awaiting scan in' || status.toString().toLowerCase() == 'upcoming route') {
-      badgeColor = Colors.grey;
-      badgeBg = Colors.grey.shade200;
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.red.shade50)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  qrCode,
-                  style: const TextStyle(fontSize: 10, color: Colors.grey),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                )
-              ],
             ),
-          ),
-          Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              decoration: BoxDecoration(
-                color: badgeBg,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                status.toUpperCase(),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: badgeColor,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: GestureDetector(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => const DocumentDetailsModal(),
-                  );
-                },
-                child: const Icon(
-                  Icons.remove_red_eye_outlined,
-                  color: AppTheme.primaryRed,
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

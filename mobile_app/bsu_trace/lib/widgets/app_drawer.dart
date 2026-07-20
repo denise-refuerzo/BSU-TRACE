@@ -18,7 +18,7 @@ class AppDrawer extends StatelessWidget {
 
       return InkWell(
         onTap: () async {
-          Navigator.pop(context); // Close the drawer immediately
+          Navigator.pop(context); 
 
           if (!isPlaceholder) {
             if (route.isNotEmpty && currentRoute != route) {
@@ -82,7 +82,6 @@ class AppDrawer extends StatelessWidget {
       );
     }
 
-    // Dynamic Header Info Based on Role
     String roleTitle = 'USER PORTAL';
     String userInitials = 'U';
     String userName = 'John Doe';
@@ -134,20 +133,13 @@ class AppDrawer extends StatelessWidget {
                 children: [
                   if (currentRole == UserRole.admin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_admin'),
-                    
-                    // GSO-Specific Document Processing
                     buildNavItem(title: 'Scan In/Out', icon: Icons.qr_code_scanner, route: '/documents'),
-                    
-                    // GSO-Specific Signatures
                     buildNavItem(title: 'Pending Signatures', icon: Icons.fact_check_outlined, route: '/signee_approvals'),
-                    
-                    // Original GSO Admin Routes
                     buildNavItem(title: 'School Resources', icon: Icons.school_outlined, route: '/scheduler'),
                     buildNavItem(title: 'Procurement', icon: Icons.shopping_cart_outlined, route: '/procurement'),
                     buildNavItem(title: 'Operational Analytics', icon: Icons.insert_chart_outlined, route: '/analytics'),
                     buildNavItem(title: 'Scan History', icon: Icons.history, route: '/history'),
                     buildNavItem(title: 'Signature History', icon: Icons.history_edu, route: '/signee_history'),
-                  ] else if (currentRole == UserRole.ictAdmin) ...[
                   ] else if (currentRole == UserRole.ictAdmin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_ict_admin'),
                     buildNavItem(title: 'Accounts', icon: Icons.people_outline, route: '/ict_admin_accounts'),
@@ -156,6 +148,7 @@ class AppDrawer extends StatelessWidget {
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_user'),
                     buildNavItem(title: 'Live Tracking', icon: Icons.track_changes, route: '/tracking'),
                     buildNavItem(title: 'Resource Scheduler', icon: Icons.calendar_month, route: '/scheduler'),
+                    buildNavItem(title: 'Inquiry Hub', icon: Icons.chat_bubble_outline, route: '/inquiry_hub'),
                   ] else if (currentRole == UserRole.processor) ...[
                      buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_processor'),
                      buildNavItem(title: 'Documents', icon: Icons.description_outlined, route: '/documents'),
@@ -191,7 +184,7 @@ class AppDrawer extends StatelessWidget {
               ),
             ),
             buildBottomItem(title: 'Logout', icon: Icons.logout, onTap: () async {
-              Navigator.pop(context); // Close Drawer
+              Navigator.pop(context); 
               
               bool shouldProceed = true;
               if (onBeforeNavigate != null) {
