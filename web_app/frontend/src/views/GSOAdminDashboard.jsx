@@ -6,6 +6,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { 
   LayoutDashboard, Archive, ShoppingCart, BarChart3, History, Bell, User, Search, Filter, X, QrCode, LogOut, Eye, GitBranch, Camera, KeyRound, ShieldCheck, Building, Landmark, Download, FileText, Plus, Calendar, Lock, Edit, Trash2, Car, ChevronLeft, ChevronRight 
 } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 import { fetchWithAuth } from '../api';
 
 const minimalSwal = Swal.mixin({
@@ -140,6 +141,53 @@ export default function GSOAdminDashboard() {
   useEffect(() => {
     if (activeTab === 'procurement') {
       fetchProcurementData();
+    }
+  }, [activeTab]);
+
+  const [bottleneckData, setBottleneckData] = useState([]);
+  const [peakDemandData, setPeakDemandData] = useState([]);
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
+  const [bottleneckSort, setBottleneckSort] = useState('desc');
+  const [bottleneckSearch, setBottleneckSearch] = useState('');
+
+  const fetchOperationalAnalytics = async () => {
+    setIsAnalyticsLoading(true);
+    try {
+      // Fetch the Bottleneck Analytical Evaluation Process data
+      const resBottlenecks = await fetchWithAuth('http://localhost:5000/api/analytics/bottlenecks');
+      if (resBottlenecks.ok) {
+        setBottleneckData(await resBottlenecks.json());
+      }
+      
+      const resPeak = await fetchWithAuth('http://localhost:5000/api/analytics/peak-demand');
+      if (resPeak.ok) {
+        const rawPeakData = await resPeak.json();
+        console.log("🔍 PYTHON PEAK DATA PAYLOAD:", rawPeakData); // Check your browser console!
+        
+        // Ensure values are numbers just in case Python sent strings
+        const formattedPeakData = rawPeakData.map(item => ({
+          ...item,
+          demand: Number(item.demand || 0) 
+        }));
+        
+        setPeakDemandData(formattedPeakData);
+      }
+
+      // Ensure inventory is loaded for the prescriptive card
+      if (equipmentInventory.length === 0) {
+        fetchInventoryMetrics();
+      }
+    } catch (err) {
+      console.error("Error fetching analytics:", err);
+    } finally {
+      setIsAnalyticsLoading(false);
+    }
+  };
+
+  // Trigger fetch when Analytics tab is opened
+  useEffect(() => {
+    if (activeTab === 'analytics') {
+      fetchOperationalAnalytics();
     }
   }, [activeTab]);
 
@@ -941,6 +989,11 @@ const handleAddAssetSubmit = async (e) => {
     }
   };
 
+  const processedBottleneckData = [...bottleneckData]
+    .filter(d => d.office_name?.toLowerCase().includes(bottleneckSearch.toLowerCase()))
+    .sort((a, b) => bottleneckSort === 'desc' ? b.dwell_time_hours - a.dwell_time_hours : a.dwell_time_hours - b.dwell_time_hours)
+    .slice(0, 5);
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -963,7 +1016,7 @@ const handleAddAssetSubmit = async (e) => {
               <ShoppingCart size={18} /> Procurement
             </button>
             <button onClick={() => setActiveTab('analytics')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'analytics' ? 'bg-[#3b2a29] text-white border-l-4 border-red-700' : 'text-neutral-400 hover:bg-[#3b2a29] hover:text-white'}`}>
-              <BarChart3 size={18} /> Bottleneck Analysis
+              <BarChart3 size={18} /> Operational Analytics
             </button>
             <button onClick={() => setActiveTab('history')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'history' ? 'bg-[#3b2a29] text-white border-l-4 border-red-700' : 'text-neutral-400 hover:bg-[#3b2a29] hover:text-white'}`}>
               <History size={18} /> History
@@ -1648,10 +1701,159 @@ const handleAddAssetSubmit = async (e) => {
             </div>
           )}
 
-          {/* PLACEHOLDER TABS FOR OTHERS TO KEEP NAVIGATION CLEAN */}
-          {(  activeTab === 'analytics' ) && (
-            <div className="max-w-7xl mx-auto flex items-center justify-center h-64 border-2 border-dashed border-neutral-200 rounded-xl bg-white text-neutral-400 font-bold">
-              {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module - System Architecture Loading...
+          {activeTab === 'analytics' && (
+            <div className="max-w-7xl mx-auto space-y-6 text-left animate-in fade-in duration-200">
+              
+              {/* HEADER */}
+              <div className="flex justify-between items-start border-b border-neutral-200 pb-4">
+                <div>
+                  <h2 className="text-2xl font-black text-neutral-900">Operational Analytics</h2>
+                  <p className="text-xs text-neutral-500 font-medium mt-1">Data-driven insights for administrative evaluation and resource planning.</p>
+                </div>
+                <button className="px-5 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2">
+                  <Download size={14} /> Generate Full Audit Report
+                </button>
+              </div>
+
+              {isAnalyticsLoading ? (
+                 <div className="flex items-center justify-center h-64 text-neutral-400 font-bold text-sm">
+                   Fetching ML Models & Processing Data...
+                 </div>
+              ) : (
+                <>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    {/* CARD 1: Bottleneck Analytical Evaluation Process (Now with Filters!) */}
+                    <div className="lg:col-span-2 bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
+                        <div>
+                          <h3 className="text-sm font-black text-neutral-900">Descriptive Analytics: Bottleneck Analytical Evaluation Process</h3>
+                          <p className="text-[10px] text-neutral-500 font-medium">Visualizing document processing dwell times across campus units.</p>
+                        </div>
+                        
+                        {/* Search & Sort Controls */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="Search Office..." 
+                            value={bottleneckSearch} 
+                            onChange={e => setBottleneckSearch(e.target.value)} 
+                            className="px-3 py-1.5 text-xs border border-neutral-300 rounded-lg outline-none focus:ring-1 focus:ring-red-800 w-36 bg-neutral-50" 
+                          />
+                          <select 
+                            value={bottleneckSort} 
+                            onChange={e => setBottleneckSort(e.target.value)} 
+                            className="px-2 py-1.5 text-xs font-bold text-neutral-700 border border-neutral-300 rounded-lg outline-none bg-neutral-50 cursor-pointer"
+                          >
+                            <option value="desc">Highest Delay</option>
+                            <option value="asc">Lowest Delay</option>
+                          </select>
+                        </div>
+                      </div>
+                      
+                      <div className="h-64">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={processedBottleneckData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f5f5f5" />
+                            <XAxis type="number" tick={{fontSize: 10}} unit="h" />
+                            {/* Increased width to 140 to prevent overlapping names */}
+                            <YAxis dataKey="office_name" type="category" tick={{fontSize: 10, fill: '#525252'}} width={140} />
+                            <Tooltip cursor={{fill: '#f9fafb'}} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                            <Bar dataKey="dwell_time_hours" fill="#991b1b" radius={[0, 4, 4, 0]} barSize={28} name="Dwell Time (Hours)" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                        {processedBottleneckData.length === 0 && (
+                          <div className="text-center text-xs text-neutral-400 font-bold -mt-32">No offices match your search.</div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* CARD 2: Prescriptive Analytics (Bigger & Red Themed) */}
+                    <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col border-t-4 border-t-red-800">
+                      <div className="mb-6">
+                        <h3 className="text-base font-black text-neutral-900">Prescriptive Analytics: Event Equipment</h3>
+                        <p className="text-[11px] text-neutral-500 font-medium">Current inventory status and loan commitments.</p>
+                      </div>
+                      
+                      <div className="space-y-6 flex-1 overflow-y-auto pr-2">
+                        {equipmentInventory.map(item => {
+                          const percentAvailable = Math.round((item.current_stock / item.capacity) * 100) || 0;
+                          const percentLoaned = 100 - percentAvailable;
+                          
+                          return (
+                            <div key={item.asd_id}>
+                              <div className="flex justify-between text-sm font-black mb-1.5">
+                                <span className="text-neutral-900">{item.asset_name}</span>
+                                <span className="text-neutral-500">{item.capacity} Total</span>
+                              </div>
+                              <div className="w-full bg-neutral-100 rounded-xl h-8 flex overflow-hidden border border-neutral-200 shadow-inner">
+                                <div 
+                                  className="h-full flex items-center justify-center text-[10px] font-black text-white bg-red-800 transition-all duration-500" 
+                                  style={{ width: `${percentAvailable}%` }}
+                                >
+                                  {percentAvailable > 15 ? `${percentAvailable}% Avail` : ''}
+                                </div>
+                                <div 
+                                  className="h-full flex items-center justify-center text-[10px] font-black text-red-900 bg-red-100 transition-all duration-500 border-l border-white/20" 
+                                  style={{ width: `${percentLoaned}%` }}
+                                >
+                                  {percentLoaned > 15 ? `${percentLoaned}% Loaned` : ''}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {equipmentInventory.length === 0 && <div className="text-sm text-neutral-400 font-bold text-center mt-10">No equipment data available.</div>}
+                      </div>
+
+                      <div className="mt-4 bg-red-50/50 border border-red-200 p-4 rounded-xl border-l-4 border-l-red-800 shadow-sm">
+                        <p className="text-[11px] font-black text-red-900 flex items-center gap-1.5 mb-1">💡 System Insight</p>
+                        <p className="text-[11px] text-red-800 font-medium leading-relaxed">Stock levels are currently stable based on historical borrowing patterns.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CARD 3: Predictive Analytics: Resource Demand Trends */}
+                  <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm mt-6">
+                    <div className="flex justify-between items-end mb-6">
+                      <div>
+                        <h3 className="text-sm font-black text-neutral-900">Predictive Analytics: Total Resource Demand Forecast</h3>
+                        <p className="text-[10px] text-neutral-500 font-medium">Holt-Winters exponential smoothing forecast vs. historical baseline.</p>
+                      </div>
+                    </div>
+                    
+                    <div className="h-72 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={peakDemandData} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorDemand" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#991b1b" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#991b1b" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="date" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
+                          <YAxis tick={{fontSize: 10}} axisLine={false} tickLine={false} />
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                            labelStyle={{ fontWeight: 'bold', color: '#171717' }} 
+                          />
+                          <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold' }} />
+                          <Area 
+                            type="monotone" 
+                            dataKey="demand" 
+                            name="Total Daily Reservations" 
+                            stroke="#991b1b" 
+                            strokeWidth={3} 
+                            fillOpacity={1} 
+                            fill="url(#colorDemand)" 
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

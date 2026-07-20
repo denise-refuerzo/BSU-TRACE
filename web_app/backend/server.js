@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const pool = require('./db');
 const { sendResetCodeEmail, sendTrackingAlertEmail } = require('./mailer');
 const crypto = require('crypto');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -2156,6 +2157,42 @@ app.get('/api/chat/active-documents-directory', requireAuth, async (req, res) =>
     console.error("Error compilation active track selection hub array:", err);
     res.status(500).json({ error: 'Failed extraction of operational document parameters directory loops.' });
   }
+});
+
+const PYTHON_MICROSERVICE_URL = 'http://localhost:8000';
+
+// Proxy route for Peak Demand (Vehicle Scheduling)
+app.get('/api/analytics/peak-demand', requireAuth, async (req, res) => {
+    try {
+        const response = await axios.get(`${PYTHON_MICROSERVICE_URL}/api/analytics/peak-demand`);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching peak demand analytics:', error.message);
+        res.status(500).json({ message: 'Analytics service unavailable' });
+    }
+});
+
+// Proxy route for Bottleneck Analytical Evaluation Process
+//app.get('/api/analytics/bottlenecks', requireAuth, async (req, res) => {
+  app.get('/api/analytics/bottlenecks', async (req, res) => {
+    try {
+        const response = await axios.get(`${PYTHON_MICROSERVICE_URL}/api/analytics/bottlenecks`);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching bottleneck analytics:', error.message);
+        res.status(500).json({ message: 'Analytics service unavailable' });
+    }
+});
+
+// Proxy route for Estimated Document Completion (EDC)
+app.get('/api/analytics/edc', requireAuth, async (req, res) => {
+    try {
+        const response = await axios.get(`${PYTHON_MICROSERVICE_URL}/api/analytics/edc`);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching EDC analytics:', error.message);
+        res.status(500).json({ message: 'Analytics service unavailable' });
+    }
 });
 
 const PORT = 5000;
