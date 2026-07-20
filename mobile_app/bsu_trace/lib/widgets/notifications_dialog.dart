@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // Added for local read state
 
 import '../services/session_manager.dart';
 import '../config.dart';
+import '../screens/document_details_screen.dart';
 
 class NotificationsDialog extends StatefulWidget {
   const NotificationsDialog({super.key});
@@ -15,11 +17,32 @@ class NotificationsDialog extends StatefulWidget {
 class _NotificationsDialogState extends State<NotificationsDialog> {
   List<dynamic> _notifications = [];
   bool _isLoading = true;
+  Set<String> _readDocIds = {}; // Tracks which documents have been read
 
   @override
   void initState() {
     super.initState();
+    _loadReadStatus(); // Load the read history when dialog opens
     _fetchNotifications();
+  }
+
+  // Fetch the saved read IDs from local storage
+  Future<void> _loadReadStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _readDocIds = (prefs.getStringList('read_notifications') ?? []).toSet();
+    });
+  }
+
+  // Add the ID to the read list and save it locally
+  Future<void> _markAsRead(String id) async {
+    if (!_readDocIds.contains(id)) {
+      setState(() {
+        _readDocIds.add(id);
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList('read_notifications', _readDocIds.toList());
+    }
   }
 
   Future<void> _fetchNotifications() async {
@@ -31,15 +54,12 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     }
 
     try {
-      // Reusing the documents endpoint; assuming it returns status, location, and a timestamp 
-      // like 'time_in', 'time_out', 'updated_at', or 'created_at'.
       final response = await http.get(Uri.parse('${AppConfig.baseUrl}/users/$userId/documents'));
 
       if (response.statusCode == 200 && mounted) {
         final List<dynamic> docs = json.decode(response.body);
         
         setState(() {
-          // Take the top 5 most recently updated records
           _notifications = docs.take(5).toList(); 
         });
       }
@@ -52,7 +72,6 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     }
   }
 
-  // Helper to construct a conversational sentence based on the action
   String _formatActionMessage(Map<String, dynamic> doc) {
     final status = (doc['status'] ?? 'updated').toString().toLowerCase();
     final location = doc['current_location'] ?? 'an unknown office';
@@ -67,12 +86,10 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     } else if (status == 'in verification') {
       return 'Your document "$title" is currently undergoing verification at the $location.';
     } else {
-      // For "Verified", "Signed", etc.
       return 'Your document "$title" was marked as $status at the $location.';
     }
   }
 
-  // Helper to format timestamps into "2 hours ago", "Just now", etc.
   String _timeAgo(String? dateTimeStr) {
     if (dateTimeStr == null || dateTimeStr.isEmpty) return 'Recently';
     
@@ -97,19 +114,18 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
     }
   }
 
-  // Visual cues based on the status
   IconData _getIconForStatus(String status) {
     final s = status.toLowerCase();
     if (s == 'completed' || s == 'approved' || s == 'verified' || s == 'signed') return Icons.check_circle;
     if (s == 'action required') return Icons.error;
-    return Icons.schedule; // pending, in verification, etc.
+    return Icons.schedule; 
   }
 
   Color _getColorForStatus(String status) {
     final s = status.toLowerCase();
     if (s == 'completed' || s == 'approved' || s == 'verified' || s == 'signed') return Colors.green;
     if (s == 'action required') return Colors.red;
-    return Colors.orange; // pending, in verification, etc.
+    return Colors.orange; 
   }
 
   @override
@@ -119,7 +135,7 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
       child: Container(
         width: 340,
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF9F9), // Light background tint
+          color: const Color(0xFFFFF9F9), 
           borderRadius: BorderRadius.circular(12),
         ),
         padding: const EdgeInsets.symmetric(vertical: 20),
@@ -151,40 +167,80 @@ class _NotificationsDialogState extends State<NotificationsDialog> {
             else
               ..._notifications.map((n) {
                 final status = n['status'] ?? 'Unknown';
-                // Fallbacks to grab whichever timestamp key your API is providing
                 final timeString = n['time_in'] ?? n['updated_at'] ?? n['created_at']; 
+                final documentId = n['ini_id']; 
+                
+                final String docIdStr = documentId.toString();
+                // Check if the current document ID exists in our read list
+                final bool isUnread = !_readDocIds.contains(docIdStr);
 
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Icon(
-                          _getIconForStatus(status), 
-                          color: _getColorForStatus(status), 
-                          size: 22
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _formatActionMessage(n),
-                              style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.3),
+                return Material(
+                  // Apply a subtle red highlight if unread, otherwise transparent
+                  color: isUnread ? const Color(0xFFFDE8E8) : Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      // 1. Mark as read immediately to remove the highlight
+                      _markAsRead(docIdStr);
+
+                      // 2. Close the dialog
+                      Navigator.pop(context);
+                      
+                      // 3. Navigate to the document details screen
+                      if (documentId != null) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DocumentDetailsScreen(
+                              docId: documentId,
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _timeAgo(timeString),
-                              style: const TextStyle(color: Colors.black54, fontSize: 11, fontWeight: FontWeight.w500),
+                          ),
+                        );
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Icon(
+                              _getIconForStatus(status), 
+                              color: _getColorForStatus(status), 
+                              size: 22
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _formatActionMessage(n),
+                                  style: TextStyle(
+                                    fontSize: 13, 
+                                    color: Colors.black87, 
+                                    height: 1.3,
+                                    // Make text bold if unread for extra emphasis
+                                    fontWeight: isUnread ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _timeAgo(timeString),
+                                  style: TextStyle(
+                                    // Make timestamp slightly darker if unread
+                                    color: isUnread ? Colors.black87 : Colors.black54, 
+                                    fontSize: 11, 
+                                    fontWeight: FontWeight.w500
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 );
               }),
