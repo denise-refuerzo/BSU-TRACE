@@ -10,8 +10,6 @@ const bcrypt = require('bcrypt');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const app = express();
-
 // ADD THESE THREE LINES (Wraps Express in an HTTP Server and initializes Socket.IO):
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -2310,7 +2308,7 @@ io.on('connection', (socket) => {
 // ==========================================
 // Ensure this block is at the VERY bottom, and only appears once.
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`API Server running on port ${PORT}`);
 
   initDatabaseListener();
