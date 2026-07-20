@@ -2001,15 +2001,15 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   }
 
   try {
-    // 1. Resolve GSO Office ID from user mapping (defaults to 3 for General Services Office if unassigned)[cite: 7]
+    // 1. Resolve GSO Office ID from user mapping
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     if (userRes.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
     const o_id = userRes.rows[0]?.o_id || 3;
 
-    // 2. Query all documents that went through, are currently at, or will go through GSO[cite: 1, 7]
-    const query = `
+    // 2. Fetch all documents that went through, are currently at, or will go through GSO
+    const documentsQuery = `
       SELECT DISTINCT ON (idoc.ini_id)
         idoc.ini_id, 
         idoc.title, 
@@ -2017,21 +2017,26 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
         idoc.qr_code, 
         idoc.created_at, 
         pt.process_name AS form_type,
-        orig_o.office_name AS origin_office,
-        COALESCE(st.current_status, 'Upcoming Route') as status,
+        INITCAP(st.current_status) as status,
+        orig_o.office_name as originating_office,
+        curr_o.office_name as current_office, 
+        next_o.office_name as next_office,
         pdoc_office.time_in,
         pdoc_office.time_out,
         pdoc_active.current_office_id,
-        CASE WHEN pdoc_active.current_office_id = $1 THEN true ELSE false END as is_at_current_office,
+        CASE WHEN pdoc_active.current_office_id = $1 AND pdoc_active.time_out IS NULL THEN true ELSE false END as is_at_current_office,
+        pdoc_active.is_adhoc AS current_step_is_adhoc,
+        creator.full_name AS requestor_name,
         s_global.current_status AS global_status
       FROM public.initial_document idoc
       JOIN public.process_type pt ON idoc.p_id = pt.p_id
       JOIN public.route r ON pt.r_id = r.r_id
       JOIN public."User" creator ON idoc.u_id = creator.u_id
-      -- Pull action log specifically for GSO workspace interaction if it exists[cite: 1, 7]
-      LEFT JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id AND pdoc_office.current_office_id = $1
+      JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id
       LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
       LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
+      LEFT JOIN public.offices curr_o ON COALESCE(pdoc_active.current_office_id, pdoc_office.current_office_id) = curr_o.o_id
+      LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON COALESCE(pdoc_active.s_id, pdoc_office.s_id) = st.s_id
       LEFT JOIN LATERAL (
         SELECT s.current_status 
@@ -2045,13 +2050,33 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
            SELECT 1 FROM public.processed_document past_pd 
            WHERE past_pd.ini_id = idoc.ini_id AND past_pd.current_office_id = $1
          )
-      ORDER BY idoc.ini_id DESC, pdoc_office.pd_id DESC NULLS LAST;
+      ORDER BY idoc.ini_id DESC, pdoc_office.pd_id DESC;
     `;
 
-    const result = await pool.query(query, [o_id]);
-    const documents = result.rows;
+    const docResult = await pool.query(documentsQuery, [o_id]);
+    const documents = docResult.rows;
 
-    // 3. Compute Metrics based on your requested parameters[cite: 1, 7]
+    // 3. Compute Incoming Count using the exact expected-count query logic
+    const incomingQuery = `
+      SELECT COUNT(DISTINCT idoc.ini_id) as expected_count
+      FROM public.initial_document idoc
+      JOIN public.process_type pt ON idoc.p_id = pt.p_id
+      JOIN public.route r ON pt.r_id = r.r_id
+      LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
+      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+        AND COALESCE(pdoc_active.s_id, 1) != 4 
+        AND COALESCE(pdoc_active.s_id, 1) != 5
+        AND NOT EXISTS (
+          SELECT 1 FROM public.processed_document pd_past 
+          WHERE pd_past.ini_id = idoc.ini_id 
+            AND pd_past.current_office_id = $1 
+            AND pd_past.time_out IS NOT NULL
+        )
+    `;
+    const incomingRes = await pool.query(incomingQuery, [o_id]);
+    const incoming = parseInt(incomingRes.rows[0].expected_count, 10) || 0;
+
+    // 4. Compute other metrics
     const completedDocs = documents.filter(d => 
       d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed'
     );
@@ -2059,12 +2084,12 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
       d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required'
     );
 
+    // Total documents: Completed AND Action Required combined (unique by ini_id)
     const totalMap = new Map();
     [...completedDocs, ...sentBackDocs].forEach(d => totalMap.set(d.ini_id, d));
     const total_documents = totalMap.size;
 
-    const incoming = documents.filter(d => d.is_at_current_office && d.time_in === null).length;
-    const pending = documents.filter(d => d.is_at_current_office && d.time_in !== null && d.time_out === null).length;
+    const pending = documents.filter(d => d.current_office_id === o_id && d.time_in !== null && d.time_out === null).length;
     const archived_action_required = sentBackDocs.length;
     const completed = completedDocs.length;
 
