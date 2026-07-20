@@ -1990,6 +1990,84 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
 });
 
 // ==========================================
+// GSO ADMIN COMPREHENSIVE DASHBOARD ENDPOINT
+// ==========================================
+app.get('/api/gso/:id/dashboard-data', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    // 1. Get GSO Office ID (Office ID 3 for General Services Office)
+    const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    const o_id = userRes.rows[0]?.o_id || 3;
+
+    // 2. Query all documents that went through, are currently at, or will go through GSO
+    const query = `
+      SELECT DISTINCT ON (i.ini_id)
+        i.ini_id, 
+        i.qr_code, 
+        i.title, 
+        p.process_name AS form_type, 
+        origin_o.office_name AS origin_office, 
+        s_global.current_status AS global_status,
+        COALESCE(s_office.current_status, 
+          CASE 
+            WHEN pd_office.time_in IS NULL THEN 'Awaiting Scan In'
+            ELSE 'Pending'
+          END, 'Upcoming Route'
+        ) AS status,
+        pd_office.time_in, 
+        pd_office.time_out,
+        pd_office.current_office_id,
+        CASE WHEN pd_office.current_office_id = $1 AND pd_office.time_out IS NULL THEN true ELSE false END as is_at_current_office
+      FROM public.initial_document i
+      LEFT JOIN public.process_type p ON i.p_id = p.p_id
+      LEFT JOIN public.route r ON p.r_id = r.r_id
+      LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
+      LEFT JOIN public.processed_document pd_office ON i.ini_id = pd_office.ini_id AND pd_office.current_office_id = $1
+      LEFT JOIN public.status s_office ON pd_office.s_id = s_office.s_id
+      LEFT JOIN LATERAL (
+        SELECT s.current_status 
+        FROM public.processed_document pd_l 
+        JOIN public.status s ON pd_l.s_id = s.s_id 
+        WHERE pd_l.ini_id = i.ini_id 
+        ORDER BY pd_l.pd_id DESC LIMIT 1
+      ) s_global ON true
+      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+         OR EXISTS (
+           SELECT 1 FROM public.processed_document past_pd 
+           WHERE past_pd.ini_id = i.ini_id AND past_pd.current_office_id = $1
+         )
+      ORDER BY i.ini_id DESC, pd_office.pd_id DESC NULLS LAST;
+    `;
+
+    const result = await pool.query(query, [o_id]);
+    const documents = result.rows;
+
+    // Compute metrics relative to GSO
+    const total_routed = documents.length;
+    const incoming = documents.filter(d => d.current_office_id === o_id && d.time_in === null).length;
+    const awaiting_scan_in = incoming; 
+    const pending = documents.filter(d => d.current_office_id === o_id && d.time_in !== null && d.time_out === null).length;
+    const completed = documents.filter(d => d.global_status?.toLowerCase() === 'completed').length;
+
+    res.status(200).json({
+      metrics: {
+        total_routed,
+        incoming,
+        pending,
+        awaiting_scan_in,
+        completed
+      },
+      documents
+    });
+
+  } catch (error) {
+    console.error('GSO Dashboard Data Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 // Ensure this block is at the VERY bottom, and only appears once.

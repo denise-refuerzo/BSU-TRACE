@@ -53,9 +53,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       if (userId == null) return;
 
-      // 1. Fetch office-isolated documents for this GSO Admin
-      final docsResponse = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'),
+      // 1. Fetch comprehensive GSO dashboard data from the new endpoint
+      final gsoResponse = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/gso/$userId/dashboard-data'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -65,22 +65,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         headers: {'Authorization': 'Bearer $token'},
       );
 
-      if (docsResponse.statusCode == 200) {
-        final List<dynamic> documents = jsonDecode(docsResponse.body);
-
-        int total = documents.length;
-        int completed = documents.where((d) => d['status']?.toString().toLowerCase() == 'completed').length;
-        int pending = documents.where((d) => d['status']?.toString().toLowerCase() == 'pending').length;
-        int incoming = documents.where((d) => d['is_at_current_office'] == true && d['time_in'] == null).length;
-        int awaitingScanIn = documents.where((d) => d['time_in'] == null).length;
+      if (gsoResponse.statusCode == 200) {
+        final data = jsonDecode(gsoResponse.body);
+        final metrics = data['metrics'] ?? {};
+        final List<dynamic> documents = data['documents'] ?? [];
 
         if (mounted) {
           setState(() {
-            _totalDocuments = total;
-            _completedCount = completed;
-            _pendingCount = pending;
-            _incomingCount = incoming;
-            _awaitingScanInCount = awaitingScanIn;
+            _totalDocuments = metrics['total_routed'] ?? 0;
+            _incomingCount = metrics['incoming'] ?? 0;
+            _pendingCount = metrics['pending'] ?? 0;
+            _awaitingScanInCount = metrics['awaiting_scan_in'] ?? 0;
+            _completedCount = metrics['completed'] ?? 0;
             _gsoDocuments = documents;
             _currentPage = 1; // Reset to page 1 on refresh
           });
@@ -552,19 +548,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildDocRow(BuildContext context, dynamic doc) {
     final title = doc['title'] ?? 'Unknown';
     final qrCode = doc['qr_code'] ?? 'N/A';
-    final status = doc['status'] ?? 'AWAITING GSO ROUTE';
+    final status = doc['status'] ?? 'PENDING';
     
     Color badgeColor = Colors.orange;
     Color badgeBg = Colors.orange.shade50;
     if (status.toString().toLowerCase() == 'completed') {
       badgeColor = Colors.green;
       badgeBg = Colors.green.shade50;
-    } else if (status.toString().toLowerCase() == 'signed' || status.toString().toLowerCase() == 'approved') {
+    } else if (status.toString().toLowerCase() == 'signed' || status.toString().toLowerCase() == 'approved' || status.toString().toLowerCase() == 'verified') {
       badgeColor = Colors.blue;
       badgeBg = Colors.blue.shade50;
-    } else if (status.toString().toLowerCase() == 'awaiting gso route') {
+    } else if (status.toString().toLowerCase() == 'awaiting scan in' || status.toString().toLowerCase() == 'upcoming route') {
       badgeColor = Colors.grey;
-      badgeBg = Colors.grey.shade100;
+      badgeBg = Colors.grey.shade200;
     }
 
     return Container(
