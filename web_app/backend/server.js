@@ -2107,7 +2107,7 @@ app.get('/api/chat/active-documents-directory', requireAuth, async (req, res) =>
         ORDER BY idoc.ini_id DESC;
       `;
       params = [userId];
-    } else if (roleId === 2) {
+    } else if (roleId === 2 || roleId === 4) {
       const userOfficeRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
       const officeId = userOfficeRes.rows[0]?.o_id;
 

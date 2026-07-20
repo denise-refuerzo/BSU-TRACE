@@ -4,8 +4,9 @@ import Swal from 'sweetalert2';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import { QRCodeSVG } from 'qrcode.react';
 import { 
-  LayoutDashboard, Archive, ShoppingCart, BarChart3, History, Bell, User, Search, Filter, X, QrCode, LogOut, Eye, GitBranch, Camera, KeyRound, ShieldCheck, Building, Landmark, Download, FileText, Plus, Calendar, Lock, Edit, Trash2, Car, ChevronLeft, ChevronRight 
+  LayoutDashboard, Archive, ShoppingCart, BarChart3, History, Bell, User, Search, Filter, X, QrCode, LogOut, Eye, GitBranch, Camera, KeyRound, ShieldCheck, Building, Landmark, Download, FileText, Plus, Calendar, Lock, Edit, Trash2, Car, ChevronLeft, ChevronRight, MessageSquare 
 } from 'lucide-react';
+import OfficeChatHub from './OfficeChatHub';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine } from 'recharts';
 import { fetchWithAuth } from '../api';
 
@@ -54,6 +55,7 @@ export default function GSOAdminDashboard() {
   
   // UI & Search States
   const [search, setSearch] = useState('');
+  const [hasUnreadChats, setHasUnreadChats] = useState(false);
   const [filterStatus, setFilterStatus] = useState('All'); 
   const [historyFilter, setHistoryFilter] = useState('All'); // ✅ Added for History
   const [dashboardPage, setDashboardPage] = useState(1);
@@ -261,6 +263,8 @@ const handleAddAssetSubmit = async (e) => {
     fetchGSOMeta();
     fetchWorkflowTemplates();
     fetchOfficesList();
+    fetchProcurementData();
+    fetchInventoryMetrics();
   }, [userId]);
 
   useEffect(() => {
@@ -270,6 +274,25 @@ const handleAddAssetSubmit = async (e) => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Poll for unread chats
+  useEffect(() => {
+    if (!userId || userId === 'undefined') return;
+
+    const checkChatBadgeStatus = async () => {
+      try {
+        const res = await fetchWithAuth('http://localhost:5000/api/chat/active-documents-directory');
+        const data = await res.json();
+        if (res.ok) {
+          setHasUnreadChats(data.some(d => d.hasAnyChat === true));
+        }
+      } catch (err) { console.error(err); }
+    };
+
+    checkChatBadgeStatus();
+    const chatInterval = setInterval(checkChatBadgeStatus, 15000);
+    return () => clearInterval(chatInterval);
+  }, [userId]);
 
   const handleLogout = () => {
     minimalSwal.fire({
@@ -1116,6 +1139,14 @@ const handleAddAssetSubmit = async (e) => {
             <button onClick={() => setActiveTab('history')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'history' ? 'bg-[#3b2a29] text-white border-l-4 border-red-700' : 'text-neutral-400 hover:bg-[#3b2a29] hover:text-white'}`}>
               <History size={18} /> History
             </button>
+            <button onClick={() => { setActiveTab('messages'); setHasUnreadChats(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg font-bold transition-colors ${activeTab === 'messages' ? 'bg-[#3b2a29] text-white border-l-4 border-red-700' : 'text-neutral-400 hover:bg-[#3b2a29] hover:text-white'}`}>
+              <div className="flex items-center gap-3">
+                <MessageSquare size={18} /> Chat Inbox
+              </div>
+              {hasUnreadChats && (
+                <span className="w-2 h-2 bg-red-600 rounded-full mr-1 animate-pulse"></span>
+              )}
+            </button>
           </nav>
         </div>
 
@@ -1209,7 +1240,7 @@ const handleAddAssetSubmit = async (e) => {
                     { label: 'Total Documents', count: pipelineDocs.length, icon: '📁', color: 'text-neutral-800' },
                     { label: 'Incoming', count: expectedIncomingCount, icon: '📥', color: 'text-blue-600' },
                     { label: 'Pending', count: pendingDocsList.length, icon: '⏳', color: 'text-amber-600' },
-                    { label: 'Archived', count: archivedDocsList.length, icon: '📦', color: 'text-red-700' },
+                    { label: 'Action Required', count: archivedDocsList.length, icon: '📦', color: 'text-red-700' },
                     { label: 'Completed', count: completedDocsList.length, icon: '✅', color: 'text-green-600' }
                   ].map((kpi, idx) => (
                     <div 
@@ -1223,6 +1254,79 @@ const handleAddAssetSubmit = async (e) => {
                       <p className={`text-3xl font-black text-center mt-2 ${kpi.color}`}>{kpi.count}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* FACILITY & ASSET COUNTS OVERVIEW */}
+              <div className="mt-2 mb-6">
+                <span className="text-[10px] font-black uppercase text-red-700 tracking-wider mb-3 block">Facility & Asset Counts</span>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  
+                  {/* Van Scheduling Count */}
+                  <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                      <Car size={20} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-neutral-900 leading-none">
+                        {reservationsList.filter(r => r.booking_type === 'Vehicle').length}
+                      </p>
+                      <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide mt-1 block leading-tight">Van<br/>Scheduling</span>
+                    </div>
+                  </div>
+
+                  {/* Gym Reservations Count */}
+                  <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+                      <Landmark size={20} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-neutral-900 leading-none">
+                        {reservationsList.filter(r => r.booking_type === 'Gymnasium').length}
+                      </p>
+                      <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide mt-1 block leading-tight">Gym<br/>Reservations</span>
+                    </div>
+                  </div>
+
+                  {/* Multimedia Room Count */}
+                  <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+                      <Building size={20} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-neutral-900 leading-none">
+                        {reservationsList.filter(r => r.booking_type === 'Room').length}
+                      </p>
+                      <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide mt-1 block leading-tight">Multimedia<br/>Reservations</span>
+                    </div>
+                  </div>
+
+                  {/* Stackable Chairs Count */}
+                  <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
+                      <Archive size={20} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-neutral-900 leading-none">
+                        {equipmentInventory.find(i => i.asset_name.toLowerCase().includes('chair'))?.capacity || 0}
+                      </p>
+                      <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide mt-1 block leading-tight">Stackable<br/>Chairs</span>
+                    </div>
+                  </div>
+
+                  {/* Folding Tables Count */}
+                  <div className="bg-white border border-neutral-200 p-4 rounded-xl shadow-sm flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-neutral-100 text-neutral-600 flex items-center justify-center shrink-0">
+                      <Archive size={20} />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-black text-neutral-900 leading-none">
+                        {equipmentInventory.find(i => i.asset_name.toLowerCase().includes('table'))?.capacity || 0}
+                      </p>
+                      <span className="text-[9px] font-black uppercase text-neutral-400 tracking-wide mt-1 block leading-tight">Folding<br/>Tables</span>
+                    </div>
+                  </div>
+
                 </div>
               </div>
 
@@ -1989,6 +2093,14 @@ const handleAddAssetSubmit = async (e) => {
                 </>
               )}
             </div>
+          )}
+
+          {activeTab === 'messages' && (
+            <OfficeChatHub 
+              userId={userId} 
+              roleId={2} // Using 2 since GSO acts as a processor in this context
+              officeId={gsoOfficeId} 
+            />
           )}
 
           {/* UNIFIED FULL PROFILE HUB (Matching Signee/Processor exact setup) */}
