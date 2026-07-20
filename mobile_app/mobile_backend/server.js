@@ -2310,7 +2310,7 @@ io.on('connection', (socket) => {
 // ==========================================
 // Ensure this block is at the VERY bottom, and only appears once.
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`API Server running on port ${PORT}`);
 
   initDatabaseListener();
