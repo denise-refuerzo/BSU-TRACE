@@ -2198,6 +2198,28 @@ app.get('/api/analytics/edc', requireAuth, async (req, res) => {
     }
 });
 
+// Proxy route for Route Performance Analytics
+app.get('/api/analytics/route-performance', requireAuth, async (req, res) => {
+  try {
+      const response = await axios.get(`${PYTHON_MICROSERVICE_URL}/api/analytics/route-performance`);
+      res.json(response.data);
+  } catch (error) {
+      console.error('Error fetching route performance analytics:', error.message);
+      res.status(500).json({ message: 'Analytics service unavailable' });
+  }
+});
+
+// Proxy route for System Health & Data Audit
+app.get('/api/analytics/system-health', requireAuth, async (req, res) => {
+  try {
+      const response = await axios.get(`${PYTHON_MICROSERVICE_URL}/api/analytics/system-health`);
+      res.json(response.data);
+  } catch (error) {
+      console.error('Error fetching system health analytics:', error.message);
+      res.status(500).json({ message: 'Analytics service unavailable' });
+  }
+});
+
 const PORT = 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Core backend subsystem running on port ${PORT}`);

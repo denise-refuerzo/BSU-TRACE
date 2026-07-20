@@ -3,6 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from services.bottleneck_service import calculate_office_dwell_times
 from services.edc_service import calculate_edc
 from services.peak_demand_service import calculate_peak_demand
+from services.route_performance_service import (
+    calculate_document_routing_efficiency, 
+    calculate_vehicle_scheduling_performance
+)
+from services.system_health_service import get_system_health_metrics
 
 
 app = FastAPI(title="BSU-Trace Analytics Engine")
@@ -47,3 +52,26 @@ def get_peak_demand_forecast():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Forecasting engine error: {str(e)}")
+    
+@app.get("/api/analytics/route-performance")
+def get_route_performance():
+    """Endpoint serving document routing and vehicle scheduling performance."""
+    try:
+        return {
+            "document_routes": calculate_document_routing_efficiency(),
+            "vehicle_scheduling": calculate_vehicle_scheduling_performance()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Routing analytics error: {str(e)}")
+
+@app.get("/api/analytics/system-health")
+def get_system_health():
+    """Endpoint serving database connection status and data quality audit."""
+    try:
+        return get_system_health_metrics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Health monitoring error: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

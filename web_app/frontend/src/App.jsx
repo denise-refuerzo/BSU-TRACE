@@ -8,6 +8,7 @@ import OriginatorDashboard from './views/OriginatorDashboard';
 import ProcessorDashboard from './views/ProcessorDashboard';
 import SigneeDashboard from './views/SigneeDashboard';
 import GSOAdminDashboard from './views/GSOAdminDashboard';
+import OperationalAnalytics from './views/OperationalAnalytics';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/accounts" element={<AccountManagement />} />
         <Route path="/admin/matrix" element={<RolesPermissionsMatrix />} />
+        <Route path="/admin/analytics" element={<OperationalAnalytics />} />
         <Route path="/dashboard" element={<OriginatorDashboard />} />
         <Route path="/processor/dashboard" element={<ProcessorDashboard />} />
         <Route path="/signee/dashboard" element={<SigneeDashboard />} />

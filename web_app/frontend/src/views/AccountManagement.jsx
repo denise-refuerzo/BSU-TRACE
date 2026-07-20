@@ -165,11 +165,12 @@ export default function AccountManagement() {
               <h1 className="font-bold text-white text-sm leading-none">BSU Portal</h1>
               <span className="text-[10px] text-neutral-400 uppercase tracking-widest">Admin Console</span>
             </div>
-          </div>
+          </div> 
           <nav className="space-y-1 text-sm text-left">
             <button type="button" onClick={() => navigate('/admin/dashboard')} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors">📊 Dashboard</button>
             <button type="button" className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-neutral-800 text-white font-medium">👥 Accounts</button>
             <button type="button" onClick={() => navigate('/admin/matrix')} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors">🛡️ Roles & Matrix</button>
+            <button type="button" onClick={() => navigate('/admin/analytics')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${ window.location.pathname === '/admin/analytics' ? 'bg-neutral-800 text-white font-medium' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white' }`}> 📈 Operational Analytics </button>
           </nav>
         </div>
         <button type="button" onClick={() => { localStorage.clear(); navigate('/login'); }} className="flex items-center gap-3 px-3 py-2.5 text-sm text-neutral-400 hover:text-red-400 rounded-lg transition-colors">
