@@ -2214,7 +2214,7 @@ app.get('/chat/messages/:iniId/:oId', async (req, res) => {
     }
 });
 
-// ==========================================
+/// ==========================================
 // SOCKET.IO REAL-TIME CHAT ENGINE
 // ==========================================
 io.on('connection', (socket) => {
@@ -2230,6 +2230,7 @@ io.on('connection', (socket) => {
         socket.leave(roomName);
     });
 
+    // Line 2154 and onwards MUST be inside this exact function block:
     socket.on('send_message', async (data) => {
         try {
             const { ini_id, o_id, sender_id, message_text, sent_at } = data;
@@ -2276,7 +2277,7 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
     });
-});
+}); // <--- This single closing bracket closes the entire io.on block
 
 app.get('/api/chat/channels/:iniId', async (req, res) => {
     const { iniId } = req.params;
