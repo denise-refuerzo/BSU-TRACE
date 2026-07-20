@@ -141,7 +141,10 @@ class _AuthScreenState extends State<AuthScreen> {
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Please enter your 6-digit PIN to continue.'),
+                const Text(
+                  'A verification code has been sent to your university email. Please enter the 6-digit PIN below.',
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: pinController,

@@ -202,7 +202,7 @@ app.post('/api/chat', async (req, res) => {
     // SYSTEM PROMPT: This tells Gemini who it is and how to behave. 
     // You can customize this to fit BSU-Trace perfectly.
     const systemPrompt = `You are a helpful, professional AI assistant for BSU-Trace, a university document tracking system. 
-    Answer this user query politely and concisely: ${userMessage}. Don't answer questions unrelated to the system.`;
+    Answer this user query politely and concisely: ${userMessage}. Don't answer questions unrelated to the system. You cannot answer questions regarding a certain document, you can only answer how the system works.`;
 
     // Ask Gemini to generate the response
     const result = await model.generateContent(systemPrompt);
@@ -224,8 +224,9 @@ app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
+    // UPDATED: Added uni_email to the SELECT query
     const result = await pool.query(
-      'SELECT u_id, password, a_id, two_fa_enabled, is_active FROM public."User" WHERE username = $1',
+      'SELECT u_id, password, a_id, two_fa_enabled, is_active, uni_email FROM public."User" WHERE username = $1',
       [username]
     );
 
@@ -235,7 +236,6 @@ app.post('/api/login', async (req, res) => {
 
     const user = result.rows[0];
 
-    // RESTRICTION CHECK: Block login if the account is explicitly deactivated
     if (user.is_active === false) {
       return res.status(403).json({ error: 'Account disabled. Please contact the ICT Administrator.' });
     }
@@ -245,14 +245,44 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // ----------------------------------------------------
+    // NEW LOGIC: Generate & Email 2FA PIN
+    // ----------------------------------------------------
+    if (user.two_fa_enabled) {
+      // 1. Generate a random 6-digit PIN
+      const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // 2. Update the user's two_fa_code in PostgreSQL
+      await pool.query(
+        'UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', 
+        [generatedPin, user.u_id]
+      );
+
+      // 3. Send the PIN to the user's university email
+      await sendSystemEmail(
+        user.uni_email,
+        'BSU-Trace Login Verification',
+        `Your 2FA verification code is: ${generatedPin}. Do not share this with anyone.`
+      );
+
+      // 4. Return immediately WITHOUT a session token to force verification
+      return res.status(200).json({
+        u_id: user.u_id,
+        a_id: user.a_id,
+        two_fa_enabled: true
+      });
+    }
+
+    // ----------------------------------------------------
+    // NORMAL LOGIC: If 2FA is OFF, generate token immediately
+    // ----------------------------------------------------
     const sessionToken = crypto.randomBytes(32).toString('hex');
     await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, user.u_id]);
 
-    // FIX: Send exactly ONE unified response package and return immediately
     return res.status(200).json({
       u_id: user.u_id,
       a_id: user.a_id,
-      two_fa_enabled: user.two_fa_enabled,
+      two_fa_enabled: false,
       session_token: sessionToken 
     });
 
@@ -283,8 +313,12 @@ app.post('/api/verify-2fa', async (req, res) => {
     if (user.two_fa_code === code) {
       failed2FAAttempts.delete(u_id);
       const sessionToken = crypto.randomBytes(32).toString('hex');
-      await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, u_id]);
-      return res.status(200).json({ success: true });
+      
+      // UPDATED: Wipe the two_fa_code to prevent reuse, and save the session token
+      await pool.query('UPDATE public."User" SET session_token = $1, two_fa_code = NULL WHERE u_id = $2', [sessionToken, u_id]);
+      
+      // UPDATED: Send the session_token back so Flutter can consume it
+      return res.status(200).json({ success: true, session_token: sessionToken });
     } else {
       const currentAttempts = (failed2FAAttempts.get(u_id) || 0) + 1;
 
