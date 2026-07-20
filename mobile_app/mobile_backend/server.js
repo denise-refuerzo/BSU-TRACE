@@ -6,7 +6,17 @@ const crypto = require('crypto');
 const cors = require('cors');
 const { Pool, Client } = require('pg');
 const bcrypt = require('bcrypt');
+// ADD THESE TWO LINES:
+const http = require('http');
+const { Server } = require('socket.io');
 
+const app = express();
+
+// ADD THESE THREE LINES (Wraps Express in an HTTP Server and initializes Socket.IO):
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] }
+});
 const app = express();
 
 // ==========================================
@@ -2300,7 +2310,7 @@ io.on('connection', (socket) => {
 // ==========================================
 // Ensure this block is at the VERY bottom, and only appears once.
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`API Server running on port ${PORT}`);
 
   initDatabaseListener();
