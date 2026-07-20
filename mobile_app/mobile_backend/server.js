@@ -2230,16 +2230,13 @@ io.on('connection', (socket) => {
         socket.leave(roomName);
     });
 
-    // Handles On-Demand Record Creation & Database Persistence
     socket.on('send_message', async (data) => {
         try {
             const { ini_id, o_id, sender_id, message_text, sent_at } = data;
             
-            // Fetch the sender's full name for real-time display
             const userRes = await pool.query('SELECT full_name FROM public."User" WHERE u_id = $1', [sender_id]);
             const sender_name = userRes.rows[0]?.full_name || 'User';
 
-            // Check if chat_room already exists for this document + office pair
             let roomRes = await pool.query(
                 'SELECT room_id FROM chat_rooms WHERE ini_id = $1 AND o_id = $2',
                 [ini_id, o_id]
@@ -2247,7 +2244,6 @@ io.on('connection', (socket) => {
 
             let roomId;
             if (roomRes.rows.length === 0) {
-                // On-Demand Creation: Created only when the first message is sent
                 const newRoomRes = await pool.query(
                     'INSERT INTO chat_rooms (ini_id, o_id) VALUES ($1, $2) RETURNING room_id',
                     [ini_id, o_id]
@@ -2257,14 +2253,12 @@ io.on('connection', (socket) => {
                 roomId = roomRes.rows[0].room_id;
             }
 
-            // Save message to database
             const msgRes = await pool.query(
                 'INSERT INTO chat_messages (room_id, sender_id, message_text, sent_at) VALUES ($1, $2, $3, $4) RETURNING message_id',
                 [roomId, sender_id, message_text, sent_at || new Date()]
             );
 
             const roomName = `room_${ini_id}_${o_id}`;
-            // Broadcast the saved message to everyone else in the room
             socket.to(roomName).emit('receive_message', {
                 message_id: msgRes.rows[0].message_id,
                 room_id: roomId,
