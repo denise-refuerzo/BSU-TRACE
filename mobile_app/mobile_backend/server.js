@@ -2008,100 +2008,109 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
     }
     const o_id = userRes.rows[0]?.o_id || 3;
 
-    // 2. Fetch all documents that went through, are currently at, or will go through GSO
+    // 2. Execute the precise CTE metrics query you provided
+    const metricsQuery = `
+      WITH ExpectedIncoming AS (
+          SELECT COUNT(DISTINCT idoc.ini_id) as incoming_count
+          FROM public.initial_document idoc
+          JOIN public.process_type pt ON idoc.p_id = pt.p_id
+          JOIN public.route r ON pt.r_id = r.r_id
+          LEFT JOIN public.processed_document pdoc_active 
+                 ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
+          WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+            AND COALESCE(pdoc_active.s_id, 1) != 4 
+            AND COALESCE(pdoc_active.s_id, 1) != 5
+            AND NOT EXISTS (
+              SELECT 1 FROM public.processed_document pd_past 
+              WHERE pd_past.ini_id = idoc.ini_id 
+                AND pd_past.current_office_id = $1 
+                AND pd_past.time_out IS NOT NULL
+            )
+      ),
+      PipelineDocs AS (
+          SELECT DISTINCT ON (idoc.ini_id)
+            idoc.ini_id,
+            idoc.qr_code,
+            idoc.title,
+            p.process_name AS form_type,
+            origin_o.office_name AS origin_office,
+            LOWER(st.current_status) as status,
+            pdoc_office.time_in, 
+            pdoc_office.time_out,
+            pdoc_active.current_office_id,
+            CASE WHEN pdoc_active.current_office_id = $1 AND pdoc_active.time_out IS NULL THEN true ELSE false END as is_at_current_office
+          FROM public.initial_document idoc
+          JOIN public.process_type p ON idoc.p_id = p.p_id
+          JOIN public.route r ON p.r_id = r.r_id
+          LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
+          JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id
+          LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
+          LEFT JOIN public.status st ON COALESCE(pdoc_active.s_id, pdoc_office.s_id) = st.s_id
+          WHERE pdoc_office.current_office_id = $1
+          ORDER BY idoc.ini_id DESC, pdoc_office.pd_id DESC
+      ),
+      AggregatedPipeline AS (
+          SELECT 
+              COUNT(ini_id) as total_documents,
+              COUNT(CASE WHEN status = 'pending' AND time_in IS NOT NULL AND time_out IS NULL THEN 1 END) as pending_count,
+              COUNT(CASE WHEN status = 'action required' THEN 1 END) as archived_count,
+              COUNT(CASE WHEN status = 'signed' OR status = 'completed' OR time_out IS NOT NULL THEN 1 END) as completed_count
+          FROM PipelineDocs
+      )
+      SELECT 
+          a.total_documents,
+          e.incoming_count as incoming,
+          a.pending_count as pending,
+          a.archived_count as archived,
+          a.completed_count as completed
+      FROM AggregatedPipeline a
+      CROSS JOIN ExpectedIncoming e;
+    `;
+
+    const metricsRes = await pool.query(metricsQuery, [o_id]);
+    const metricsRow = metricsRes.rows[0] || {
+      total_documents: 0,
+      incoming: 0,
+      pending: 0,
+      archived: 0,
+      completed: 0
+    };
+
+    // 3. Fetch the full list of pipeline documents to display in the table view
     const documentsQuery = `
       SELECT DISTINCT ON (idoc.ini_id)
-        idoc.ini_id, 
-        idoc.title, 
-        idoc.edc, 
-        idoc.qr_code, 
-        idoc.created_at, 
-        pt.process_name AS form_type,
+        idoc.ini_id,
+        idoc.qr_code,
+        idoc.title,
+        p.process_name AS form_type,
+        origin_o.office_name AS origin_office,
         INITCAP(st.current_status) as status,
-        orig_o.office_name as originating_office,
-        curr_o.office_name as current_office, 
-        next_o.office_name as next_office,
-        pdoc_office.time_in,
+        pdoc_office.time_in, 
         pdoc_office.time_out,
         pdoc_active.current_office_id,
-        CASE WHEN pdoc_active.current_office_id = $1 AND pdoc_active.time_out IS NULL THEN true ELSE false END as is_at_current_office,
-        pdoc_active.is_adhoc AS current_step_is_adhoc,
-        creator.full_name AS requestor_name,
-        s_global.current_status AS global_status
+        CASE WHEN pdoc_active.current_office_id = $1 AND pdoc_active.time_out IS NULL THEN true ELSE false END as is_at_current_office
       FROM public.initial_document idoc
-      JOIN public.process_type pt ON idoc.p_id = pt.p_id
-      JOIN public.route r ON pt.r_id = r.r_id
-      JOIN public."User" creator ON idoc.u_id = creator.u_id
+      JOIN public.process_type p ON idoc.p_id = p.p_id
+      JOIN public.route r ON p.r_id = r.r_id
+      LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
       JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id
       LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
-      LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
-      LEFT JOIN public.offices curr_o ON COALESCE(pdoc_active.current_office_id, pdoc_office.current_office_id) = curr_o.o_id
-      LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON COALESCE(pdoc_active.s_id, pdoc_office.s_id) = st.s_id
-      LEFT JOIN LATERAL (
-        SELECT s.current_status 
-        FROM public.processed_document pd_l 
-        JOIN public.status s ON pd_l.s_id = s.s_id 
-        WHERE pd_l.ini_id = idoc.ini_id 
-        ORDER BY pd_l.pd_id DESC LIMIT 1
-      ) s_global ON true
-      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
-         OR EXISTS (
-           SELECT 1 FROM public.processed_document past_pd 
-           WHERE past_pd.ini_id = idoc.ini_id AND past_pd.current_office_id = $1
-         )
+      WHERE pdoc_office.current_office_id = $1
       ORDER BY idoc.ini_id DESC, pdoc_office.pd_id DESC;
     `;
 
     const docResult = await pool.query(documentsQuery, [o_id]);
-    const documents = docResult.rows;
-
-    // 3. Compute Incoming Count using the exact expected-count query logic
-    const incomingQuery = `
-      SELECT COUNT(DISTINCT idoc.ini_id) as expected_count
-      FROM public.initial_document idoc
-      JOIN public.process_type pt ON idoc.p_id = pt.p_id
-      JOIN public.route r ON pt.r_id = r.r_id
-      LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
-      WHERE $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
-        AND COALESCE(pdoc_active.s_id, 1) != 4 
-        AND COALESCE(pdoc_active.s_id, 1) != 5
-        AND NOT EXISTS (
-          SELECT 1 FROM public.processed_document pd_past 
-          WHERE pd_past.ini_id = idoc.ini_id 
-            AND pd_past.current_office_id = $1 
-            AND pd_past.time_out IS NOT NULL
-        )
-    `;
-    const incomingRes = await pool.query(incomingQuery, [o_id]);
-    const incoming = parseInt(incomingRes.rows[0].expected_count, 10) || 0;
-
-    // 4. Compute other metrics
-    const completedDocs = documents.filter(d => 
-      d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed'
-    );
-    const sentBackDocs = documents.filter(d => 
-      d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required'
-    );
-
-    // Total documents: Completed AND Action Required combined (unique by ini_id)
-    const totalMap = new Map();
-    [...completedDocs, ...sentBackDocs].forEach(d => totalMap.set(d.ini_id, d));
-    const total_documents = totalMap.size;
-
-    const pending = documents.filter(d => d.current_office_id === o_id && d.time_in !== null && d.time_out === null).length;
-    const archived_action_required = sentBackDocs.length;
-    const completed = completedDocs.length;
 
     res.status(200).json({
       metrics: {
-        total_documents,
-        incoming,
-        pending,
-        archived_action_required,
-        completed
+        total_documents: parseInt(metricsRow.total_documents, 10),
+        incoming: parseInt(metricsRow.incoming, 10),
+        pending: parseInt(metricsRow.pending, 10),
+        archived_action_required: parseInt(metricsRow.archived, 10),
+        completed: parseInt(metricsRow.completed, 10)
       },
-      documents
+      documents: docResult.rows
     });
 
   } catch (error) {
