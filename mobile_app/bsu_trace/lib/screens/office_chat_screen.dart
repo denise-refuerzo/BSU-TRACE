@@ -63,10 +63,12 @@ Future<void> _fetchChatHistory() async {
         final List<dynamic> fetchedMessages = json.decode(response.body);
         if (mounted) {
           setState(() {
+            // FIX: Added 'sender_name' to the mapped dictionary
             messages = fetchedMessages.map((m) => {
               'message_id': m['message_id'],
               'room_id': m['room_id'],
               'sender_id': m['sender_id'],
+              'sender_name': m['sender_name'], // <--- THIS LINE WAS MISSING
               'message_text': m['message_text'],
               'sent_at': m['sent_at'],
             }).toList();
