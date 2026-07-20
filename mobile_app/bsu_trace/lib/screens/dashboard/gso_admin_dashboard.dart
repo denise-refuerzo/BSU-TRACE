@@ -552,7 +552,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildDocRow(BuildContext context, dynamic doc) {
     final title = doc['title'] ?? 'Unknown';
     final qrCode = doc['qr_code'] ?? 'N/A';
-    final status = doc['status'] ?? 'PENDING';
+    final status = doc['status'] ?? 'AWAITING GSO ROUTE';
     
     Color badgeColor = Colors.orange;
     Color badgeBg = Colors.orange.shade50;
@@ -562,6 +562,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     } else if (status.toString().toLowerCase() == 'signed' || status.toString().toLowerCase() == 'approved') {
       badgeColor = Colors.blue;
       badgeBg = Colors.blue.shade50;
+    } else if (status.toString().toLowerCase() == 'awaiting gso route') {
+      badgeColor = Colors.grey;
+      badgeBg = Colors.grey.shade100;
     }
 
     return Container(
