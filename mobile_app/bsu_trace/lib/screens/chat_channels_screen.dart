@@ -41,10 +41,10 @@ Future<void> _fetchOfficeChannels() async {
           });
         }
       } else {
-        debugPrint('Failed to load channels');
+        debugPrint('Failed to load channels: ${response.statusCode} | Body: ${response.body}');
       }
     } catch (e) {
-      debugPrint('Error: $e');
+      debugPrint('Error loading channels: $e');
     }
   }
 

@@ -2289,6 +2289,39 @@ io.on('connection', (socket) => {
     });
 });
 
+app.get('/api/chat/channels/:iniId', async (req, res) => {
+    const { iniId } = req.params;
+
+    try {
+        const query = `
+            SELECT 
+                pd.current_office_id as o_id, 
+                o.office_name,
+                CASE 
+                    -- RULE 1: If it has been scanned out to the NEXT office (time_out is set) AND it is a normal forward route
+                    WHEN pd.time_out IS NOT NULL AND pd.s_id NOT IN (4, 5) THEN true
+                    
+                    -- RULE 2: Halted (4) or Completed (5) 24-Hour Grace Period
+                    WHEN pd.s_id IN (4, 5) AND pd.time_out IS NOT NULL THEN 
+                        (EXTRACT(EPOCH FROM (NOW() AT TIME ZONE 'Asia/Manila' - pd.time_out)) / 3600) > 24
+                    
+                    -- RULE 3: Otherwise, it's active
+                    ELSE false 
+                END as "isLocked"
+            FROM processed_document pd
+            JOIN offices o ON pd.current_office_id = o.o_id
+            WHERE pd.ini_id = $1
+            ORDER BY pd.pd_id ASC;
+        `;
+        
+        const result = await pool.query(query, [iniId]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching channels:', error);
+        res.status(500).send('Server Error');
+    }
+});
+
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
