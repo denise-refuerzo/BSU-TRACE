@@ -824,7 +824,11 @@ app.get('/api/processor/documents/pipeline/:officeId', requireAuth, async (req, 
         idoc.created_at, 
         pt.process_name,
         INITCAP(st.current_status) as status,
-        orig_o.office_name as originating_office,
+        (SELECT o.office_name 
+         FROM public.processed_document first_pd 
+         JOIN public.offices o ON first_pd.current_office_id = o.o_id 
+         WHERE first_pd.ini_id = idoc.ini_id 
+         ORDER BY first_pd.pd_id ASC LIMIT 1) as originating_office,
         curr_o.office_name as current_office, 
         next_o.office_name as next_office,
         pdoc_office.time_in,
@@ -838,7 +842,6 @@ app.get('/api/processor/documents/pipeline/:officeId', requireAuth, async (req, 
       JOIN public."User" creator ON idoc.u_id = creator.u_id
       JOIN public.processed_document pdoc_office ON idoc.ini_id = pdoc_office.ini_id
       LEFT JOIN public.processed_document pdoc_active ON idoc.ini_id = pdoc_active.ini_id AND pdoc_active.time_out IS NULL
-      LEFT JOIN public.offices orig_o ON r.stop_1 = orig_o.o_id
       LEFT JOIN public.offices curr_o ON COALESCE(pdoc_active.current_office_id, pdoc_office.current_office_id) = curr_o.o_id
       LEFT JOIN public.offices next_o ON pdoc_active.next_office_id = next_o.o_id
       LEFT JOIN public.status st ON COALESCE(pdoc_active.s_id, pdoc_office.s_id) = st.s_id
