@@ -1992,10 +1992,11 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
 // ==========================================
 // GSO ADMIN COMPREHENSIVE DASHBOARD ENDPOINT
 // ==========================================
-app.get('/api/gso/:id/dashboard-data', async (req, res) => {
+app.get('/api/gso/:id/dashboard-data', requireAuth, async (req, res) => {
   const userId = req.params.id;
 
   try {
+    // Resolve GSO Office ID from user mapping (defaults to 3 for General Services Office if unassigned)
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     const o_id = userRes.rows[0]?.o_id || 3;
 
@@ -2041,9 +2042,13 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
     const result = await pool.query(query, [o_id]);
     const documents = result.rows;
 
-    // Filter categories
-    const completedDocs = documents.filter(d => d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed');
-    const sentBackDocs = documents.filter(d => d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required');
+    // Filter categories based on your precise dashboard card parameters
+    const completedDocs = documents.filter(d => 
+      d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed'
+    );
+    const sentBackDocs = documents.filter(d => 
+      d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required'
+    );
 
     // Total documents: Total completed AND sent back documents combined (unique set by ini_id)
     const totalMap = new Map();
