@@ -53,7 +53,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       if (userId == null) return;
 
-      // 1. Fetch office-isolated documents for this GSO Admin via server.js
+      // 1. Fetch office-isolated documents for this GSO Admin
       final docsResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/processors/$userId/documents'),
         headers: {'Authorization': 'Bearer $token'},
@@ -429,7 +429,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'GSO Routed Documents',
+                  'GSO Routed Documents & Actions',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 Text(
@@ -457,7 +457,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 Expanded(
                   child: Text(
-                    'STATUS',
+                    'GSO STATUS',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
@@ -483,7 +483,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             const Padding(
               padding: EdgeInsets.all(32.0),
               child: Text(
-                'No documents routed for GSO currently.',
+                'No documents routed through GSO found.',
                 style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
               ),
             )

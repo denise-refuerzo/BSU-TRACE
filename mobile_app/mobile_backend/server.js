@@ -677,7 +677,7 @@ app.get('/api/documents', async (req, res) => {
 });
 
 // ==========================================
-// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS (Updated for GSO Route/History Scope)
+// 5.5 FETCH PROCESSOR-ISOLATED DOCUMENTS (GSO Office-Specific Status)
 // ==========================================
 app.get('/api/processors/:id/documents', async (req, res) => {
   const userId = req.params.id;
@@ -690,41 +690,32 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     const o_id = userRes.rows[0].o_id;
 
     const query = `
-      WITH RankedDocs AS (
-        SELECT 
-          i.ini_id, i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
-          s.current_status AS status, pd.time_in, pd.time_out,
-          pd.current_office_id, pd.is_adhoc, pd.pd_id, r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7,
-          ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
-        FROM public.initial_document i
-        LEFT JOIN public.process_type p ON i.p_id = p.p_id
-        LEFT JOIN public.route r ON p.r_id = r.r_id
-        LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
-        LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
-        LEFT JOIN public.status s ON pd.s_id = s.s_id
-      )
-      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, current_office_id,
-        TO_CHAR(COALESCE(time_in, CURRENT_TIMESTAMP), 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
-        CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office,
-        is_adhoc,
-        EXISTS (
-          SELECT 1 FROM public.processed_document past_pd 
-          WHERE past_pd.ini_id = RankedDocs.ini_id 
-            AND past_pd.current_office_id = $1 
-            AND past_pd.time_out IS NOT NULL
-        ) as is_completed_by_me
-      FROM RankedDocs
-      WHERE rn = 1 
-        AND (
-          current_office_id = $1 
-          OR EXISTS (
-            SELECT 1 FROM public.processed_document all_pd 
-            WHERE all_pd.ini_id = RankedDocs.ini_id 
-              AND all_pd.current_office_id = $1
-          )
-          OR $1 IN (stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7)
-        )
-      ORDER BY pd_id DESC;
+      SELECT DISTINCT ON (i.ini_id)
+        i.ini_id, 
+        i.qr_code, 
+        i.title, 
+        p.process_name AS form_type, 
+        origin_o.office_name AS origin_office, 
+        COALESCE(s_office.current_status, 'AWAITING GSO ROUTE') AS status,
+        pd_office.time_in, 
+        pd_office.time_out,
+        pd_office.current_office_id,
+        CASE WHEN pd_office.current_office_id = $1 AND pd_office.time_out IS NULL THEN true ELSE false END as is_at_current_office,
+        TO_CHAR(COALESCE(pd_office.time_in, i.created_at), 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at
+      FROM public.initial_document i
+      LEFT JOIN public.process_type p ON i.p_id = p.p_id
+      LEFT JOIN public.route r ON p.r_id = r.r_id
+      LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
+      -- Pull the exact status/action log for THIS specific office (GSO)
+      LEFT JOIN public.processed_document pd_office ON i.ini_id = pd_office.ini_id AND pd_office.current_office_id = $1
+      LEFT JOIN public.status s_office ON pd_office.s_id = s_office.s_id
+      WHERE pd_office.current_office_id = $1
+         OR $1 IN (r.stop_1, r.stop_2, r.stop_3, r.stop_4, r.stop_5, r.stop_6, r.stop_7)
+         OR EXISTS (
+           SELECT 1 FROM public.processed_document past_pd 
+           WHERE past_pd.ini_id = i.ini_id AND past_pd.current_office_id = $1
+         )
+      ORDER BY i.ini_id DESC, pd_office.pd_id DESC NULLS LAST;
     `;
 
     const result = await pool.query(query, [o_id]);
