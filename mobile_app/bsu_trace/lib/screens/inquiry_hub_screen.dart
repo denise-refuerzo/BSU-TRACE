@@ -27,7 +27,7 @@ Future<void> _fetchActiveDocuments() async {
 
     try {
       final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/api/chat/active-documents/$userId'),
+        Uri.parse('${AppConfig.baseUrl}/chat/active-documents/$userId'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -38,7 +38,8 @@ Future<void> _fetchActiveDocuments() async {
           });
         }
       } else {
-        debugPrint('Failed to load documents');
+        // THIS WILL SHOW YOU EXACTLY WHY IT IS FAILING
+        debugPrint('Failed to load documents: ${response.statusCode} | Body: ${response.body}');
       }
     } catch (e) {
       debugPrint('Error: $e');

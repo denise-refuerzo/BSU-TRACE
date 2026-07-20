@@ -95,8 +95,14 @@ class BsuPortalApp extends StatelessWidget {
             ),
             // Inside your MaterialApp's routes or onGenerateRoute
             '/inquiry_hub': (context) => RouteGuard(
-                  allowedRoles: [UserRole.user], // Restricts to Originators
-                  child: InquiryHubScreen(),
+              // EXPAND THIS LIST WITH THE NEW ROLES:
+              allowedRoles: [
+                UserRole.user, 
+                UserRole.processor, 
+                UserRole.signee,
+                UserRole.admin
+              ],
+              child: InquiryHubScreen(),
             ),
           },
         );

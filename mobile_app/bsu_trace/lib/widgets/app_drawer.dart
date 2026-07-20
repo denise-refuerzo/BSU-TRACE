@@ -140,6 +140,7 @@ class AppDrawer extends StatelessWidget {
                     buildNavItem(title: 'Operational Analytics', icon: Icons.insert_chart_outlined, route: '/analytics'),
                     buildNavItem(title: 'Scan History', icon: Icons.history, route: '/history'),
                     buildNavItem(title: 'Signature History', icon: Icons.history_edu, route: '/signee_history'),
+                    buildNavItem(title: 'Inquiry Hub', icon: Icons.chat_bubble_outline, route: '/inquiry_hub'),
                   ] else if (currentRole == UserRole.ictAdmin) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_ict_admin'),
                     buildNavItem(title: 'Accounts', icon: Icons.people_outline, route: '/ict_admin_accounts'),
@@ -153,10 +154,12 @@ class AppDrawer extends StatelessWidget {
                      buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_processor'),
                      buildNavItem(title: 'Documents', icon: Icons.description_outlined, route: '/documents'),
                      buildNavItem(title: 'History', icon: Icons.history, route: '/history'),
+                     buildNavItem(title: 'Inquiry Hub', icon: Icons.chat_bubble_outline, route: '/inquiry_hub'),
                   ] else if (currentRole == UserRole.signee) ...[
                     buildNavItem(title: 'Dashboard', icon: Icons.grid_view, route: '/dashboard_signee'),
                     buildNavItem(title: 'Pending Approvals', icon: Icons.fact_check_outlined, route: '/signee_approvals'),
                     buildNavItem(title: 'Signature History', icon: Icons.history_edu, route: '/signee_history'),
+                    buildNavItem(title: 'Inquiry Hub', icon: Icons.chat_bubble_outline, route: '/inquiry_hub'),
                   ],
                 ],
               ),

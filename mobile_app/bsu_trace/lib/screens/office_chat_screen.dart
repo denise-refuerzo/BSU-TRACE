@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/socket_service.dart';
 import '../services/session_manager.dart';
+import '../config.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class OfficeChatScreen extends StatefulWidget {
   final int iniId;
@@ -47,9 +50,35 @@ class _OfficeChatScreenState extends State<OfficeChatScreen> {
     });
   }
 
-  Future<void> _fetchChatHistory() async {
-    // TODO: HTTP GET request to your Node.js backend to fetch existing chat history
-    // Endpoint example: /api/chat/${widget.iniId}/${widget.oId}
+Future<void> _fetchChatHistory() async {
+    final token = SessionManager().sessionToken;
+
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/chat/messages/${widget.iniId}/${widget.oId}'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> fetchedMessages = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            messages = fetchedMessages.map((m) => {
+              'message_id': m['message_id'],
+              'room_id': m['room_id'],
+              'sender_id': m['sender_id'],
+              'message_text': m['message_text'],
+              'sent_at': m['sent_at'],
+            }).toList();
+          });
+          _scrollToBottom();
+        }
+      } else {
+        debugPrint('Failed to load chat history: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Error fetching chat history: $e');
+    }
   }
 
   void _setupSocketListeners() {

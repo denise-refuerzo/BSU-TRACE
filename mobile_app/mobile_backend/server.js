@@ -2178,6 +2178,86 @@ app.get('/api/chat/channels/:iniId', async (req, res) => {
         console.error('Error fetching channels:', error);
         res.status(500).send('Server Error');
     }
+});// 1. REST Endpoint to load past chat messages when opening a room
+app.get('/chat/messages/:iniId/:oId', async (req, res) => {
+    const { iniId, oId } = req.params;
+    try {
+        const query = `
+            SELECT cm.message_id, cm.room_id, cm.sender_id, cm.message_text, cm.sent_at
+            FROM chat_messages cm
+            JOIN chat_rooms cr ON cm.room_id = cr.room_id
+            WHERE cr.ini_id = $1 AND cr.o_id = $2
+            ORDER BY cm.sent_at ASC;
+        `;
+        const result = await pool.query(query, [iniId, oId]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching chat history:', error);
+        res.status(500).json({ error: 'Server Error' });
+    }
+});
+
+// 2. Socket.IO Real-Time & Persistence Handlers
+io.on('connection', (socket) => {
+    console.log('Client connected for chat:', socket.id);
+
+    socket.on('join_room', ({ ini_id, o_id }) => {
+        const roomName = `room_${ini_id}_${o_id}`;
+        socket.join(roomName);
+    });
+
+    socket.on('leave_room', ({ ini_id, o_id }) => {
+        const roomName = `room_${ini_id}_${o_id}`;
+        socket.leave(roomName);
+    });
+
+    // Handles On-Demand Record Creation & Database Persistence
+    socket.on('send_message', async (data) => {
+        try {
+            const { ini_id, o_id, sender_id, message_text, sent_at } = data;
+            
+            // Check if chat_room already exists for this document + office pair
+            let roomRes = await pool.query(
+                'SELECT room_id FROM chat_rooms WHERE ini_id = $1 AND o_id = $2',
+                [ini_id, o_id]
+            );
+
+            let roomId;
+            if (roomRes.rows.length === 0) {
+                // On-Demand Creation: Created only when the first message is sent
+                const newRoomRes = await pool.query(
+                    'INSERT INTO chat_rooms (ini_id, o_id) VALUES ($1, $2) RETURNING room_id',
+                    [ini_id, o_id]
+                );
+                roomId = newRoomRes.rows[0].room_id;
+            } else {
+                roomId = roomRes.rows[0].room_id;
+            }
+
+            // Save message to database
+            const msgRes = await pool.query(
+                'INSERT INTO chat_messages (room_id, sender_id, message_text, sent_at) VALUES ($1, $2, $3, $4) RETURNING message_id',
+                [roomId, sender_id, message_text, sent_at || new Date()]
+            );
+
+            const roomName = `room_${ini_id}_${o_id}`;
+            // Broadcast the saved message to everyone else in the room
+            socket.to(roomName).emit('receive_message', {
+                message_id: msgRes.rows[0].message_id,
+                room_id: roomId,
+                sender_id,
+                message_text,
+                sent_at: sent_at || new Date()
+            });
+
+        } catch (error) {
+            console.error('Error saving chat message via socket:', error);
+        }
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
 });
 
 // ==========================================

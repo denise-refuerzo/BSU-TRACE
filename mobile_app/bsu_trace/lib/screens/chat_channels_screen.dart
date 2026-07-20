@@ -30,7 +30,7 @@ Future<void> _fetchOfficeChannels() async {
 
     try {
       final response = await http.get(
-        Uri.parse('${AppConfig.baseUrl}/api/chat/channels/${widget.iniId}'),
+        Uri.parse('${AppConfig.baseUrl}/chat/channels/${widget.iniId}'),
         headers: {'Authorization': 'Bearer $token'},
       );
 

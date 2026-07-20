@@ -5,7 +5,9 @@ import '../config.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
-  late io.Socket socket;
+  
+  // 1. Change from 'late' to a nullable private variable
+  io.Socket? _socket;
 
   factory SocketService() {
     return _instance;
@@ -13,29 +15,39 @@ class SocketService {
 
   SocketService._internal();
 
+  // 2. Add a getter that automatically initializes the socket if it hasn't been yet
+  io.Socket get socket {
+    if (_socket == null) {
+      initSocket();
+    }
+    return _socket!;
+  }
+
   void initSocket() {
-    // Accessing the synchronous getter from your Singleton
+    // Prevent duplicate initializations
+    if (_socket != null) return;
+
     String? token = SessionManager().sessionToken; 
 
-    // Use AppConfig.baseUrl if you have it set up in config.dart
-    socket = io.io('${AppConfig.baseUrl}', <String, dynamic>{
+    _socket = io.io('${AppConfig.baseUrl}', <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
       'extraHeaders': {'Authorization': 'Bearer $token'}
     });
 
-    socket.connect();
+    _socket!.connect();
 
-    socket.onConnect((_) {
+    _socket!.onConnect((_) {
       debugPrint('Connected to Socket.IO Server'); 
     });
 
-    socket.onDisconnect((_) {
+    _socket!.onDisconnect((_) {
       debugPrint('Disconnected from Socket.IO Server'); 
     });
   }
 
   void joinRoom(int iniId, int oId) {
+    // This will now trigger the 'get socket' method, safely auto-initializing if needed
     socket.emit('join_room', {'ini_id': iniId, 'o_id': oId});
   }
 
@@ -44,6 +56,9 @@ class SocketService {
   }
 
   void dispose() {
-    socket.disconnect();
+    if (_socket != null) {
+      _socket!.disconnect();
+      _socket = null;
+    }
   }
 }
