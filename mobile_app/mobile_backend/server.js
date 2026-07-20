@@ -2130,8 +2130,8 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   }
 });
 
-// 1. Fetch active documents for the Originator (Inquiry Hub)
-app.get('/chat/active-documents/:userId', async (req, res) => {
+// 1. Fetch active documents for the Originator / Office (Inquiry Hub)
+app.get('/api/chat/active-documents/:userId', async (req, res) => {
     const { userId } = req.params;
 
     try {
@@ -2146,7 +2146,6 @@ app.get('/chat/active-documents/:userId', async (req, res) => {
         let queryParams = [];
 
         if (user.a_id === 1) { 
-            // Originators see all documents they created
             query = `
                 SELECT i.ini_id, i.title, s.current_status as status
                 FROM initial_document i
@@ -2163,7 +2162,6 @@ app.get('/chat/active-documents/:userId', async (req, res) => {
             queryParams = [userId];
             
         } else {
-            // Processors, Signees, and Admins see documents currently in their office OR with active chats
             query = `
                 SELECT DISTINCT i.ini_id, i.title, s.current_status as status
                 FROM initial_document i
@@ -2190,37 +2188,22 @@ app.get('/chat/active-documents/:userId', async (req, res) => {
     }
 });
 
-// 2. Fetch office channels and evaluate locks (Chat Channels)
-app.get('/api/chat/channels/:iniId', async (req, res) => {
-    const { iniId } = req.params;
-
+// 2. REST Endpoint to load past chat messages when opening a room
+app.get('/api/chat/messages/:iniId/:oId', async (req, res) => {
+    const { iniId, oId } = req.params;
     try {
         const query = `
-            SELECT 
-                pd.current_office_id as o_id, 
-                o.office_name,
-                CASE 
-                    -- RULE 1: If it has been scanned out to the NEXT office (time_out is set) AND it is a normal forward route
-                    WHEN pd.time_out IS NOT NULL AND pd.s_id NOT IN (4, 5) THEN true
-                    
-                    -- RULE 2: Halted (4) or Completed (5) 24-Hour Grace Period
-                    WHEN pd.s_id IN (4, 5) AND pd.time_out IS NOT NULL THEN 
-                        (EXTRACT(EPOCH FROM (NOW() AT TIME ZONE 'Asia/Manila' - pd.time_out)) / 3600) > 24
-                    
-                    -- RULE 3: Otherwise, it's active
-                    ELSE false 
-                END as "isLocked"
-            FROM processed_document pd
-            JOIN offices o ON pd.current_office_id = o.o_id
-            WHERE pd.ini_id = $1
-            ORDER BY pd.pd_id ASC;
+            SELECT cm.message_id, cm.room_id, cm.sender_id, cm.message_text, cm.sent_at
+            FROM chat_messages cm
+            JOIN chat_rooms cr ON cm.room_id = cr.room_id
+            WHERE cr.ini_id = $1 AND cr.o_id = $2
+            ORDER BY cm.sent_at ASC;
         `;
-        
-        const result = await pool.query(query, [iniId]);
+        const result = await pool.query(query, [iniId, oId]);
         res.json(result.rows);
     } catch (error) {
-        console.error('Error fetching channels:', error);
-        res.status(500).send('Server Error');
+        console.error('Error fetching chat history:', error);
+        res.status(500).json({ error: 'Server Error' });
     }
 });
 
