@@ -150,6 +150,8 @@ export default function GSOAdminDashboard() {
   const [bottleneckSort, setBottleneckSort] = useState('desc');
   const [bottleneckSearch, setBottleneckSearch] = useState('');
   const [demandTimeFilter, setDemandTimeFilter] = useState(3);
+  const [auditStartDate, setAuditStartDate] = useState('');
+  const [auditEndDate, setAuditEndDate] = useState('');
 
   const fetchOperationalAnalytics = async () => {
     setIsAnalyticsLoading(true);
@@ -1024,6 +1026,69 @@ const handleAddAssetSubmit = async (e) => {
     };
   });
 
+  const handleGenerateAuditReport = () => {
+    const printWindow = window.open('', '_blank');
+    
+    // 1. Filter Data by Date
+    const filteredDemand = peakDemandData.filter(d => {
+      const dDate = d.date;
+      return (!auditStartDate || dDate >= auditStartDate) && (!auditEndDate || dDate <= auditEndDate);
+    });
+  
+    // 2. Build HTML Report
+    const htmlContent = `
+      <html>
+        <head>
+          <title>Full Operational Audit Report</title>
+          <style>
+            body { font-family: 'Segoe UI', sans-serif; padding: 40px; color: #333; }
+            .report-header { border-bottom: 2px solid #991b1b; padding-bottom: 20px; margin-bottom: 30px; }
+            .section { margin-bottom: 40px; }
+            h2 { color: #991b1b; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }
+            th { background: #f9fafb; padding: 10px; border: 1px solid #ddd; text-align: left; }
+            td { padding: 8px; border: 1px solid #ddd; }
+          </style>
+        </head>
+        <body>
+          <div class="report-header">
+            <h1>BSU GSO Operational Audit</h1>
+            <p>Generated on: ${new Date().toLocaleString()}</p>
+            <p>Range: ${auditStartDate || 'Start'} to ${auditEndDate || 'Present'}</p>
+          </div>
+  
+          <div class="section">
+            <h2>1. Bottleneck Analytics</h2>
+            <table>
+              <thead><tr><th>Office Name</th><th>Dwell Time (Hours)</th></tr></thead>
+              <tbody>${bottleneckData.map(b => `<tr><td>${b.office_name}</td><td>${b.dwell_time_hours.toFixed(2)}h</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+  
+          <div class="section">
+            <h2>2. Equipment Inventory Status</h2>
+            <table>
+              <thead><tr><th>Asset</th><th>Total</th><th>Available</th></tr></thead>
+              <tbody>${equipmentInventory.map(i => `<tr><td>${i.asset_name}</td><td>${i.capacity}</td><td>${i.current_stock}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+  
+          <div class="section">
+            <h2>3. Demand Forecast Data</h2>
+            <table>
+              <thead><tr><th>Date</th><th>Vehicle Demand</th><th>Facility Demand</th></tr></thead>
+              <tbody>${filteredDemand.map(d => `<tr><td>${d.date}</td><td>${d.vehicle_demand || 0}</td><td>${d.facility_demand || 0}</td></tr>`).join('')}</tbody>
+            </table>
+          </div>
+        </body>
+      </html>
+    `;
+  
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    setTimeout(() => printWindow.print(), 500);
+  };
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -1740,9 +1805,17 @@ const handleAddAssetSubmit = async (e) => {
                   <h2 className="text-2xl font-black text-neutral-900">Operational Analytics</h2>
                   <p className="text-xs text-neutral-500 font-medium mt-1">Data-driven insights for administrative evaluation and resource planning.</p>
                 </div>
-                <button className="px-5 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2">
-                  <Download size={14} /> Generate Full Audit Report
-                </button>
+                <div className="flex items-center gap-3">
+                  <input type="date" value={auditStartDate} onChange={e => setAuditStartDate(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5" />
+                  <input type="date" value={auditEndDate} onChange={e => setAuditEndDate(e.target.value)} className="text-xs border rounded-lg px-2 py-1.5" />
+                  
+                  <button 
+                    onClick={handleGenerateAuditReport}
+                    className="px-5 py-2 bg-red-800 hover:bg-red-900 text-white font-bold text-xs rounded-xl shadow-sm transition-colors flex items-center gap-2"
+                  >
+                    <Download size={14} /> Generate Full Audit Report
+                  </button>
+                </div>
               </div>
 
               {isAnalyticsLoading ? (
