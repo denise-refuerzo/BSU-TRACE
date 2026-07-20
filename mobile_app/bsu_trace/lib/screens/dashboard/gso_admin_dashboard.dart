@@ -25,7 +25,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int _totalDocuments = 0;
   int _incomingCount = 0;
   int _pendingCount = 0;
-  int _awaitingScanInCount = 0;
+  int _archivedCount = 0;
   int _completedCount = 0;
 
   // GSO Module Pending Reservation Stats
@@ -53,7 +53,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       if (userId == null) return;
 
-      // 1. Fetch comprehensive GSO dashboard data from the new endpoint
+      // 1. Fetch comprehensive GSO dashboard data from backend endpoint
       final gsoResponse = await http.get(
         Uri.parse('${AppConfig.baseUrl}/gso/$userId/dashboard-data'),
         headers: {'Authorization': 'Bearer $token'},
@@ -72,10 +72,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
         if (mounted) {
           setState(() {
-            _totalDocuments = metrics['total_routed'] ?? 0;
+            _totalDocuments = metrics['total_documents'] ?? 0;
             _incomingCount = metrics['incoming'] ?? 0;
             _pendingCount = metrics['pending'] ?? 0;
-            _awaitingScanInCount = metrics['awaiting_scan_in'] ?? 0;
+            _archivedCount = metrics['archived_action_required'] ?? 0;
             _completedCount = metrics['completed'] ?? 0;
             _gsoDocuments = documents;
             _currentPage = 1; // Reset to page 1 on refresh
@@ -221,10 +221,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               ),
             ),
             const Text(
-              'GSO ROUTED DOCS',
+              'TOTAL DOCUMENTS',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.white70,
-                fontSize: 10,
+                fontSize: 9,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -249,7 +250,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _buildMetric('$_awaitingScanInCount', 'AWAITING SCAN IN', Icons.qr_code_scanner, Colors.grey.shade200),
+              _buildMetric('$_archivedCount', 'ARCHIVED (ACTION REQ)', Icons.archive, Colors.red.shade50),
               const SizedBox(width: 12),
               _buildMetric('$_completedCount', 'COMPLETED', Icons.check_circle, Colors.green.shade50),
             ],
@@ -263,7 +264,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     return Expanded(
       child: Container(
         height: 84,
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
@@ -283,7 +284,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               label,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize: 7,
+                fontSize: 6.5,
                 fontWeight: FontWeight.bold,
                 color: Colors.grey,
               ),
@@ -558,6 +559,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     } else if (status.toString().toLowerCase() == 'signed' || status.toString().toLowerCase() == 'approved' || status.toString().toLowerCase() == 'verified') {
       badgeColor = Colors.blue;
       badgeBg = Colors.blue.shade50;
+    } else if (status.toString().toLowerCase() == 'action required' || status.toString().toLowerCase() == 'archived') {
+      badgeColor = Colors.red;
+      badgeBg = Colors.red.shade50;
     } else if (status.toString().toLowerCase() == 'awaiting scan in' || status.toString().toLowerCase() == 'upcoming route') {
       badgeColor = Colors.grey;
       badgeBg = Colors.grey.shade200;

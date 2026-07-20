@@ -1996,11 +1996,9 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   const userId = req.params.id;
 
   try {
-    // 1. Get GSO Office ID (Office ID 3 for General Services Office)
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
     const o_id = userRes.rows[0]?.o_id || 3;
 
-    // 2. Query all documents that went through, are currently at, or will go through GSO
     const query = `
       SELECT DISTINCT ON (i.ini_id)
         i.ini_id, 
@@ -2043,19 +2041,26 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
     const result = await pool.query(query, [o_id]);
     const documents = result.rows;
 
-    // Compute metrics relative to GSO
-    const total_routed = documents.length;
+    // Filter categories
+    const completedDocs = documents.filter(d => d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed');
+    const sentBackDocs = documents.filter(d => d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required');
+
+    // Total documents: Total completed AND sent back documents combined (unique set by ini_id)
+    const totalMap = new Map();
+    [...completedDocs, ...sentBackDocs].forEach(d => totalMap.set(d.ini_id, d));
+    const total_documents = totalMap.size;
+
     const incoming = documents.filter(d => d.current_office_id === o_id && d.time_in === null).length;
-    const awaiting_scan_in = incoming; 
     const pending = documents.filter(d => d.current_office_id === o_id && d.time_in !== null && d.time_out === null).length;
-    const completed = documents.filter(d => d.global_status?.toLowerCase() === 'completed').length;
+    const archived_action_required = sentBackDocs.length;
+    const completed = completedDocs.length;
 
     res.status(200).json({
       metrics: {
-        total_routed,
+        total_documents,
         incoming,
         pending,
-        awaiting_scan_in,
+        archived_action_required,
         completed
       },
       documents
