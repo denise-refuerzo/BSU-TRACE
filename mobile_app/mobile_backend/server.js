@@ -2130,7 +2130,107 @@ app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   }
 });
 
-// 1. REST Endpoint to load past chat messages (Now includes sender_name)
+// ==========================================
+// 1. Fetch active documents for the Originator / Office (Inquiry Hub)
+// ==========================================
+app.get('/api/chat/active-documents/:userId', async (req, res) => {
+    const { userId } = req.params;
+
+    try {
+        const userRes = await pool.query('SELECT a_id, o_id FROM "User" WHERE u_id = $1', [userId]);
+        
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        
+        const user = userRes.rows[0];
+        let query = '';
+        let queryParams = [];
+
+        if (user.a_id === 1) { 
+            // Originators see all documents they created
+            query = `
+                SELECT i.ini_id, i.title, s.current_status as status
+                FROM initial_document i
+                JOIN processed_document pd ON i.ini_id = pd.ini_id
+                JOIN status s ON pd.s_id = s.s_id
+                WHERE i.u_id = $1
+                  AND pd.pd_id = (
+                      SELECT MAX(pd_id) 
+                      FROM processed_document 
+                      WHERE ini_id = i.ini_id
+                  )
+                ORDER BY i.ini_id DESC;
+            `;
+            queryParams = [userId];
+            
+        } else {
+            // Processors, Signees, and Admins see documents currently in their office OR with active chats
+            query = `
+                SELECT DISTINCT i.ini_id, i.title, s.current_status as status
+                FROM initial_document i
+                JOIN processed_document pd ON i.ini_id = pd.ini_id
+                JOIN status s ON pd.s_id = s.s_id
+                LEFT JOIN chat_rooms cr ON i.ini_id = cr.ini_id
+                WHERE (pd.current_office_id = $1 OR cr.o_id = $1)
+                  AND pd.pd_id = (
+                      SELECT MAX(pd_id) 
+                      FROM processed_document 
+                      WHERE ini_id = i.ini_id
+                  )
+                ORDER BY i.ini_id DESC;
+            `;
+            queryParams = [user.o_id]; 
+        }
+
+        const result = await pool.query(query, queryParams);
+        res.json(result.rows);
+        
+    } catch (error) {
+        console.error('Error fetching active documents:', error);
+        res.status(500).json({ error: 'Server Error', details: error.message }); 
+    }
+});
+
+// ==========================================
+// 2. Fetch office channels and evaluate locks (Chat Channels)
+// ==========================================
+app.get('/api/chat/channels/:iniId', async (req, res) => {
+    const { iniId } = req.params;
+
+    try {
+        const query = `
+            SELECT 
+                pd.current_office_id as o_id, 
+                o.office_name,
+                CASE 
+                    -- RULE 1: If it has been scanned out to the NEXT office (time_out is set) AND it is a normal forward route
+                    WHEN pd.time_out IS NOT NULL AND pd.s_id NOT IN (4, 5) THEN true
+                    
+                    -- RULE 2: Halted (4) or Completed (5) 24-Hour Grace Period
+                    WHEN pd.s_id IN (4, 5) AND pd.time_out IS NOT NULL THEN 
+                        (EXTRACT(EPOCH FROM (NOW() AT TIME ZONE 'Asia/Manila' - pd.time_out)) / 3600) > 24
+                    
+                    -- RULE 3: Otherwise, it's active
+                    ELSE false 
+                END as "isLocked"
+            FROM processed_document pd
+            JOIN offices o ON pd.current_office_id = o.o_id
+            WHERE pd.ini_id = $1
+            ORDER BY pd.pd_id ASC;
+        `;
+        
+        const result = await pool.query(query, [iniId]);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Error fetching channels:', error);
+        res.status(500).send('Server Error');
+    }
+});
+
+// ==========================================
+// 3. REST Endpoint to load past chat messages
+// ==========================================
 app.get('/api/chat/messages/:iniId/:oId', async (req, res) => {
     const { iniId, oId } = req.params;
     try {
@@ -2150,71 +2250,7 @@ app.get('/api/chat/messages/:iniId/:oId', async (req, res) => {
     }
 });
 
-// 2. Socket.IO Handler (Now attaches sender_name to live broadcasts)
-socket.on('send_message', async (data) => {
-    try {
-        const { ini_id, o_id, sender_id, message_text, sent_at } = data;
-        
-        // Fetch the sender's full name for real-time display
-        const userRes = await pool.query('SELECT full_name FROM public."User" WHERE u_id = $1', [sender_id]);
-        const sender_name = userRes.rows[0]?.full_name || 'User';
-
-        let roomRes = await pool.query(
-            'SELECT room_id FROM chat_rooms WHERE ini_id = $1 AND o_id = $2',
-            [ini_id, o_id]
-        );
-
-        let roomId;
-        if (roomRes.rows.length === 0) {
-            const newRoomRes = await pool.query(
-                'INSERT INTO chat_rooms (ini_id, o_id) VALUES ($1, $2) RETURNING room_id',
-                [ini_id, o_id]
-            );
-            roomId = newRoomRes.rows[0].room_id;
-        } else {
-            roomId = roomRes.rows[0].room_id;
-        }
-
-        const msgRes = await pool.query(
-            'INSERT INTO chat_messages (room_id, sender_id, message_text, sent_at) VALUES ($1, $2, $3, $4) RETURNING message_id',
-            [roomId, sender_id, message_text, sent_at || new Date()]
-        );
-
-        const roomName = `room_${ini_id}_${o_id}`;
-        socket.to(roomName).emit('receive_message', {
-            message_id: msgRes.rows.query ? msgRes.rows[0].message_id : msgRes.rows[0].message_id,
-            room_id: roomId,
-            sender_id,
-            sender_name, // <--- Included here for real-time broadcast
-            message_text,
-            sent_at: sent_at || new Date()
-        });
-
-    } catch (error) {
-        console.error('Error saving chat message via socket:', error);
-    }
-});
-
-// 1. REST Endpoint to load past chat messages when opening a room
-app.get('/chat/messages/:iniId/:oId', async (req, res) => {
-    const { iniId, oId } = req.params;
-    try {
-        const query = `
-            SELECT cm.message_id, cm.room_id, cm.sender_id, cm.message_text, cm.sent_at
-            FROM chat_messages cm
-            JOIN chat_rooms cr ON cm.room_id = cr.room_id
-            WHERE cr.ini_id = $1 AND cr.o_id = $2
-            ORDER BY cm.sent_at ASC;
-        `;
-        const result = await pool.query(query, [iniId, oId]);
-        res.json(result.rows);
-    } catch (error) {
-        console.error('Error fetching chat history:', error);
-        res.status(500).json({ error: 'Server Error' });
-    }
-});
-
-/// ==========================================
+// ==========================================
 // SOCKET.IO REAL-TIME CHAT ENGINE
 // ==========================================
 io.on('connection', (socket) => {
@@ -2230,7 +2266,7 @@ io.on('connection', (socket) => {
         socket.leave(roomName);
     });
 
-    // Line 2154 and onwards MUST be inside this exact function block:
+    // Handles On-Demand Record Creation & Database Persistence
     socket.on('send_message', async (data) => {
         try {
             const { ini_id, o_id, sender_id, message_text, sent_at } = data;
@@ -2278,39 +2314,6 @@ io.on('connection', (socket) => {
         console.log('Client disconnected:', socket.id);
     });
 }); // <--- This single closing bracket closes the entire io.on block
-
-app.get('/api/chat/channels/:iniId', async (req, res) => {
-    const { iniId } = req.params;
-
-    try {
-        const query = `
-            SELECT 
-                pd.current_office_id as o_id, 
-                o.office_name,
-                CASE 
-                    -- RULE 1: If it has been scanned out to the NEXT office (time_out is set) AND it is a normal forward route
-                    WHEN pd.time_out IS NOT NULL AND pd.s_id NOT IN (4, 5) THEN true
-                    
-                    -- RULE 2: Halted (4) or Completed (5) 24-Hour Grace Period
-                    WHEN pd.s_id IN (4, 5) AND pd.time_out IS NOT NULL THEN 
-                        (EXTRACT(EPOCH FROM (NOW() AT TIME ZONE 'Asia/Manila' - pd.time_out)) / 3600) > 24
-                    
-                    -- RULE 3: Otherwise, it's active
-                    ELSE false 
-                END as "isLocked"
-            FROM processed_document pd
-            JOIN offices o ON pd.current_office_id = o.o_id
-            WHERE pd.ini_id = $1
-            ORDER BY pd.pd_id ASC;
-        `;
-        
-        const result = await pool.query(query, [iniId]);
-        res.json(result.rows);
-    } catch (error) {
-        console.error('Error fetching channels:', error);
-        res.status(500).send('Server Error');
-    }
-});
 
 // ==========================================
 // SERVER INITIALIZATION
