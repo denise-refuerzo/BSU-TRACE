@@ -421,7 +421,7 @@ app.post('/api/documents', requireAuth, async (req, res) => {
     const docResult = await pool.query(
       `INSERT INTO public.initial_document (p_id, u_id, title, edc, qr_code, created_at) 
        VALUES ($1, $2, $3, $4, $5, TIMEZONE('Asia/Manila', NOW())) RETURNING *`,
-      [processTypeId, userId, title, edc || null, uniqueQrPayload]
+      [processTypeId, userId, title, edc , uniqueQrPayload] // 'edc' variable is used here
     );
     const newDoc = docResult.rows[0];
     

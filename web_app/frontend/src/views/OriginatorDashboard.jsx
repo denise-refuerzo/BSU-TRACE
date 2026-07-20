@@ -15,7 +15,7 @@ export default function OriginatorDashboard() {
   const userName = localStorage.getItem('user') || 'Faculty User';
   
   const [activeTab, setActiveTab] = useState('dashboard');
-  
+  const [edcPredictions, setEdcPredictions] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [processTypes, setProcessTypes] = useState([]);
   const [search, setSearch] = useState('');
@@ -105,6 +105,19 @@ export default function OriginatorDashboard() {
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const fetchEDC = async () => {
+      try {
+        const res = await fetchWithAuth('http://localhost:5000/api/analytics/edc');
+        if (res.ok) {
+          const data = await res.json();
+          setEdcPredictions(data);
+        }
+      } catch (err) { console.error("Error fetching EDC data:", err); }
+    };
+    fetchEDC();
   }, []);
 
   useEffect(() => {
@@ -272,9 +285,17 @@ export default function OriginatorDashboard() {
       setSelectedRoutePreview(stops);
       setForm({ ...form, processTypeId: pId });
       
-      const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + (stops.length * 2)); 
-      setEstimatedDate(futureDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
+      // FIND MATCHING PREDICTION
+      const prediction = edcPredictions.find(e => e.process_id === parseInt(pId));
+      
+      if (prediction) {
+        const hours = prediction.estimated_hours_to_complete;
+        const futureDate = new Date();
+        futureDate.setHours(futureDate.getHours() + hours);
+        setEstimatedDate(futureDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
+      } else {
+        setEstimatedDate("Estimation pending...");
+      }
     } else {
       setSelectedRoutePreview([]);
       setForm({ ...form, processTypeId: '' });
@@ -284,20 +305,40 @@ export default function OriginatorDashboard() {
 
   const submitDocument = async (e) => {
     e.preventDefault();
+  
+    // FIX: Convert "July 22, 2026" to "2026-07-22"
+    let edcPayload = null;
+    if (estimatedDate && estimatedDate !== "Estimation pending...") {
+      const d = new Date(estimatedDate);
+      edcPayload = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+  
     try {
       const res = await fetchWithAuth('http://localhost:5000/api/documents', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: parseInt(userId), title: form.title, processTypeId: parseInt(form.processTypeId), edc: estimatedDate ? new Date(estimatedDate).toISOString().split('T')[0] : null })
+        body: JSON.stringify({ 
+          userId: parseInt(userId), 
+          title: form.title, 
+          processTypeId: parseInt(form.processTypeId), 
+          edc: edcPayload // Now passing 'YYYY-MM-DD'
+        })
       });
+      
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to submit");
+      
       setGeneratedQr(data.qrCode);
       setShowModal(false);
       setShowQrModal(true);
       setForm({ title: '', processTypeId: '', confirmation: false });
       setSelectedRoutePreview([]);
+      setEstimatedDate(''); // Reset
       fetchDashboardLedger();
-    } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error("Frontend Submit Error:", err); 
+      alert("Submission failed: " + err.message);
+    }
   };
 
   const filteredDocuments = documents.filter(doc => {

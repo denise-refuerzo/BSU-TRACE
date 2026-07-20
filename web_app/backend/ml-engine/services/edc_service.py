@@ -3,47 +3,43 @@ from sklearn.linear_model import LinearRegression
 from database import get_db_connection
 
 def calculate_edc():
-    """
-    Trains a Linear Regression model on historical document completion times 
-    to forecast the Estimated Date of Completion for pending paperwork.
-    """
-    # 1. Pull historical data: We need documents that have fully completed their routing
-    query = """
-        SELECT 
-            i.qr_code,
-            COUNT(p.pd_id) as total_steps,
-            EXTRACT(EPOCH FROM (MAX(p.time_out) - MIN(p.time_in)))/3600 as total_hours_taken
-        FROM public.processed_document p
-        JOIN public.initial_document i ON p.ini_id = i.ini_id
-        WHERE p.time_in IS NOT NULL AND p.time_out IS NOT NULL
-        GROUP BY i.qr_code
-        HAVING EXTRACT(EPOCH FROM (MAX(p.time_out) - MIN(p.time_in))) > 0;
+    # 1. Pull historical dwell times per office
+    # This query calculates the average time (in hours) a document spends at each office
+    dwell_query = """
+        SELECT current_office_id, AVG(EXTRACT(EPOCH FROM (time_out - time_in))/3600) as avg_hours
+        FROM public.processed_document
+        WHERE time_in IS NOT NULL AND time_out IS NOT NULL
+        GROUP BY current_office_id;
     """
     
     with get_db_connection() as conn:
-        df = pd.read_sql_query(query, conn)
-        
-    if df.empty or len(df) < 5:
-        return {"message": "Not enough historical data to train the EDC model."}
-        
-    # 2. Define Features (X) and Target (y)
-    # X = Total steps/offices required for the document
-    # y = Total hours it historically took to complete
-    X = df[['total_steps']] 
-    y = df['total_hours_taken']
+        dwell_df = pd.read_sql_query(dwell_query, conn)
     
-    # 3. Train the Linear Regression Model
-    model = LinearRegression()
-    model.fit(X, y)
+    # Create a dictionary for quick lookup: {office_id: avg_hours}
+    dwell_map = dict(zip(dwell_df['current_office_id'], dwell_df['avg_hours']))
     
-    # 4. Generate a baseline prediction matrix for the frontend
-    # Example: Predicting time for documents requiring 1 to 10 steps
+    # 2. Return a prediction based on actual historical data per office
+    # If a specific office hasn't been visited yet, we use a global average (e.g., 24 hours)
+    global_avg = dwell_df['avg_hours'].mean() if not dwell_df.empty else 24
+    
     predictions = []
-    for steps in range(1, 11):
-        predicted_hours = model.predict([[steps]])[0]
+    # Generate predictions for all process patterns existing in your DB
+    query_processes = "SELECT p_id, stop_1, stop_2, stop_3, stop_4, stop_5, stop_6, stop_7 FROM public.process_type pt JOIN public.route r ON pt.r_id = r.r_id"
+    with get_db_connection() as conn:
+        processes = pd.read_sql_query(query_processes, conn)
+    
+    for _, proc in processes.iterrows():
+        # Sum the average dwell times of all active stops in this process
+        total_estimated_hours = 0
+        stops = [proc['stop_1'], proc['stop_2'], proc['stop_3'], proc['stop_4'], proc['stop_5'], proc['stop_6'], proc['stop_7']]
+        
+        for stop_id in stops:
+            if stop_id:
+                total_estimated_hours += dwell_map.get(stop_id, global_avg)
+                
         predictions.append({
-            "required_offices": steps,
-            "estimated_hours_to_complete": round(predicted_hours, 2)
+            "process_id": int(proc['p_id']),
+            "estimated_hours_to_complete": round(total_estimated_hours, 2)
         })
         
     return predictions
