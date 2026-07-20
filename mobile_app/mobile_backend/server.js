@@ -1992,12 +1992,20 @@ app.post('/api/auth/reset-2fa', async (req, res) => {
 // ==========================================
 // GSO ADMIN COMPREHENSIVE DASHBOARD ENDPOINT
 // ==========================================
-app.get('/api/gso/:id/dashboard-data', requireAuth, async (req, res) => {
+app.get('/api/gso/:id/dashboard-data', async (req, res) => {
   const userId = req.params.id;
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Unauthorized access. Please log in.' });
+  }
 
   try {
     // Resolve GSO Office ID from user mapping (defaults to 3 for General Services Office if unassigned)
     const userRes = await pool.query('SELECT o_id FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     const o_id = userRes.rows[0]?.o_id || 3;
 
     const query = `
@@ -2042,7 +2050,6 @@ app.get('/api/gso/:id/dashboard-data', requireAuth, async (req, res) => {
     const result = await pool.query(query, [o_id]);
     const documents = result.rows;
 
-    // Filter categories based on your precise dashboard card parameters
     const completedDocs = documents.filter(d => 
       d.global_status?.toLowerCase() === 'completed' || d.status?.toLowerCase() === 'completed'
     );
@@ -2050,7 +2057,6 @@ app.get('/api/gso/:id/dashboard-data', requireAuth, async (req, res) => {
       d.status?.toLowerCase() === 'action required' || d.global_status?.toLowerCase() === 'action required'
     );
 
-    // Total documents: Total completed AND sent back documents combined (unique set by ini_id)
     const totalMap = new Map();
     [...completedDocs, ...sentBackDocs].forEach(d => totalMap.set(d.ini_id, d));
     const total_documents = totalMap.size;
@@ -2076,7 +2082,6 @@ app.get('/api/gso/:id/dashboard-data', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 // ==========================================
 // SERVER INITIALIZATION
 // ==========================================
