@@ -5,8 +5,6 @@ import '../config.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
-  
-  // 1. Change from 'late' to a nullable private variable
   io.Socket? _socket;
 
   factory SocketService() {
@@ -15,7 +13,6 @@ class SocketService {
 
   SocketService._internal();
 
-  // 2. Add a getter that automatically initializes the socket if it hasn't been yet
   io.Socket get socket {
     if (_socket == null) {
       initSocket();
@@ -24,12 +21,16 @@ class SocketService {
   }
 
   void initSocket() {
-    // Prevent duplicate initializations
     if (_socket != null) return;
 
     String? token = SessionManager().sessionToken; 
 
-    _socket = io.io('${AppConfig.baseUrl}', <String, dynamic>{
+    // STRIP '/api' if it exists in your config, because Socket.io runs on the root server
+    String serverUrl = AppConfig.baseUrl.replaceAll('/api', '');
+
+    debugPrint('Connecting Socket.IO to: $serverUrl');
+
+    _socket = io.io(serverUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
       'extraHeaders': {'Authorization': 'Bearer $token'}
@@ -38,16 +39,23 @@ class SocketService {
     _socket!.connect();
 
     _socket!.onConnect((_) {
-      debugPrint('Connected to Socket.IO Server'); 
+      debugPrint('🟢 Connected to Socket.IO Server successfully!'); 
+    });
+
+    _socket!.onConnectError((data) {
+      debugPrint('🔴 Socket Connection Error: $data');
+    });
+
+    _socket!.onError((data) {
+      debugPrint('🔴 Socket Error: $data');
     });
 
     _socket!.onDisconnect((_) {
-      debugPrint('Disconnected from Socket.IO Server'); 
+      debugPrint('🟡 Disconnected from Socket.IO Server'); 
     });
   }
 
   void joinRoom(int iniId, int oId) {
-    // This will now trigger the 'get socket' method, safely auto-initializing if needed
     socket.emit('join_room', {'ini_id': iniId, 'o_id': oId});
   }
 

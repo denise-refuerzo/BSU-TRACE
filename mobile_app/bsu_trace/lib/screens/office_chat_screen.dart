@@ -103,13 +103,16 @@ Future<void> _fetchChatHistory() async {
     });
   }
 
-  void _sendMessage() {
+void _sendMessage() {
     if (_messageController.text.trim().isEmpty) return;
+
+    final userName = SessionManager().currentRole.toString(); // Or get name if stored, or let UI handle it
 
     final messageData = {
       'ini_id': widget.iniId,
       'o_id': widget.oId,
       'sender_id': currentUserId,
+      'sender_name': 'Me', // Local temporary tag until broadcast/reload
       'message_text': _messageController.text.trim(),
       'sent_at': DateTime.now().toIso8601String(),
     };
@@ -196,9 +199,20 @@ Future<void> _fetchChatHistory() async {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
-                      crossAxisAlignment:
-                          isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                       children: [
+                        // Show sender name for incoming messages (Office group chat clarity)
+                        if (!isMe && msg['sender_name'] != null) ...[
+                          Text(
+                            msg['sender_name'],
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                        ],
                         Text(
                           msg['message_text'],
                           style: TextStyle(
