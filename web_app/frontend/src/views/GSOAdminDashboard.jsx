@@ -6,7 +6,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { 
   LayoutDashboard, Archive, ShoppingCart, BarChart3, History, Bell, User, Search, Filter, X, QrCode, LogOut, Eye, GitBranch, Camera, KeyRound, ShieldCheck, Building, Landmark, Download, FileText, Plus, Calendar, Lock, Edit, Trash2, Car, ChevronLeft, ChevronRight 
 } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, ReferenceLine } from 'recharts';
 import { fetchWithAuth } from '../api';
 
 const minimalSwal = Swal.mixin({
@@ -149,6 +149,7 @@ export default function GSOAdminDashboard() {
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [bottleneckSort, setBottleneckSort] = useState('desc');
   const [bottleneckSearch, setBottleneckSearch] = useState('');
+  const [demandTimeFilter, setDemandTimeFilter] = useState(3);
 
   const fetchOperationalAnalytics = async () => {
     setIsAnalyticsLoading(true);
@@ -162,12 +163,11 @@ export default function GSOAdminDashboard() {
       const resPeak = await fetchWithAuth('http://localhost:5000/api/analytics/peak-demand');
       if (resPeak.ok) {
         const rawPeakData = await resPeak.json();
-        console.log("🔍 PYTHON PEAK DATA PAYLOAD:", rawPeakData); // Check your browser console!
         
-        // Ensure values are numbers just in case Python sent strings
         const formattedPeakData = rawPeakData.map(item => ({
           ...item,
-          demand: Number(item.demand || 0) 
+          vehicle_demand: Number(item.vehicle_demand || 0), 
+          facility_demand: Number(item.facility_demand || 0)
         }));
         
         setPeakDemandData(formattedPeakData);
@@ -994,6 +994,36 @@ const handleAddAssetSubmit = async (e) => {
     .sort((a, b) => bottleneckSort === 'desc' ? b.dwell_time_hours - a.dwell_time_hours : a.dwell_time_hours - b.dwell_time_hours)
     .slice(0, 5);
 
+  // --- Predictive Analytics: Formatting for Solid/Dashed Lines ---
+  const cutoffDate = new Date();
+  cutoffDate.setMonth(cutoffDate.getMonth() - demandTimeFilter);
+  const cutoffString = cutoffDate.toISOString().split('T')[0];
+
+  // 1. Filter historical data based on dropdown, but ALWAYS keep forecast data
+  const timeFilteredDemand = peakDemandData.filter(d => {
+    if (d.type === 'forecast') return true;
+    return d.date >= cutoffString;
+  });
+
+  // 2. Find the handoff point to draw the vertical line
+  const transitionDate = timeFilteredDemand.find((d, i, arr) => d.type === 'historical' && arr[i + 1]?.type === 'forecast')?.date;
+
+  // 3. Map new keys so Recharts knows when to render solid vs dashed
+  const chartReadyDemandData = timeFilteredDemand.map(d => {
+    const isForecast = d.type === 'forecast';
+    const isTransition = d.date === transitionDate;
+    
+    return {
+      ...d,
+      // Solid fill variables (Only has data during the past + the transition day)
+      van_hist: (!isForecast || isTransition) ? d.vehicle_demand : null,
+      fac_hist: (!isForecast || isTransition) ? d.facility_demand : null,
+      // Dashed variables (Only has data during the future + the transition day)
+      van_fore: (isForecast || isTransition) ? d.vehicle_demand : null,
+      fac_fore: (isForecast || isTransition) ? d.facility_demand : null,
+    };
+  });
+
   return (
     <div className="flex h-screen w-screen bg-[#FAF8F5] text-neutral-800 font-sans overflow-hidden">
       
@@ -1813,41 +1843,72 @@ const handleAddAssetSubmit = async (e) => {
                     </div>
                   </div>
 
-                  {/* CARD 3: Predictive Analytics: Resource Demand Trends */}
+                  {/* CARD 3: Predictive Analytics: Van Scheduling & Facility Demand Trends */}
                   <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm mt-6">
-                    <div className="flex justify-between items-end mb-6">
+                    <div className="flex justify-between items-start mb-6">
                       <div>
-                        <h3 className="text-sm font-black text-neutral-900">Predictive Analytics: Total Resource Demand Forecast</h3>
+                        <h3 className="text-sm font-black text-neutral-900">Predictive Analytics: Van Scheduling & Facility Demand</h3>
                         <p className="text-[10px] text-neutral-500 font-medium">Holt-Winters exponential smoothing forecast vs. historical baseline.</p>
+                      </div>
+                      
+                      {/* Time Range Filter */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Timeline:</span>
+                        <select 
+                          value={demandTimeFilter} 
+                          onChange={e => setDemandTimeFilter(Number(e.target.value))} 
+                          className="px-3 py-1.5 text-xs font-bold text-neutral-700 border border-neutral-300 rounded-lg outline-none bg-neutral-50 cursor-pointer"
+                        >
+                          <option value={3}>Last 3 Months</option>
+                          <option value={6}>Last 6 Months</option>
+                          <option value={9}>Last 9 Months</option>
+                          <option value={12}>Last 12 Months</option>
+                        </select>
                       </div>
                     </div>
                     
                     <div className="h-72 w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={peakDemandData} margin={{ top: 10, right: 30, left: -20, bottom: 0 }}>
+                        {/* Increased top margin from 10 to 30 to prevent label clipping */}
+                        <AreaChart data={chartReadyDemandData} margin={{ top: 30, right: 30, left: -20, bottom: 0 }}>
                           <defs>
-                            <linearGradient id="colorDemand" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#991b1b" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#991b1b" stopOpacity={0}/>
+                            <linearGradient id="colorVehicle" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.4}/>
+                              <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorFacility" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#16a34a" stopOpacity={0.4}/>
+                              <stop offset="95%" stopColor="#16a34a" stopOpacity={0}/>
                             </linearGradient>
                           </defs>
-                          <XAxis dataKey="date" tick={{fontSize: 10}} axisLine={false} tickLine={false} />
+                          
+                          <XAxis dataKey="date" tick={{fontSize: 10}} axisLine={false} tickLine={false} minTickGap={30} />
                           <YAxis tick={{fontSize: 10}} axisLine={false} tickLine={false} />
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                          
                           <Tooltip 
                             contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                             labelStyle={{ fontWeight: 'bold', color: '#171717' }} 
                           />
                           <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold' }} />
-                          <Area 
-                            type="monotone" 
-                            dataKey="demand" 
-                            name="Total Daily Reservations" 
-                            stroke="#991b1b" 
-                            strokeWidth={3} 
-                            fillOpacity={1} 
-                            fill="url(#colorDemand)" 
-                          />
+                          
+                          {/* THE CURRENT DATE DIVIDER */}
+                          {transitionDate && (
+                            <ReferenceLine 
+                              x={transitionDate} 
+                              stroke="#991b1b" 
+                              strokeWidth={1.5}
+                              label={{ position: 'top', value: 'Current Date', fill: '#991b1b', fontSize: 10, fontWeight: 'black', offset: 10 }} 
+                            />
+                          )}
+
+                          {/* 1. HISTORICAL DATA (Solid Fill) - Renamed for the Legend */}
+                          <Area type="monotone" dataKey="van_hist" name="Van Scheduling" stroke="#2563eb" strokeWidth={2} fillOpacity={1} fill="url(#colorVehicle)" connectNulls />
+                          <Area type="monotone" dataKey="fac_hist" name="Campus Facilities" stroke="#16a34a" strokeWidth={2} fillOpacity={1} fill="url(#colorFacility)" connectNulls />
+                          
+                          {/* 2. FORECAST DATA (Dashed, No Fill) - legendType="none" hides them from the legend */}
+                          <Area type="monotone" dataKey="van_fore" name="Van Forecast" legendType="none" stroke="#2563eb" strokeWidth={2.5} strokeDasharray="5 5" fill="none" connectNulls />
+                          <Area type="monotone" dataKey="fac_fore" name="Facility Forecast" legendType="none" stroke="#16a34a" strokeWidth={2.5} strokeDasharray="5 5" fill="none" connectNulls />
                         </AreaChart>
                       </ResponsiveContainer>
                     </div>
