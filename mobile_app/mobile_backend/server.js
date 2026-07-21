@@ -1727,7 +1727,6 @@ const verifyToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
-  // Grab the user ID from the query string (or body for POST requests)
   const userId = req.query.u_id || req.body.u_id;
 
   if (!token || !userId) {
@@ -1735,9 +1734,8 @@ const verifyToken = async (req, res, next) => {
   }
 
   try {
-    // Check the database for the active session token
-    const result = await db.query(
-      `SELECT session_token FROM "User" WHERE u_id = $1`,
+    const result = await pool.query(
+      `SELECT session_token FROM public."User" WHERE u_id = $1`,
       [userId]
     );
 
@@ -1747,12 +1745,10 @@ const verifyToken = async (req, res, next) => {
 
     const dbToken = result.rows[0].session_token;
 
-    // If the token doesn't match, or if it's null (logged out), reject
     if (!dbToken || token !== dbToken) {
       return res.status(401).json({ error: 'Invalid or expired session token.' });
     }
 
-    // Token is valid, proceed to the route
     next();
   } catch (err) {
     console.error('Session verification error:', err);
@@ -1760,14 +1756,15 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-app.get('/api/admin/ict-stats', authenticateToken, async (req, res) => {
+// FIX: Changed authenticateToken to verifyToken
+app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
   try {
     const userId = req.query.u_id;
     let adminName = 'System Administrator';
 
     if (userId) {
-      const userResult = await db.query(
-        `SELECT full_name FROM "User" WHERE u_id = $1`, 
+      const userResult = await pool.query(
+        `SELECT full_name FROM public."User" WHERE u_id = $1`, 
         [userId]
       );
       if (userResult.rows.length > 0) {
@@ -1776,37 +1773,37 @@ app.get('/api/admin/ict-stats', authenticateToken, async (req, res) => {
     }
 
     // 1. Core Metrics
-    const userStats = await db.query(`SELECT COUNT(*) as total_users FROM "User";`);
-    const docStats = await db.query(`SELECT COUNT(DISTINCT ini_id) as active_docs FROM processed_document WHERE s_id NOT IN (4, 5);`);
-    const blueprintStats = await db.query(`SELECT COUNT(*) as total_blueprints FROM process_type;`);
-    const logStats = await db.query(`SELECT COUNT(*) as total_logs FROM office_action_history;`);
+    const userStats = await pool.query(`SELECT COUNT(*) as total_users FROM public."User";`);
+    const docStats = await pool.query(`SELECT COUNT(DISTINCT ini_id) as active_docs FROM public.processed_document WHERE s_id NOT IN (4, 5);`);
+    const blueprintStats = await pool.query(`SELECT COUNT(*) as total_blueprints FROM public.process_type;`);
+    const logStats = await pool.query(`SELECT COUNT(*) as total_logs FROM public.office_action_history;`);
 
     // 2. LIVE SYSTEM-WIDE AUDIT STREAM FEED (Limit 15)
-    const auditQuery = await db.query(`
+    const auditQuery = await pool.query(`
       SELECT 
         u.full_name, 
         oah.action_type, 
         id.title, 
         o.office_name, 
         oah.action_timestamp 
-      FROM office_action_history oah 
-      JOIN "User" u ON oah.u_id = u.u_id 
-      JOIN initial_document id ON oah.ini_id = id.ini_id 
-      JOIN offices o ON oah.o_id = o.o_id 
+      FROM public.office_action_history oah 
+      JOIN public."User" u ON oah.u_id = u.u_id 
+      JOIN public.initial_document id ON oah.ini_id = id.ini_id 
+      JOIN public.offices o ON oah.o_id = o.o_id 
       ORDER BY oah.action_timestamp DESC 
       LIMIT 15;
     `);
 
     // 3. STALLED QUEUE CONGESTION ALERTS (> 48 hours)
-    const stalledQuery = await db.query(`
+    const stalledQuery = await pool.query(`
       SELECT 
         id.title, 
         o.office_name, 
         pd.time_in, 
         FLOOR(EXTRACT(EPOCH FROM (timezone('Asia/Manila', now()) - pd.time_in))/3600) AS hours_stuck 
-      FROM processed_document pd 
-      JOIN initial_document id ON pd.ini_id = id.ini_id 
-      JOIN offices o ON pd.current_office_id = o.o_id 
+      FROM public.processed_document pd 
+      JOIN public.initial_document id ON pd.ini_id = id.ini_id 
+      JOIN public.offices o ON pd.current_office_id = o.o_id 
       WHERE pd.time_out IS NULL 
         AND pd.s_id NOT IN (4, 5) 
         AND pd.time_in < (timezone('Asia/Manila', now()) - INTERVAL '48 hours') 

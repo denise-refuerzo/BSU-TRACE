@@ -8,6 +8,8 @@ import '../../services/session_manager.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/add_user_modal.dart';
+import '../ict_admin_accounts_screen.dart';
+import '../ict_admin_roles_screen.dart';
 
 class IctAdminDashboard extends StatefulWidget {
   const IctAdminDashboard({Key? key}) : super(key: key);
@@ -107,10 +109,12 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
         title: const Text('ICT Admin Dashboard'),
         actions: buildAppBarActions(context),
+        backgroundColor: Colors.white,
+        elevation: 0,
       ),
       drawer: const AppDrawer(),
       floatingActionButton: FloatingActionButton.extended(
@@ -176,6 +180,46 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                     ),
                     const SizedBox(height: 20),
 
+                    // Quick Actions
+                    const Text('Management Console', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                              child: const Icon(Icons.manage_accounts, color: Color(0xFF800000)),
+                            ),
+                            title: const Text('Account Management', style: TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: const Text('Manage user credentials & status'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => const IctAdminAccountsScreen())).then((_) => _loadDashboardData());
+                            },
+                          ),
+                          const Divider(height: 1),
+                          ListTile(
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                              child: Icon(Icons.security, color: Colors.blue.shade700),
+                            ),
+                            title: const Text('Roles & Permissions Matrix', style: TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: const Text('Configure account permissions'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => const IctAdminRolesScreen()));
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
                     // Metrics Grid
                     const Text('System Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
@@ -196,125 +240,140 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                     const SizedBox(height: 24),
 
                     // LIVE SYSTEM-WIDE AUDIT STREAM FEED
-                    const Text('LIVE SYSTEM-WIDE AUDIT STREAM FEED', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFA00000))),
-                    const SizedBox(height: 4),
-                    Text('Real-time rolling ledger tracing pipeline checkpoints and structural user actions campus-wide.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                    const SizedBox(height: 12),
-                    _auditLogs.isEmpty
-                        ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No audit logs available')))
-                        : Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade200),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _auditLogs.length,
-                              separatorBuilder: (context, index) => Divider(height: 1, color: Colors.grey.shade200),
-                              itemBuilder: (context, index) {
-                                final log = _auditLogs[index];
-                                return Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('LIVE SYSTEM-WIDE AUDIT STREAM FEED', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF800000))),
+                            const SizedBox(height: 4),
+                            Text('Real-time rolling ledger tracing pipeline checkpoints and structural user actions campus-wide.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            const SizedBox(height: 16),
+                            _auditLogs.isEmpty
+                                ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No audit logs available')))
+                                : ListView.separated(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    itemCount: _auditLogs.length,
+                                    separatorBuilder: (context, index) => Divider(height: 24, color: Colors.grey.shade200),
+                                    itemBuilder: (context, index) {
+                                      final log = _auditLogs[index];
+                                      return Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Expanded(
-                                            child: RichText(
-                                              text: TextSpan(
-                                                style: const TextStyle(color: Colors.black87, fontSize: 14),
-                                                children: [
-                                                  TextSpan(text: '${log['full_name']} applied ', style: const TextStyle(fontWeight: FontWeight.w600)),
-                                                  TextSpan(text: '"${log['action_type']}"', style: const TextStyle(color: Color(0xFFA00000), fontWeight: FontWeight.bold)),
-                                                ]
-                                              )
-                                            ),
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Expanded(
+                                                child: RichText(
+                                                  text: TextSpan(
+                                                    style: const TextStyle(color: Colors.black87, fontSize: 14, fontFamily: 'sans-serif'),
+                                                    children: [
+                                                      TextSpan(text: '${log['full_name']} applied ', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                                      TextSpan(text: '"${log['action_type']}"', style: const TextStyle(color: Color(0xFF800000), fontWeight: FontWeight.bold)),
+                                                    ]
+                                                  )
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(formatTime(log['action_timestamp']), style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w600)),
+                                            ]
                                           ),
-                                          const SizedBox(width: 8),
-                                          Text(formatTime(log['action_timestamp']), style: const TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.w500)),
-                                        ]
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text('Document: \'${log['title']}\'', style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.domain, size: 14, color: Colors.blueGrey),
-                                          const SizedBox(width: 4),
-                                          Expanded(child: Text('Location Block: ${log['office_name']}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12))),
-                                        ]
-                                      )
-                                    ]
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                    const SizedBox(height: 32),
-
-                    // STALLED QUEUE CONGESTION ALERTS
-                    Row(
-                      children: const [
-                        Text('🎉 ', style: TextStyle(fontSize: 16)),
-                        Expanded(child: Text('STALLED QUEUE CONGESTION ALERTS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFA00000)))),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text('Identifies critical workflows sitting inside an office destination past 48 hours without release scans.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                    const SizedBox(height: 12),
-                    _stalledAlerts.isEmpty
-                        ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No stalled documents found.')))
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _stalledAlerts.length,
-                            itemBuilder: (context, index) {
-                              final alert = _stalledAlerts[index];
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                color: const Color(0xFFFFF5F5), // Light red tint background
-                                shape: RoundedRectangleBorder(
-                                  side: const BorderSide(color: Color(0xFFFFD6D6)), // Light red border
-                                  borderRadius: BorderRadius.circular(12)
-                                ),
-                                elevation: 0,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(child: Text('${alert['title']}', style: const TextStyle(fontSize: 16, color: Colors.black87, fontWeight: FontWeight.bold))),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                            decoration: BoxDecoration(color: const Color(0xFFD66A6A), borderRadius: BorderRadius.circular(6)),
-                                            child: Text('+${alert['hours_stuck']} HOURS', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                                          const SizedBox(height: 4),
+                                          Text("Document: '${log['title']}'", style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              const Icon(Icons.domain, size: 14, color: Colors.blueGrey),
+                                              const SizedBox(width: 4),
+                                              Expanded(child: Text('Location Block: ${log['office_name']}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12))),
+                                            ]
                                           )
                                         ]
-                                      ),
-                                      const SizedBox(height: 8),
-                                      RichText(
-                                        text: TextSpan(
-                                          style: const TextStyle(fontSize: 13, color: Color(0xFFD66A6A)),
-                                          children: [
-                                            const TextSpan(text: 'Stuck at: '),
-                                            TextSpan(text: '${alert['office_name']}', style: const TextStyle(decoration: TextDecoration.underline, fontWeight: FontWeight.w600)),
-                                          ]
+                                      );
+                                    },
+                                  ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // STALLED QUEUE CONGESTION ALERTS
+                    Card(
+                      elevation: 1,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: const [
+                                Text('🎉 ', style: TextStyle(fontSize: 16)),
+                                Expanded(child: Text('STALLED QUEUE CONGESTION ALERTS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF800000)))),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text('Identifies critical workflows sitting inside an office destination past 48 hours without release scans.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            const SizedBox(height: 16),
+                            _stalledAlerts.isEmpty
+                                ? const Center(child: Padding(padding: EdgeInsets.all(20), child: Text('No stalled documents found.')))
+                                : ListView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    itemCount: _stalledAlerts.length,
+                                    itemBuilder: (context, index) {
+                                      final alert = _stalledAlerts[index];
+                                      return Card(
+                                        margin: const EdgeInsets.only(bottom: 12),
+                                        color: const Color(0xFFFFF5F5),
+                                        shape: RoundedRectangleBorder(
+                                          side: const BorderSide(color: Color(0xFFFFD6D6)),
+                                          borderRadius: BorderRadius.circular(12)
+                                        ),
+                                        elevation: 0,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(16),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                children: [
+                                                  Expanded(child: Text('${alert['title']}', style: const TextStyle(fontSize: 16, color: Colors.black87, fontWeight: FontWeight.bold))),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                    decoration: BoxDecoration(color: const Color(0xFFD66A6A), borderRadius: BorderRadius.circular(6)),
+                                                    child: Text('+${alert['hours_stuck']} HOURS', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                                                  )
+                                                ]
+                                              ),
+                                              const SizedBox(height: 8),
+                                              RichText(
+                                                text: TextSpan(
+                                                  style: const TextStyle(fontSize: 13, color: Color(0xFFD66A6A)),
+                                                  children: [
+                                                    const TextSpan(text: 'Stuck at: '),
+                                                    TextSpan(text: '${alert['office_name']}', style: const TextStyle(decoration: TextDecoration.underline, fontWeight: FontWeight.w600)),
+                                                  ]
+                                                )
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text('Arrived: ${formatDateTime(alert['time_in'])}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                                            ]
+                                          )
                                         )
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text('Arrived: ${formatDateTime(alert['time_in'])}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
-                                    ]
-                                  )
-                                )
-                              );
-                            },
-                          ),
+                                      );
+                                    },
+                                  ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 32),
                   ],
                 ),
