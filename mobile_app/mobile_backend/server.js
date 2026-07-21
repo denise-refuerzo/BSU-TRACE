@@ -1719,44 +1719,6 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 });
 
-// ==========================================
-// 22. FETCH ICT ADMIN DASHBOARD STATS
-// ==========================================
-
-const verifyToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  const userId = req.query.u_id || req.body.u_id;
-
-  if (!token || !userId) {
-    return res.status(401).json({ error: 'Access denied. Missing token or user ID.' });
-  }
-
-  try {
-    const result = await pool.query(
-      `SELECT session_token FROM public."User" WHERE u_id = $1`,
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'User not found.' });
-    }
-
-    const dbToken = result.rows[0].session_token;
-
-    if (!dbToken || token !== dbToken) {
-      return res.status(401).json({ error: 'Invalid or expired session token.' });
-    }
-
-    next();
-  } catch (err) {
-    console.error('Session verification error:', err);
-    res.status(500).json({ error: 'Internal server error during authentication.' });
-  }
-};
-
-// FIX: Changed authenticateToken to verifyToken
 app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
   try {
     const userId = req.query.u_id;
@@ -1778,7 +1740,7 @@ app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
     const blueprintStats = await pool.query(`SELECT COUNT(*) as total_blueprints FROM public.process_type;`);
     const logStats = await pool.query(`SELECT COUNT(*) as total_logs FROM public.office_action_history;`);
 
-    // 2. LIVE SYSTEM-WIDE AUDIT STREAM FEED (Limit 15)
+    // 2. LIVE SYSTEM-WIDE AUDIT STREAM FEED (Strictly limited to 5)
     const auditQuery = await pool.query(`
       SELECT 
         u.full_name, 
@@ -1791,10 +1753,10 @@ app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
       JOIN public.initial_document id ON oah.ini_id = id.ini_id 
       JOIN public.offices o ON oah.o_id = o.o_id 
       ORDER BY oah.action_timestamp DESC 
-      LIMIT 15;
+      LIMIT 5;
     `);
 
-    // 3. STALLED QUEUE CONGESTION ALERTS (> 48 hours)
+    // 3. STALLED QUEUE CONGESTION ALERTS (> 48 hours, Strictly limited to 5)
     const stalledQuery = await pool.query(`
       SELECT 
         id.title, 
@@ -1808,7 +1770,7 @@ app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
         AND pd.s_id NOT IN (4, 5) 
         AND pd.time_in < (timezone('Asia/Manila', now()) - INTERVAL '48 hours') 
       ORDER BY hours_stuck DESC 
-      LIMIT 10;
+      LIMIT 5;
     `);
 
     res.json({

@@ -166,26 +166,6 @@ class AppDrawer extends StatelessWidget {
             ),
             
             Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(color: const Color(0xFFB01A22), borderRadius: BorderRadius.circular(8)),
-                    child: Center(child: Text(userInitials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      Text(roleSubtitle, style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ],
-                  )
-                ],
-              ),
-            ),
             buildBottomItem(title: 'Logout', icon: Icons.logout, onTap: () async {
               Navigator.pop(context); 
               

@@ -8,8 +8,6 @@ import '../../services/session_manager.dart';
 import '../../widgets/app_bar_helper.dart';
 import '../../widgets/app_drawer.dart';
 import '../../widgets/modals/add_user_modal.dart';
-import '../ict_admin_accounts_screen.dart';
-import '../ict_admin_roles_screen.dart';
 
 class IctAdminDashboard extends StatefulWidget {
   const IctAdminDashboard({Key? key}) : super(key: key);
@@ -179,46 +177,6 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                       ),
                     ),
                     const SizedBox(height: 20),
-
-                    // Quick Actions
-                    const Text('Management Console', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 12),
-                    Card(
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: Column(
-                        children: [
-                          ListTile(
-                            leading: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
-                              child: const Icon(Icons.manage_accounts, color: Color(0xFF800000)),
-                            ),
-                            title: const Text('Account Management', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: const Text('Manage user credentials & status'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => const IctAdminAccountsScreen())).then((_) => _loadDashboardData());
-                            },
-                          ),
-                          const Divider(height: 1),
-                          ListTile(
-                            leading: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                              child: Icon(Icons.security, color: Colors.blue.shade700),
-                            ),
-                            title: const Text('Roles & Permissions Matrix', style: TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: const Text('Configure account permissions'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () {
-                              Navigator.push(context, MaterialPageRoute(builder: (context) => const IctAdminRolesScreen()));
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
 
                     // Metrics Grid
                     const Text('System Overview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
