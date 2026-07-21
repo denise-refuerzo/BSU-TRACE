@@ -1722,23 +1722,60 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // ==========================================
 // 22. FETCH ICT ADMIN DASHBOARD STATS
 // ==========================================
-app.get('/api/dashboard/ict/stats', async (req, res) => {
+app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
   try {
-    // Count total documents
-    const activeDocsRes = await pool.query(`SELECT COUNT(*) FROM public.initial_document`);
-    // Count total users
-    const usersRes = await pool.query(`SELECT COUNT(*) FROM public."User"`);
-    // Count total process types/workflows
-    const workflowsRes = await pool.query(`SELECT COUNT(*) FROM public.process_type`);
+    const userId = req.query.u_id;
+    let adminName = 'System Administrator';
 
-    res.status(200).json({
-      active_documents: parseInt(activeDocsRes.rows[0].count) || 0,
-      total_users: parseInt(usersRes.rows[0].count) || 0,
-      total_workflows: parseInt(workflowsRes.rows[0].count) || 0
+    // 1. Fetch current Admin's name dynamically using the passed u_id
+    if (userId) {
+      const userResult = await db.query(
+        `SELECT full_name FROM "User" WHERE u_id = $1`, 
+        [userId]
+      );
+      if (userResult.rows.length > 0) {
+        adminName = userResult.rows[0].full_name;
+      }
+    }
+
+    // 2. Total & Active Users
+    const userStats = await db.query(`
+      SELECT 
+        COUNT(*) as total_users,
+        COUNT(CASE WHEN is_active = true THEN 1 END) as active_users
+      FROM "User";
+    `);
+
+    // 3. Total Offices (excluding dynamic/system placeholders like 999)
+    const officeStats = await db.query(`
+      SELECT COUNT(*) as total_offices FROM offices WHERE o_id != 999;
+    `);
+
+    // 4. System Action Logs Count
+    const logStats = await db.query(`
+      SELECT COUNT(*) as total_logs FROM office_action_history;
+    `);
+
+    // 5. Five Most Recent Users
+    const recentUsers = await db.query(`
+      SELECT u.u_id, u.full_name, u.username, u.is_active, a.account_type
+      FROM "User" u
+      LEFT JOIN account a ON u.a_id = a.a_id
+      ORDER BY u.u_id DESC
+      LIMIT 5;
+    `);
+
+    res.json({
+      adminName: adminName,
+      totalUsers: parseInt(userStats.rows[0].total_users || 0),
+      activeUsers: parseInt(userStats.rows[0].active_users || 0),
+      totalOffices: parseInt(officeStats.rows[0].total_offices || 0),
+      totalSystemLogs: parseInt(logStats.rows[0].total_logs || 0),
+      recentUsers: recentUsers.rows
     });
-  } catch (error) {
-    console.error('ICT Stats Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (err) {
+    console.error('Error fetching ICT stats:', err);
+    res.status(500).json({ error: 'Failed to retrieve ICT admin statistics' });
   }
 });
 

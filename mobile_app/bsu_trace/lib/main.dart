@@ -83,7 +83,7 @@ class BsuPortalApp extends StatelessWidget {
             // NEW: ICT Admin Routes
             '/dashboard_ict_admin': (context) => const RouteGuard(
               allowedRoles: [UserRole.ictAdmin],
-              child: IctAdminDashboardScreen(),
+              child: IctAdminDashboard(),
             ),
             '/ict_admin_accounts': (context) => const RouteGuard(
               allowedRoles: [UserRole.ictAdmin],

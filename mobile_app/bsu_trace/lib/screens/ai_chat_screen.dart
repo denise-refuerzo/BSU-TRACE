@@ -79,12 +79,12 @@ class _AiChatScreenState extends State<AiChatScreen> {
       appBar: AppBar(
         title: const Row(
           children: [
-            Icon(Icons.auto_awesome, color: Colors.white, size: 20),
+            Icon(Icons.auto_awesome, color: Colors.red, size: 20),
             SizedBox(width: 8),
             Text('BSU-Trace AI', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
-        backgroundColor: Colors.blue.shade800,
+        backgroundColor: Colors.white,
         foregroundColor: Colors.white,
       ),
       body: Column(
