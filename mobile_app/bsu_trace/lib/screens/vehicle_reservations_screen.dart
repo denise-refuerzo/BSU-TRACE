@@ -1,4 +1,3 @@
-// lib/screens/vehicle_reservations_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -201,8 +200,10 @@ class _VehicleReservationsScreenState extends State<VehicleReservationsScreen> {
                       ...filteredBookings.map((b) {
                         final status = (b['status'] ?? 'Reserved').toString().toUpperCase();
                         final dateStr = '${formatDate(b['reservation_date'])} | ${formatTime(b['start_time'])} -\n${formatTime(b['end_time'])}';
+                        
                         return _buildReservationCard(
                           context: context,
+                          bookingData: b, // <-- PASSES THE DATA HERE
                           requestor: b['requestor'] ?? 'Unknown Requestor',
                           vehicle: b['destination'] ?? b['purpose'] ?? 'Vehicle',
                           date: dateStr,
@@ -217,8 +218,10 @@ class _VehicleReservationsScreenState extends State<VehicleReservationsScreen> {
     );
   }
 
+  // Notice the addition of `required Map<String, dynamic> bookingData`
   Widget _buildReservationCard({
     required BuildContext context,
+    required Map<String, dynamic> bookingData,
     required String requestor,
     required String vehicle,
     required String date,
@@ -239,11 +242,15 @@ class _VehicleReservationsScreenState extends State<VehicleReservationsScreen> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: () {
-          showDialog(
+        onTap: () async {
+          // Passes the data to the modal
+          final result = await showDialog(
             context: context,
-            builder: (context) => const VehicleReservationModal(),
+            builder: (context) => VehicleReservationModal(bookingData: bookingData), 
           );
+          if (result == true) {
+            fetchVehicleBookings(); // Instantly refreshes on success
+          }
         },
         child: Padding(
           padding: const EdgeInsets.all(20.0),
@@ -295,7 +302,7 @@ class _VehicleReservationsScreenState extends State<VehicleReservationsScreen> {
                         ],
                       ),
                       SizedBox(width: 4),
-                      Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryRed),
+                      Icon(Icons.chevron_right, size: 16, color: AppTheme.primaryRed)
                     ],
                   )
                 ],

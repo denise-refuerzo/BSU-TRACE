@@ -1,3 +1,4 @@
+// lib/screens/scheduler_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:async';
@@ -135,7 +136,7 @@ class _SchedulerScreenState extends State<SchedulerScreen> {
                       builder: (context) => const NewRequestModal(),
                     );
                   },
-              backgroundColor: Colors.red.shade700, // Or whatever color you prefer!
+              backgroundColor: Colors.red.shade700, 
               icon: const Icon(Icons.post_add, color: Colors.white),
               label: const Text('New Schedule', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
@@ -150,14 +151,14 @@ class SchedulerContent extends StatefulWidget {
   final String category;
   final List<dynamic> bookings;
   final List<dynamic> inventory;
-  final Future<void> Function() onRefresh; // <--- NEW: Accept the refresh callback
+  final Future<void> Function() onRefresh;
 
   const SchedulerContent({
     super.key, 
     required this.category, 
     required this.bookings, 
     required this.inventory,
-    required this.onRefresh // <--- NEW: Initialize it
+    required this.onRefresh
   });
 
   @override
@@ -170,7 +171,7 @@ class _SchedulerContentState extends State<SchedulerContent> {
   @override
   void initState() {
     super.initState();
-    _currentMonth = DateTime.now(); // Defaults to actual current month
+    _currentMonth = DateTime.now(); 
   }
 
   // Filters the global bookings down to the current tab and current viewed month
@@ -205,16 +206,66 @@ class _SchedulerContentState extends State<SchedulerContent> {
     }
   }
 
+  // Pops up a dialog listing all the events for the tapped day
+  void _showDayEventsDialog(BuildContext context, int day, List<dynamic> dayBookings) {
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final dateStr = '${months[_currentMonth.month - 1]} $day, ${_currentMonth.year}';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: AppTheme.scaffoldBg,
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Events for $dateStr', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryRed)),
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: const Icon(Icons.close, color: Colors.black54),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: dayBookings.map((event) => _buildEventItem(
+                        context,
+                        widget.category.toUpperCase(),
+                        _formatTime(event['start_time']),
+                        event['purpose'] ?? 'Untitled Booking',
+                        event['department'] ?? 'General',
+                        event
+                      )).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeBookings = _filteredBookings;
 
-    // Wrapped the ScrollView with RefreshIndicator
     return RefreshIndicator(
       color: AppTheme.primaryRed,
       onRefresh: widget.onRefresh,
       child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(), // MUST have this for pull down to work properly
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 100.0), 
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,8 +313,6 @@ class _SchedulerContentState extends State<SchedulerContent> {
 
   Widget _buildCalendarGrid(List<dynamic> activeBookings) {
     final days = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    
-    // Get actual number of days in the currently viewed month
     int daysInMonth = DateUtils.getDaysInMonth(_currentMonth.year, _currentMonth.month);
 
     return Column(
@@ -274,32 +323,47 @@ class _SchedulerContentState extends State<SchedulerContent> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7),
-          itemCount: daysInMonth, // Dynamically set to 28, 30, or 31!
+          itemCount: daysInMonth, 
           itemBuilder: (context, index) {
             int day = index + 1;
             
-            // Check if there are any bookings on this specific day
-            bool hasReservation = activeBookings.any((b) {
+            // Gather all bookings mapped to this specific day
+            List<dynamic> dayBookings = activeBookings.where((b) {
               if (b['reservation_date'] == null) return false;
               final date = DateTime.parse(b['reservation_date']).toLocal();
-              return date.day == day && b['status'] == 'Reserved';
-            });
+              return date.day == day;
+            }).toList();
             
-            bool hasConfirmed = activeBookings.any((b) {
-              if (b['reservation_date'] == null) return false;
-              final date = DateTime.parse(b['reservation_date']).toLocal();
-              return date.day == day && b['status'] == 'Confirmed';
-            });
+            // Update: Red if Reserved, Green if Confirmed
+            bool hasReserved = dayBookings.any((b) => (b['status'] ?? '').toString().toLowerCase() == 'reserved');
+            bool hasConfirmed = dayBookings.any((b) => (b['status'] ?? '').toString().toLowerCase() == 'confirmed');
 
-            return Container(
-              alignment: Alignment.center,
-              margin: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: hasConfirmed ? AppTheme.primaryRed.withValues(alpha: 0.2) : (hasReservation ? Colors.green.withValues(alpha: 0.2) : Colors.transparent),
-                border: hasConfirmed ? Border.all(color: AppTheme.primaryRed) : (hasReservation ? Border.all(color: Colors.green) : null),
-                borderRadius: BorderRadius.circular(8),
+            Color bgColor = Colors.transparent;
+            Color borderColor = Colors.transparent;
+
+            // Give visual priority to Red (Action Needed / Reserved)
+            if (hasReserved) {
+              bgColor = AppTheme.primaryRed.withValues(alpha: 0.2);
+              borderColor = AppTheme.primaryRed;
+            } else if (hasConfirmed) {
+              bgColor = Colors.green.withValues(alpha: 0.2);
+              borderColor = Colors.green;
+            }
+
+            return GestureDetector(
+              onTap: dayBookings.isNotEmpty ? () {
+                _showDayEventsDialog(context, day, dayBookings);
+              } : null,
+              child: Container(
+                alignment: Alignment.center,
+                margin: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  border: borderColor != Colors.transparent ? Border.all(color: borderColor) : null,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('$day', style: TextStyle(fontWeight: dayBookings.isNotEmpty ? FontWeight.bold : FontWeight.normal)),
               ),
-              child: Text('$day', style: TextStyle(fontWeight: hasReservation || hasConfirmed ? FontWeight.bold : FontWeight.normal)),
             );
           },
         ),

@@ -1265,6 +1265,46 @@ app.post('/api/scheduler/bookings', async (req, res) => {
 
   try {
     await pool.query('BEGIN'); 
+    
+    // --- NEW STRICT BOOKING VALIDATION LOGIC ---
+    // Format incoming time to ensure HH:MM:SS format for accurate database comparison
+    const formatTime = (t) => t.split(':').length === 2 ? `${t}:00` : t;
+    const reqStart = formatTime(start_time || '08:00:00');
+    
+    // 1. Fetch any existing active bookings for this specific resource on the chosen date
+    const existingQuery = `
+      SELECT 
+          COALESCE(g.start_time, v.pick_up_time)::time AS existing_start,
+          COALESCE(g.end_time, v.drop_off_time)::time AS existing_end
+      FROM public.bookings b
+      LEFT JOIN public.gm_requirements g ON b.booking_id = g.booking_id
+      LEFT JOIN public.vehicle_requirements v ON b.booking_id = v.booking_id
+      WHERE b.reservation_date = $1 
+        AND b.status IN ('Reserved', 'Confirmed')
+        AND b.booking_type = $2
+    `;
+    const existingRes = await pool.query(existingQuery, [reservation_date, booking_type]);
+    
+    // 2. Evaluate against the rules
+    for (let eb of existingRes.rows) {
+        const existingEndStr = eb.existing_end.toString(); // e.g., '12:00:00'
+        
+        // RULE: "If the booking is until 1pm, no one should be able to book onwards"
+        // RULE: "If someone has reserved the day, no one should be able to reserve again"
+        // Check: If any existing booking ends AFTER 12:00 PM, the rest of the day is locked entirely.
+        if (existingEndStr > '12:00:00') {
+            await pool.query('ROLLBACK');
+            return res.status(400).json({ error: 'This resource is already reserved into the afternoon. No further bookings are allowed for this day.' });
+        }
+
+        // RULE: "If the booking is only until 12pm or earlier, someone should be able to book from that time onwards"
+        // Check: If an existing booking ends at or before 12:00 PM, the new booking MUST start from that end time onwards.
+        if (reqStart < existingEndStr) {
+            await pool.query('ROLLBACK');
+            return res.status(400).json({ error: `A morning reservation already exists. You can only book from ${existingEndStr} onwards.` });
+        }
+    }
+    // --- END OF VALIDATION LOGIC ---
 
     const deptResult = await pool.query(
       'SELECT d.department_name FROM public."User" u JOIN public.department d ON u.d_id = d.d_id WHERE u.u_id = $1',
@@ -1284,7 +1324,8 @@ app.post('/api/scheduler/bookings', async (req, res) => {
     const assetResult = await pool.query(assetQuery, [asset_name]);
     const asd_id = assetResult.rows.length > 0 ? assetResult.rows[0].asd_id : 1; 
 
-    if (booking_type === 'Vehicle') {
+    // Handle both 'Vehicle' and 'Van' categorizations dynamically
+    if (booking_type === 'Vehicle' || booking_type === 'Van') {
       const vQuery = `
         INSERT INTO public.vehicle_requirements (asd_id, sv_id, booking_id, destination, passenger_count, pick_up_time, drop_off_time)
         VALUES ($1, 3, $2, $3, 1, $4, $5);

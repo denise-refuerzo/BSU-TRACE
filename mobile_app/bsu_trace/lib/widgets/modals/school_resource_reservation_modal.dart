@@ -49,7 +49,12 @@ class _SchoolResourceReservationModalState extends State<SchoolResourceReservati
       );
 
       if (response.statusCode == 201) {
-        if (mounted) Navigator.pop(context, true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('School resource reservation created successfully!')),
+          );
+          Navigator.pop(context, true);
+        }
       } else {
         if (mounted) {
           final errBody = json.decode(response.body);

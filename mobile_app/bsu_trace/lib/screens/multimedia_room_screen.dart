@@ -1,4 +1,3 @@
-// lib/screens/multimedia_room_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -164,8 +163,10 @@ class _MultimediaRoomScreenState extends State<MultimediaRoomScreen> {
                       ...filteredBookings.map((b) {
                         final status = (b['status'] ?? 'Reserved').toString();
                         final dateStr = formatDate(b['reservation_date']);
+                        
                         return _buildMultimediaCard(
                           context: context,
+                          bookingData: b, // <-- PASSES THE DATA HERE
                           requestor: b['requestor'] ?? 'Unknown Requestor',
                           date: dateStr,
                           room: b['purpose'] ?? 'Multimedia Suite A',
@@ -180,8 +181,10 @@ class _MultimediaRoomScreenState extends State<MultimediaRoomScreen> {
     );
   }
 
+  // Notice the addition of `required Map<String, dynamic> bookingData`
   Widget _buildMultimediaCard({
     required BuildContext context,
+    required Map<String, dynamic> bookingData,
     required String requestor,
     required String date,
     required String room,
@@ -258,11 +261,15 @@ class _MultimediaRoomScreenState extends State<MultimediaRoomScreen> {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () {
-                showDialog(
+              onPressed: () async {
+                // Passes the data to the modal
+                final result = await showDialog(
                   context: context,
-                  builder: (context) => const MultimediaReservationModal(),
+                  builder: (context) => MultimediaReservationModal(bookingData: bookingData),
                 );
+                if (result == true) {
+                  fetchMultimediaBookings(); // Instantly refreshes on success
+                }
               },
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),

@@ -24,6 +24,9 @@ class _MultimediaReservationModalState extends State<MultimediaReservationModal>
 
   Future<void> _confirmReservation() async {
     if (widget.bookingData == null || widget.bookingData!['booking_id'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error: Booking ID is missing from record.')),
+      );
       Navigator.pop(context);
       return;
     }
@@ -38,16 +41,25 @@ class _MultimediaReservationModalState extends State<MultimediaReservationModal>
       );
 
       if (response.statusCode == 200) {
-        if (mounted) Navigator.pop(context, true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Reservation successfully confirmed!')),
+          );
+          Navigator.pop(context, true);
+        }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Failed to confirm reservation')),
+            SnackBar(content: Text('Server Error (${response.statusCode}): ${response.body}')),
           );
         }
       }
     } catch (e) {
-      debugPrint('Error confirming reservation: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection Failed: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -56,7 +68,8 @@ class _MultimediaReservationModalState extends State<MultimediaReservationModal>
   @override
   Widget build(BuildContext context) {
     final requestor = widget.bookingData?['requestor'] ?? 'Digital Arts Guild';
-    final date = widget.bookingData?['reservation_date'] ?? 'Dec 12, 2023';
+    final rawDate = widget.bookingData?['reservation_date'];
+    final date = rawDate != null ? rawDate.toString().split('T')[0] : 'Dec 12, 2023';
     final room = widget.bookingData?['purpose'] ?? 'Multimedia Suite A';
 
     return Dialog(

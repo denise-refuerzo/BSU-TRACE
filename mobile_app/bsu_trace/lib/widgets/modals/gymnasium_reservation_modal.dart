@@ -14,14 +14,12 @@ class GymnasiumReservationModal extends StatefulWidget {
 }
 
 class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
-  // Checklist State
   bool _formChecked = false;
   bool _intentChecked = false;
   bool _idChecked = false;
   bool _clearanceChecked = false;
   bool _isSubmitting = false;
 
-  // Helper to check if all documents are verified
   bool get _isAllChecked => _formChecked && _intentChecked && _idChecked && _clearanceChecked;
 
   Future<void> _confirmReservation() async {
@@ -38,10 +36,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
     try {
       final bookingId = widget.bookingData!['booking_id'];
       final url = '${AppConfig.baseUrl}/scheduler/bookings/$bookingId';
-      
-      debugPrint('--- SENDING RESERVATION CONFIRMATION ---');
-      debugPrint('URL: $url');
-      debugPrint('Payload: {"status": "Confirmed"}');
 
       final response = await http.put(
         Uri.parse(url),
@@ -49,15 +43,12 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
         body: json.encode({'status': 'Confirmed'}),
       );
 
-      debugPrint('Response Status Code: ${response.statusCode}');
-      debugPrint('Response Body: ${response.body}');
-
       if (response.statusCode == 200) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Reservation successfully confirmed!')),
           );
-          Navigator.pop(context, true); // Returns true to trigger screen refresh
+          Navigator.pop(context, true);
         }
       } else {
         if (mounted) {
@@ -67,7 +58,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
         }
       }
     } catch (e) {
-      debugPrint('Network/Connection Exception: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Connection Failed: $e')),
@@ -83,8 +73,12 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
   @override
   Widget build(BuildContext context) {
     final requestor = widget.bookingData?['requestor'] ?? 'Varsity Sports Council';
-    final date = widget.bookingData?['reservation_date'] ?? 'Dec 10, 2023';
-    final time = '${widget.bookingData?['start_time'] ?? '04:00 PM'} - ${widget.bookingData?['end_time'] ?? '07:00 PM'}';
+    final rawDate = widget.bookingData?['reservation_date'];
+    final date = rawDate != null ? rawDate.toString().split('T')[0] : 'Dec 10, 2023';
+    final purpose = widget.bookingData?['purpose'] ?? 'Court #1 Booking';
+    final startTime = widget.bookingData?['start_time'] ?? '';
+    final endTime = widget.bookingData?['end_time'] ?? '';
+    final timeStr = (startTime.isNotEmpty && endTime.isNotEmpty) ? '$startTime - $endTime' : '04:00 PM - 07:00 PM';
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -97,7 +91,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // --- RED HEADER ---
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 color: AppTheme.primaryRed,
@@ -111,12 +104,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                         children: [
                           Text(
                             'Gymnasium Reservation', 
-                            style: TextStyle(
-                              color: Colors.white, 
-                              fontSize: 18, 
-                              fontWeight: FontWeight.bold,
-                              fontFamily: 'Georgia',
-                            )
+                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia')
                           ),
                           SizedBox(height: 4),
                           Text(
@@ -133,8 +121,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
-              
-              // --- BODY SECTION ---
               Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
@@ -142,18 +128,12 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: _buildInfo('REQUESTOR', requestor)
-                        ),
+                        Expanded(child: _buildInfo('REQUESTOR', requestor)),
                         const SizedBox(width: 16),
-                        Expanded(
-                          child: _buildInfo('DATE & TIME', '$date |\n$time')
-                        ),
+                        Expanded(child: _buildInfo('PURPOSE / DATE', '$purpose\n$date | $timeStr')),
                       ],
                     ),
                     const SizedBox(height: 24),
-
-                    // --- CHECKLIST SECTION ---
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -185,11 +165,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
-
-              // --- DIVIDER ---
               Divider(height: 1, color: Colors.red.shade100, thickness: 1),
-
-              // --- FOOTER BUTTONS ---
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(24.0),
@@ -227,19 +203,11 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))
                         ), 
                         child: _isSubmitting 
-                          ? const SizedBox(
-                              height: 16, 
-                              width: 16, 
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
-                            )
+                          ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                           : Text(
                               'Confirm Reservation', 
                               textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _isAllChecked ? Colors.white : Colors.grey.shade400, 
-                                fontSize: 11, 
-                                fontWeight: FontWeight.bold
-                              )
+                              style: TextStyle(color: _isAllChecked ? Colors.white : Colors.grey.shade400, fontSize: 11, fontWeight: FontWeight.bold)
                             )
                       ),
                     ),

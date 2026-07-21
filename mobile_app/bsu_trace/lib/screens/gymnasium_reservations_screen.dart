@@ -1,11 +1,10 @@
-// lib/screens/gymnasium_reservations_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../../theme/app_theme.dart';
-import '../../widgets/modals/gymnasium_reservation_modal.dart';
-import '../../config.dart';
+import '../theme/app_theme.dart';
+import '../widgets/modals/gymnasium_reservation_modal.dart';
+import '../config.dart';
 
 class GymnasiumReservationsScreen extends StatefulWidget {
   const GymnasiumReservationsScreen({super.key});
@@ -148,7 +147,7 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
                         hintStyle: const TextStyle(color: Colors.black54, fontSize: 14),
                         prefixIcon: const Icon(Icons.search, color: Colors.black54),
                         filled: true,
-                        fillColor: Colors.red.shade50.withValues(alpha: 0.5),
+                        fillColor: Colors.red.shade50.withValues(alpha: 0.5), 
                         contentPadding: const EdgeInsets.symmetric(vertical: 14),
                         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.red.shade100)),
                         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: AppTheme.primaryRed)),
@@ -160,7 +159,7 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50.withValues(alpha: 0.5),
+                        color: Colors.red.shade50.withValues(alpha: 0.5), 
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(color: Colors.red.shade100),
                       ),
@@ -197,8 +196,10 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
                         final status = (b['status'] ?? 'Reserved').toString().toUpperCase();
                         final dateStr = formatDate(b['reservation_date']);
                         final timeStr = b['start_time'] != null ? ' | ${formatTime(b['start_time'])}' : '';
+                        
                         return _buildGymCard(
                           context: context,
+                          bookingData: b, // <-- THIS IS THE CRITICAL FIX. Passes the DB row to the widget below.
                           requestor: b['requestor'] ?? 'Unknown Requestor',
                           details: '${b['purpose'] ?? 'Court Booking'} | $dateStr$timeStr',
                           status: status,
@@ -214,8 +215,10 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
     );
   }
 
+  // Notice the addition of `required Map<String, dynamic> bookingData`
   Widget _buildGymCard({
     required BuildContext context,
+    required Map<String, dynamic> bookingData, 
     required String requestor,
     required String details,
     required String status,
@@ -223,21 +226,28 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
     required Color iconColor,
     required Color iconBgColor,
   }) {
-    Color statusBgColor = Colors.red.shade50;
-    Color statusTextColor = AppTheme.primaryRed;
+    Color statusBgColor;
+    Color statusTextColor;
 
-    if (status == 'CONFIRMED') {
+    if (status == 'RESERVED' || status == 'PENDING') {
+      statusBgColor = Colors.red.shade50;
+      statusTextColor = AppTheme.primaryRed;
+    } else if (status == 'CONFIRMED') {
       statusBgColor = Colors.green.shade50;
       statusTextColor = Colors.green.shade800;
-    } else if (status == 'COMPLETED') {
-      statusBgColor = Colors.grey.shade200;
-      statusTextColor = Colors.black54;
+    } else {
+      statusBgColor = Colors.lightBlue.shade50;
+      statusTextColor = Colors.blue.shade900;
     }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.shade100),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -245,7 +255,10 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
             children: [
               Container(
                 padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: iconBgColor, borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Icon(icon, color: iconColor, size: 24),
               ),
               const SizedBox(width: 16),
@@ -253,38 +266,78 @@ class _GymnasiumReservationsScreenState extends State<GymnasiumReservationsScree
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(requestor, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87, fontFamily: 'Georgia')),
+                    Text(
+                      requestor,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.black87,
+                        fontFamily: 'Georgia', 
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text(details, style: const TextStyle(color: Colors.black54, fontSize: 12, fontWeight: FontWeight.w500)),
+                    Text(
+                      details,
+                      style: const TextStyle(
+                        color: Colors.black54,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 24),
+          
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(color: statusBgColor, borderRadius: BorderRadius.circular(16)),
-                child: Text(status, style: TextStyle(color: statusTextColor, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                decoration: BoxDecoration(
+                  color: statusBgColor,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  status,
+                  style: TextStyle(
+                    color: statusTextColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               ),
+              
               ElevatedButton(
-                onPressed: () {
-                  showDialog(
+                onPressed: () async {
+                  // Passes the data to the actual modal!
+                  final result = await showDialog(
                     context: context,
-                    builder: (context) => const GymnasiumReservationModal(),
+                    builder: (context) => GymnasiumReservationModal(bookingData: bookingData), 
                   );
+                  if (result == true) {
+                    fetchGymBookings(); // Instantly refreshes the screen on success
+                  }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryRed,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
-                child: const Text('View Details', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                child: const Text(
+                  'View Details',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),

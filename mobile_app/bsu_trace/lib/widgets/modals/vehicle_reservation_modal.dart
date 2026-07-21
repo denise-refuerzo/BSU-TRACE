@@ -56,8 +56,12 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
   @override
   Widget build(BuildContext context) {
     final requestor = widget.bookingData?['requestor'] ?? 'Varsity Sports Council';
-    final vehicle = widget.bookingData?['destination'] ?? 'TOYOTA COASTER #4';
-    final date = widget.bookingData?['reservation_date'] ?? 'Dec 10, 2023';
+    final vehicle = widget.bookingData?['destination'] ?? widget.bookingData?['purpose'] ?? 'TOYOTA COASTER #4';
+    final rawDate = widget.bookingData?['reservation_date'];
+    final date = rawDate != null ? rawDate.toString().split('T')[0] : 'Dec 10, 2023';
+    final startTime = widget.bookingData?['start_time'] ?? '';
+    final endTime = widget.bookingData?['end_time'] ?? '';
+    final timeStr = (startTime.isNotEmpty && endTime.isNotEmpty) ? ' | $startTime - $endTime' : '';
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -101,7 +105,7 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                     children: [
                       Expanded(child: _buildInfo('REQUESTOR', requestor)),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildInfo('DATE', date)),
+                      Expanded(child: _buildInfo('DATE & TIME', '$date$timeStr')),
                     ],
                   ),
                   const SizedBox(height: 24),
