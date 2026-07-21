@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config.dart';
 import 'package:bsu_trace/screens/forgot_password_screen.dart';
+import '../widgets/modals/terms_and_conditions_modal.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -49,7 +50,26 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  // UPDATED: Now requires the sessionToken to pass to the SessionManager
+  // Terms and Conditions Modal trigger
+  void _showTermsAndConditions(UserRole role, int userId, String sessionToken) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return TermsAndConditionsModal(
+          onAccept: () {
+            Navigator.of(context).pop(); // Close modal
+            _proceedToDashboard(role, userId, sessionToken);
+          },
+          onDecline: () {
+            Navigator.of(context).pop(); // Close modal
+            SessionManager().logout(); // Securely clear/logout session
+          },
+        );
+      },
+    );
+  }
+
   void _proceedToDashboard(UserRole role, int userId, String sessionToken) {
     SessionManager().login(role, userId, sessionToken);
 
@@ -76,7 +96,7 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _showVerify2FAModal(UserRole actualRole, int userId) {
     final TextEditingController pinController = TextEditingController();
     bool isVerifying = false;
-    int failedAttempts = 0; // Tracks failed attempts locally
+    int failedAttempts = 0;
 
     return showDialog(
       context: context,
@@ -89,39 +109,39 @@ class _AuthScreenState extends State<AuthScreen> {
             setModalState(() => isVerifying = true);
 
             try {
+              final url = '${AppConfig.baseUrl}/verify-2fa';
+              print('Verifying 2FA at: $url');
+
               final response = await http.post(
-                Uri.parse('${AppConfig.baseUrl}/verify-2fa'),
+                Uri.parse(url),
                 headers: {'Content-Type': 'application/json'},
                 body: json.encode({'u_id': userId, 'code': pinController.text}),
               );
 
               if (response.statusCode == 200) {
                 final data = json.decode(response.body);
-                final String token =
-                    data['session_token']; // UPDATED: Extract token
+                final String token = data['session_token'];
 
-                Navigator.pop(context); // Close modal
-                _proceedToDashboard(
-                  actualRole,
-                  userId,
-                  token,
-                ); // Pass the token
+                Navigator.pop(context); // Close 2FA modal
+                
+                // Show Terms & Conditions right after successful 2FA
+                _showTermsAndConditions(actualRole, userId, token); 
               } else if (response.statusCode == 401) {
                 final data = json.decode(response.body);
 
                 setModalState(() {
                   isVerifying = false;
-                  failedAttempts++; // Increment attempt
+                  failedAttempts++;
                   pinController.clear();
                 });
 
-                // If backend sent the new PIN email (10 limits hit)
-                if (data['error'].contains('A NEW PIN has been sent')) {
+                if (data['error'] != null && data['error'].contains('A NEW PIN has been sent')) {
                   Navigator.pop(context);
                   _showAlertDialog('Notice', data['error']);
                 }
               }
             } catch (e) {
+              print('2FA Connection Error: $e');
               setModalState(() => isVerifying = false);
               _showAlertDialog(
                 'Error',
@@ -162,8 +182,6 @@ class _AuthScreenState extends State<AuthScreen> {
                     counterText: '',
                   ),
                 ),
-
-                // ADDED: The dynamic countdown text below the field
                 if (failedAttempts >= 5 && failedAttempts < 10)
                   Padding(
                     padding: const EdgeInsets.only(top: 8.0),
@@ -182,7 +200,7 @@ class _AuthScreenState extends State<AuthScreen> {
             actions: [
               TextButton(
                 onPressed: () {
-                  Navigator.pop(context); // Cancel
+                  Navigator.pop(context);
                   SessionManager().logout();
                 },
                 child: const Text('Cancel'),
@@ -219,8 +237,11 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isLoading = true);
 
     try {
+      final url = '${AppConfig.baseUrl}/login';
+      print('Attempting login request to: $url');
+
       final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/login'),
+        Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'username': _emailController.text,
@@ -236,26 +257,23 @@ class _AuthScreenState extends State<AuthScreen> {
         final int accountId = data['a_id'];
         final int userId = data['u_id'];
         final bool is2faEnabled = data['two_fa_enabled'] ?? false;
-        final String? sessionToken =
-            data['session_token']; // UPDATED: Extract token
+        final String? sessionToken = data['session_token'];
 
         final UserRole actualRole = accountId.toRole();
 
         if (is2faEnabled) {
-          // If 2FA is enabled, the new token comes from the verify-2fa endpoint
           _showVerify2FAModal(actualRole, userId);
         } else {
-          // Pass the token generated from the primary login endpoint
-          _proceedToDashboard(actualRole, userId, sessionToken ?? '');
+          _showTermsAndConditions(actualRole, userId, sessionToken ?? '');
         }
       } else if (response.statusCode == 403) {
-        // CATCH RESTRICTED ACCOUNTS HERE
         final errorMsg = json.decode(response.body)['error'];
         _showAlertDialog('Access Denied', errorMsg);
       } else {
         _showAlertDialog('Login Failed', 'Invalid credentials.');
       }
     } catch (e) {
+      print('Login Connection Error: $e'); // Inspect this in your debug console
       if (!mounted) return;
       setState(() => _isLoading = false);
       _showAlertDialog('Error', 'Connection error. Please check your network.');

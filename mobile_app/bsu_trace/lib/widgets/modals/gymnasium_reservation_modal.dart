@@ -1,25 +1,67 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../../theme/app_theme.dart';
+import '../../config.dart';
 
 class GymnasiumReservationModal extends StatefulWidget {
-  const GymnasiumReservationModal({super.key});
+  final Map<String, dynamic>? bookingData;
+
+  const GymnasiumReservationModal({super.key, this.bookingData});
 
   @override
   State<GymnasiumReservationModal> createState() => _GymnasiumReservationModalState();
 }
 
 class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
-  // Checklist State
   bool _formChecked = false;
   bool _intentChecked = false;
   bool _idChecked = false;
   bool _clearanceChecked = false;
+  bool _isSubmitting = false;
 
-  // Helper to check if all documents are verified
   bool get _isAllChecked => _formChecked && _intentChecked && _idChecked && _clearanceChecked;
+
+  Future<void> _confirmReservation() async {
+    if (widget.bookingData == null || widget.bookingData!['booking_id'] == null) {
+      Navigator.pop(context);
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final bookingId = widget.bookingData!['booking_id'];
+      final response = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/scheduler/bookings'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'booking_id': bookingId,
+          'status': 'Confirmed',
+        }),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to confirm: ${response.body}')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error confirming reservation: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final requestor = widget.bookingData?['requestor'] ?? 'Varsity Sports Council';
+    final date = widget.bookingData?['reservation_date'] ?? 'Dec 10, 2023';
+    final time = '${widget.bookingData?['start_time'] ?? '04:00 PM'} - ${widget.bookingData?['end_time'] ?? '07:00 PM'}';
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: Colors.transparent, 
@@ -31,7 +73,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // --- RED HEADER ---
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 color: AppTheme.primaryRed,
@@ -43,18 +84,11 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: const [
-                          Text(
-                            'Gymnasium Reservation', 
-                            style: TextStyle(
-                              color: Colors.white, 
-                              fontSize: 18, 
-                              fontWeight: FontWeight.bold,
-                              fontFamily: 'Georgia', // Serif font matches screen title
-                            )
+                          Text('Gymnasium Reservation', 
+                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia')
                           ),
                           SizedBox(height: 4),
-                          Text(
-                            'Court #1 (SCREEN_46 Reference)', 
+                          Text('Court #1 Booking Verification', 
                             style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)
                           ),
                         ],
@@ -67,8 +101,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
-              
-              // --- BODY SECTION ---
               Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
@@ -76,18 +108,12 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: _buildInfo('REQUESTOR', 'Varsity Sports\nCouncil')
-                        ),
+                        Expanded(child: _buildInfo('REQUESTOR', requestor)),
                         const SizedBox(width: 16),
-                        Expanded(
-                          child: _buildInfo('DATE & TIME', 'Dec 10, 2023 |\n04:00 PM - 07:00\nPM')
-                        ),
+                        Expanded(child: _buildInfo('DATE & TIME', '$date |\n$time')),
                       ],
                     ),
                     const SizedBox(height: 24),
-
-                    // --- CHECKLIST SECTION ---
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -102,8 +128,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                             children: const [
                               Icon(Icons.assignment_outlined, size: 16, color: Colors.black54),
                               SizedBox(width: 8),
-                              Text(
-                                'DOCUMENT CHECKLIST', 
+                              Text('DOCUMENT CHECKLIST', 
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black54, letterSpacing: 0.5)
                               ),
                             ],
@@ -111,7 +136,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                           const SizedBox(height: 16),
                           _buildCheckboxRow('Approved Request Form', _formChecked, (v) => setState(() => _formChecked = v!)),
                           _buildCheckboxRow('Letter of Intent', _intentChecked, (v) => setState(() => _intentChecked = v!)),
-                          _buildCheckboxRow('Student/Faculty ID\nPhotocopy', _idChecked, (v) => setState(() => _idChecked = v!)),
+                          _buildCheckboxRow('Student/Faculty ID Photocopy', _idChecked, (v) => setState(() => _idChecked = v!)),
                           _buildCheckboxRow('Facility Clearance Slip', _clearanceChecked, (v) => setState(() => _clearanceChecked = v!)),
                         ],
                       ),
@@ -119,15 +144,11 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
-
-              // --- DIVIDER ---
               Divider(height: 1, color: Colors.red.shade100, thickness: 1),
-
-              // --- FOOTER BUTTONS (TINTED BACKGROUND) ---
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(24.0),
-                color: Colors.red.shade50.withValues(alpha: 0.5), // Light pink footer
+                color: Colors.red.shade50.withValues(alpha: 0.5),
                 child: Row(
                   children: [
                     Expanded(
@@ -144,27 +165,20 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: _isAllChecked ? () {
-                          // Handle confirmation logic here
-                          Navigator.pop(context);
-                        } : null, 
+                        onPressed: (_isAllChecked && !_isSubmitting) ? _confirmReservation : null, 
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _isAllChecked ? AppTheme.primaryRed : Colors.grey.shade200,
                           disabledBackgroundColor: Colors.grey.shade200, 
-                          disabledForegroundColor: Colors.grey.shade400,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))
                         ), 
-                        child: Text(
-                          'Confirm Reservation', 
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _isAllChecked ? Colors.white : Colors.grey.shade400, 
-                            fontSize: 11, 
-                            fontWeight: FontWeight.bold
-                          )
-                        )
+                        child: _isSubmitting 
+                          ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text('Confirm Reservation', 
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: _isAllChecked ? Colors.white : Colors.grey.shade400, fontSize: 11, fontWeight: FontWeight.bold)
+                            )
                       ),
                     ),
                   ],
@@ -176,8 +190,6 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
       ),
     );
   }
-
-  // --- REUSABLE WIDGETS ---
 
   Widget _buildInfo(String label, String value) {
     return Column(
@@ -211,10 +223,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(top: 1.0),
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3),
-              ),
+              child: Text(label, style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3)),
             ),
           ),
         ],

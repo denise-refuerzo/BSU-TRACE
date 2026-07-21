@@ -78,53 +78,6 @@ class ProcurementHubScreen extends StatelessWidget {
                 );
               },
             ),
-            
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: const Color(0xFFB01A22), 
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Procurement Health', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('System performance and fulfillment metrics.', style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13)),
-                  const SizedBox(height: 24),
-                  
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: const [
-                      Text('98%', style: TextStyle(color: Colors.white, fontSize: 48, fontWeight: FontWeight.bold, height: 1)),
-                      SizedBox(width: 8),
-                      Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Text('SLA Met', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      ),
-                    ]
-                  ),
-                  const SizedBox(height: 32),
-                  
-                  _buildMetricBar('Vehicles', '100%', 1.0),
-                  const SizedBox(height: 20),
-                  _buildMetricBar('Facility Usage', '92%', 0.92),
-                  const SizedBox(height: 32),
-                  
-                  ElevatedButton.icon(
-                    onPressed: (){},
-                    icon: const Icon(Icons.insert_chart_outlined, color: Color(0xFFB01A22)),
-                    label: const Text('Full Report', style: TextStyle(color: Color(0xFFB01A22), fontWeight: FontWeight.bold, fontSize: 16)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 50),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
-                    )
-                  )
-                ]
-              )
-            )
           ],
         ),
       ),

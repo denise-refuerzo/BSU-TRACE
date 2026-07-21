@@ -1,9 +1,85 @@
+// lib/screens/multimedia_room_screen.dart
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../widgets/modals/multimedia_reservation_modal.dart';
+import '../config.dart';
 
-class MultimediaRoomScreen extends StatelessWidget {
+class MultimediaRoomScreen extends StatefulWidget {
   const MultimediaRoomScreen({super.key});
+
+  @override
+  State<MultimediaRoomScreen> createState() => _MultimediaRoomScreenState();
+}
+
+class _MultimediaRoomScreenState extends State<MultimediaRoomScreen> {
+  List<dynamic> bookings = [];
+  List<dynamic> filteredBookings = [];
+  bool isLoading = true;
+  String _searchQuery = '';
+  String _selectedStatus = 'All Statuses';
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchMultimediaBookings();
+    _timer = Timer.periodic(const Duration(seconds: 10), (t) => fetchMultimediaBookings());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchMultimediaBookings() async {
+    final url = '${AppConfig.baseUrl}/scheduler/bookings';
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            final allBookings = json.decode(response.body) as List;
+            bookings = allBookings.where((b) => (b['booking_type'] ?? '').toString().toLowerCase() == 'room' || (b['booking_type'] ?? '').toString().toLowerCase() == 'multimedia room').toList();
+            _applyFilters();
+            isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching multimedia room reservations: $e');
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  void _applyFilters() {
+    setState(() {
+      filteredBookings = bookings.where((b) {
+        final requestor = (b['requestor'] ?? '').toString().toLowerCase();
+        final purpose = (b['purpose'] ?? '').toString().toLowerCase();
+        final status = (b['status'] ?? 'Reserved').toString().toLowerCase();
+
+        final matchesSearch = requestor.contains(_searchQuery.toLowerCase()) || purpose.contains(_searchQuery.toLowerCase());
+        final matchesStatus = _selectedStatus == 'All Statuses' || status == _selectedStatus.toLowerCase();
+
+        return matchesSearch && matchesStatus;
+      }).toList();
+    });
+  }
+
+  String formatDate(String? dateString) {
+    if (dateString == null) return 'N/A';
+    try {
+      DateTime d = DateTime.parse(dateString);
+      List<String> months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[d.month - 1]} ${d.day}, ${d.year}';
+    } catch (e) {
+      return dateString.split('T')[0];
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,142 +95,118 @@ class MultimediaRoomScreen extends StatelessWidget {
         titleSpacing: 0,
         title: const Text(
           'Procurement Hub',
-          style: TextStyle(
-            color: AppTheme.primaryRed,
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-          ),
+          style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 16),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Multimedia Room',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primaryRed, 
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Manage and approve AV facility reservations.',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 20),
-            
-            // Search Bar
-            TextField(
-              decoration: InputDecoration(
-                hintText: 'Search requestor...',
-                hintStyle: const TextStyle(color: Colors.black54, fontSize: 14),
-                prefixIcon: const Icon(Icons.search, color: Colors.black54),
-                filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4), 
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: AppTheme.primaryRed),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Dropdown Filter
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: const [
-                  Text(
-                    'All Statuses',
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontSize: 14,
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
+          : RefreshIndicator(
+              onRefresh: fetchMultimediaBookings,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Multimedia Room', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.primaryRed)),
+                    const SizedBox(height: 4),
+                    const Text('Manage and approve AV facility reservations.', style: TextStyle(fontSize: 14, color: Colors.black87)),
+                    const SizedBox(height: 20),
+                    
+                    TextField(
+                      onChanged: (val) {
+                        _searchQuery = val;
+                        _applyFilters();
+                      },
+                      decoration: InputDecoration(
+                        hintText: 'Search requestor...',
+                        hintStyle: const TextStyle(color: Colors.black54, fontSize: 14),
+                        prefixIcon: const Icon(Icons.search, color: Colors.black54),
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: AppTheme.primaryRed)),
+                      ),
                     ),
-                  ),
-                  Icon(Icons.keyboard_arrow_down, color: Colors.black54),
-                ],
+                    const SizedBox(height: 12),
+
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.grey.shade300)),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedStatus,
+                          items: ['All Statuses', 'Reserved', 'Confirmed', 'Completed']
+                              .map((status) => DropdownMenuItem(value: status, child: Text(status, style: const TextStyle(color: Colors.black87, fontSize: 14))))
+                              .toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _selectedStatus = val;
+                                _applyFilters();
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.black54),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    if (filteredBookings.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 40),
+                        child: Center(child: Text('No multimedia room reservations found.', style: TextStyle(color: Colors.grey))),
+                      )
+                    else
+                      ...filteredBookings.map((b) {
+                        final status = (b['status'] ?? 'Reserved').toString();
+                        final dateStr = formatDate(b['reservation_date']);
+                        return _buildMultimediaCard(
+                          context: context,
+                          requestor: b['requestor'] ?? 'Unknown Requestor',
+                          date: dateStr,
+                          room: b['purpose'] ?? 'Multimedia Suite A',
+                          status: status,
+                          icon: Icons.videocam_outlined,
+                        );
+                      }),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 24),
-
-            // Reservation Cards
-            _buildMultimediaCard(
-              context: context, // <--- FIXED: Passed context here
-              requestor: 'Digital Arts Guild',
-              date: 'Dec 12, 2023',
-              room: 'Multimedia Suite A',
-              status: 'Pending',
-              icon: Icons.people_alt_outlined, 
-            ),
-            _buildMultimediaCard(
-              context: context, // <--- FIXED: Passed context here
-              requestor: 'Faculty Union',
-              date: 'Dec 14, 2023',
-              room: 'Seminar Room 102',
-              status: 'Approved',
-              icon: Icons.school_outlined,
-            ),
-            _buildMultimediaCard(
-              context: context, // <--- FIXED: Passed context here
-              requestor: 'Varsity Sports Council',
-              date: 'Dec 10, 2023',
-              room: 'Main Theatre',
-              status: 'Completed',
-              icon: Icons.workspace_premium_outlined, 
-            ),
-          ],
-        ),
-      ),
     );
   }
 
-  // FIXED: Added 'required BuildContext context' to the parameters
   Widget _buildMultimediaCard({
-    required BuildContext context, 
+    required BuildContext context,
     required String requestor,
     required String date,
     required String room,
     required String status,
     required IconData icon,
   }) {
-    // Determine dynamic colors for the status badge
     Color badgeBgColor;
     Color badgeTextColor;
     Color dotColor;
     Color badgeBorderColor;
 
-    if (status == 'Pending') {
-      badgeBgColor = const Color(0xFFFFF9C4); // Light yellow
-      badgeTextColor = const Color(0xFFF57F17); // Dark orange
+    final statusLower = status.toLowerCase();
+    if (statusLower == 'reserved' || statusLower == 'pending') {
+      badgeBgColor = const Color(0xFFFFF9C4);
+      badgeTextColor = const Color(0xFFF57F17);
       dotColor = const Color(0xFFF57F17);
       badgeBorderColor = const Color(0xFFFFE082);
-    } else if (status == 'Approved') {
-      badgeBgColor = const Color(0xFFE8F5E9); // Light green
-      badgeTextColor = const Color(0xFF2E7D32); // Dark green
+    } else if (statusLower == 'confirmed' || statusLower == 'approved') {
+      badgeBgColor = const Color(0xFFE8F5E9);
+      badgeTextColor = const Color(0xFF2E7D32);
       dotColor = const Color(0xFF2E7D32);
       badgeBorderColor = const Color(0xFFA5D6A7);
     } else {
-      // Completed
-      badgeBgColor = const Color(0xFFFCE4EC); // Light reddish-grey
-      badgeTextColor = const Color(0xFF5D4037); // Dark brownish
+      badgeBgColor = const Color(0xFFFCE4EC);
+      badgeTextColor = const Color(0xFF5D4037);
       dotColor = const Color(0xFF5D4037);
       badgeBorderColor = const Color(0xFFF8BBD0);
     }
@@ -162,105 +214,47 @@ class MultimediaRoomScreen extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.red.shade100),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.red.shade100)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Row: Icon, Requestor, Date
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
                 child: Icon(icon, color: AppTheme.primaryRed),
               ),
               const SizedBox(width: 16),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    requestor,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.black87,
-                    ),
-                  ),
+                  Text(requestor, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)),
                   const SizedBox(height: 4),
-                  Text(
-                    date,
-                    style: const TextStyle(
-                      color: Colors.black54,
-                      fontSize: 13,
-                    ),
-                  ),
+                  Text(date, style: const TextStyle(color: Colors.black54, fontSize: 13)),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 20),
-          
-          // Room Details
-          const Text(
-            'ROOM:',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
+          const Text('ROOM / PURPOSE:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.black87)),
           const SizedBox(height: 4),
-          Text(
-            room,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.black87,
-            ),
-          ),
+          Text(room, style: const TextStyle(fontSize: 14, color: Colors.black87)),
           const SizedBox(height: 16),
-
-          // Status Badge with dot
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: badgeBgColor,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: badgeBorderColor, width: 0.5),
-            ),
+            decoration: BoxDecoration(color: badgeBgColor, borderRadius: BorderRadius.circular(4), border: Border.all(color: badgeBorderColor, width: 0.5)),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: dotColor,
-                    shape: BoxShape.circle,
-                  ),
-                ),
+                Container(width: 6, height: 6, decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle)),
                 const SizedBox(width: 6),
-                Text(
-                  status,
-                  style: TextStyle(
-                    color: badgeTextColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                Text(status.toUpperCase(), style: TextStyle(color: badgeTextColor, fontSize: 12, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
           const SizedBox(height: 20),
-
-          // Action Button (Text on left, Icon on right)
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -273,20 +267,12 @@ class MultimediaRoomScreen extends StatelessWidget {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 side: const BorderSide(color: AppTheme.primaryRed),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(4),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: const [
-                  Text(
-                    'View Details',
-                    style: TextStyle(
-                      color: AppTheme.primaryRed,
-                      fontSize: 14,
-                    ),
-                  ),
+                  Text('View Details', style: TextStyle(color: AppTheme.primaryRed, fontSize: 14)),
                   SizedBox(width: 8),
                   Icon(Icons.open_in_new, size: 16, color: AppTheme.primaryRed),
                 ],

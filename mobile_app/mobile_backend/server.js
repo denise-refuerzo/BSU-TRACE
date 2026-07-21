@@ -2488,6 +2488,33 @@ io.on('connection', (socket) => {
 }); // <--- This single closing bracket closes the entire io.on block
 
 // ==========================================
+// UPDATE BOOKING STATUS ENDPOINT
+// ==========================================
+app.put('/api/scheduler/bookings/:id', async (req, res) => {
+  const bookingId = req.params.id;
+  const { status } = req.body;
+
+  try {
+    const result = await pool.query(
+      `UPDATE public.bookings 
+       SET status = $1, updated_at = timezone('Asia/Manila', now()) 
+       WHERE booking_id = $2 
+       RETURNING booking_id;`,
+      [status, bookingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    res.status(200).json({ message: 'Booking status updated successfully' });
+  } catch (error) {
+    console.error('Update Booking Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==========================================
 // SERVER INITIALIZATION
 // ==========================================
 // Ensure this block is at the VERY bottom, and only appears once.
