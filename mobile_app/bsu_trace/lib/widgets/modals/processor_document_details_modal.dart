@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; 
 import 'package:qr_flutter/qr_flutter.dart'; 
 import 'signee_ad_hoc_routing_modal.dart'; 
-import 'qr_download_modal.dart'; // Added import for the downloader
+import 'qr_download_modal.dart'; 
 
 class ProcessorDocumentDetailsModal extends StatelessWidget {
   final Map<String, dynamic> document;
@@ -23,7 +23,13 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
     final String trackingId = document['qr_code'] ?? document['tracking_id'] ?? 'N/A';
     final String formType = document['form_type'] ?? document['process_name'] ?? 'N/A';
     final String status = document['status'] ?? 'Pending';
-    final String originatingOffice = document['origin_office'] ?? document['originatingOffice'] ?? 'N/A';
+    final String originatorName = document['originator_name'] ?? 'Unknown Originator';
+    
+    final String rawOfficeName = document['origin_office'] ?? document['originatingOffice'] ?? 'N/A';
+    // Fallback just in case the raw string leaks from another endpoint
+    final String displayOfficeName = rawOfficeName == 'ORIGINATING_COLLEGE_DYNAMIC' 
+        ? 'Originating Department' 
+        : rawOfficeName;
 
     const Color primaryRed = Color(0xFFB71C1C);
     const Color lightPink = Color(0xFFFFEBEE);
@@ -180,25 +186,59 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
           ),
 
           const SizedBox(height: 16),
-          Column(
+
+          // Updated Row containing both Originating Office and Originator
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'ORIGINATING OFFICE',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey[600],
-                  letterSpacing: 0.8,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ORIGINATING OFFICE',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      displayOfficeName,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                originatingOffice,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ORIGINATOR',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      originatorName,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -241,7 +281,6 @@ class ProcessorDocumentDetailsModal extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Attached the downloader modal here
                 TextButton.icon(
                   onPressed: () {
                     showDialog(

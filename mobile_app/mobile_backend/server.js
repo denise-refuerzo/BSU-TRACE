@@ -773,24 +773,32 @@ app.get('/api/processors/:id/documents', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // FIX: 
-    // 1. Sorts by pd_id to ensure "Awaiting Scan In" (NULL timestamps) appear at the very top.
-    // 2. Strictly tracks physical custody to prevent false-positive "Incoming" floods from custom routes.
+    // FIX:
+    // 1. Added u.full_name AS originator_name
+    // 2. Added CASE statement to swap 999 with d.department_name
+    // 3. Joined "User" and department tables
     const query = `
       WITH RankedDocs AS (
         SELECT 
-          i.ini_id, i.qr_code, i.title, p.process_name AS form_type, origin_o.office_name AS origin_office, 
+          i.ini_id, i.qr_code, i.title, p.process_name AS form_type, 
+          CASE 
+            WHEN origin_o.o_id = 999 THEN d.department_name 
+            ELSE origin_o.office_name 
+          END AS origin_office,
+          u.full_name AS originator_name,
           s.current_status AS status, pd.time_in, pd.time_out,
           pd.current_office_id, pd.is_adhoc, pd.pd_id,
           ROW_NUMBER() OVER (PARTITION BY i.ini_id ORDER BY pd.pd_id DESC) as rn
         FROM public.initial_document i
+        LEFT JOIN public."User" u ON i.u_id = u.u_id
+        LEFT JOIN public.department d ON u.d_id = d.d_id
         LEFT JOIN public.process_type p ON i.p_id = p.p_id
         LEFT JOIN public.route r ON p.r_id = r.r_id
         LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
         LEFT JOIN public.processed_document pd ON i.ini_id = pd.ini_id
         LEFT JOIN public.status s ON pd.s_id = s.s_id
       )
-      SELECT qr_code, title, form_type, origin_office, status, time_in, time_out, current_office_id,
+      SELECT qr_code, title, form_type, origin_office, originator_name, status, time_in, time_out, current_office_id,
         TO_CHAR(COALESCE(time_in, CURRENT_TIMESTAMP), 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS created_at,
         CASE WHEN current_office_id = $1 THEN true ELSE false END as is_at_current_office,
         is_adhoc,
