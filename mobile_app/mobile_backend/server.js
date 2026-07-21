@@ -1722,12 +1722,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // ==========================================
 // 22. FETCH ICT ADMIN DASHBOARD STATS
 // ==========================================
+// GET /api/admin/ict-stats
 app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
   try {
     const userId = req.query.u_id;
     let adminName = 'System Administrator';
 
-    // 1. Fetch current Admin's name dynamically using the passed u_id
     if (userId) {
       const userResult = await db.query(
         `SELECT full_name FROM "User" WHERE u_id = $1`, 
@@ -1738,40 +1738,53 @@ app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
       }
     }
 
-    // 2. Total & Active Users
-    const userStats = await db.query(`
+    // 1. Core Metrics
+    const userStats = await db.query(`SELECT COUNT(*) as total_users FROM "User";`);
+    const docStats = await db.query(`SELECT COUNT(DISTINCT ini_id) as active_docs FROM processed_document WHERE s_id NOT IN (4, 5);`);
+    const blueprintStats = await db.query(`SELECT COUNT(*) as total_blueprints FROM process_type;`);
+    const logStats = await db.query(`SELECT COUNT(*) as total_logs FROM office_action_history;`);
+
+    // 2. LIVE SYSTEM-WIDE AUDIT STREAM FEED (Limit 15)
+    const auditQuery = await db.query(`
       SELECT 
-        COUNT(*) as total_users,
-        COUNT(CASE WHEN is_active = true THEN 1 END) as active_users
-      FROM "User";
+        u.full_name, 
+        oah.action_type, 
+        id.title, 
+        o.office_name, 
+        oah.action_timestamp 
+      FROM office_action_history oah 
+      JOIN "User" u ON oah.u_id = u.u_id 
+      JOIN initial_document id ON oah.ini_id = id.ini_id 
+      JOIN offices o ON oah.o_id = o.o_id 
+      ORDER BY oah.action_timestamp DESC 
+      LIMIT 15;
     `);
 
-    // 3. Total Offices (excluding dynamic/system placeholders like 999)
-    const officeStats = await db.query(`
-      SELECT COUNT(*) as total_offices FROM offices WHERE o_id != 999;
-    `);
-
-    // 4. System Action Logs Count
-    const logStats = await db.query(`
-      SELECT COUNT(*) as total_logs FROM office_action_history;
-    `);
-
-    // 5. Five Most Recent Users
-    const recentUsers = await db.query(`
-      SELECT u.u_id, u.full_name, u.username, u.is_active, a.account_type
-      FROM "User" u
-      LEFT JOIN account a ON u.a_id = a.a_id
-      ORDER BY u.u_id DESC
-      LIMIT 5;
+    // 3. STALLED QUEUE CONGESTION ALERTS (> 48 hours)
+    const stalledQuery = await db.query(`
+      SELECT 
+        id.title, 
+        o.office_name, 
+        pd.time_in, 
+        FLOOR(EXTRACT(EPOCH FROM (timezone('Asia/Manila', now()) - pd.time_in))/3600) AS hours_stuck 
+      FROM processed_document pd 
+      JOIN initial_document id ON pd.ini_id = id.ini_id 
+      JOIN offices o ON pd.current_office_id = o.o_id 
+      WHERE pd.time_out IS NULL 
+        AND pd.s_id NOT IN (4, 5) 
+        AND pd.time_in < (timezone('Asia/Manila', now()) - INTERVAL '48 hours') 
+      ORDER BY hours_stuck DESC 
+      LIMIT 10;
     `);
 
     res.json({
       adminName: adminName,
-      totalUsers: parseInt(userStats.rows[0].total_users || 0),
-      activeUsers: parseInt(userStats.rows[0].active_users || 0),
-      totalOffices: parseInt(officeStats.rows[0].total_offices || 0),
-      totalSystemLogs: parseInt(logStats.rows[0].total_logs || 0),
-      recentUsers: recentUsers.rows
+      registeredPersonnel: parseInt(userStats.rows[0].total_users || 0),
+      activeDocumentTracks: parseInt(docStats.rows[0].active_docs || 0),
+      workflowBlueprints: parseInt(blueprintStats.rows[0].total_blueprints || 0),
+      auditStreamFeed: parseInt(logStats.rows[0].total_logs || 0),
+      auditLogs: auditQuery.rows,
+      stalledAlerts: stalledQuery.rows
     });
   } catch (err) {
     console.error('Error fetching ICT stats:', err);
