@@ -3,7 +3,7 @@ const cors = require('cors');
 const jwt = require('jwt-simple');
 const bcrypt = require('bcrypt');
 const pool = require('./db');
-const { sendResetCodeEmail, sendTrackingAlertEmail } = require('./mailer');
+const { sendResetCodeEmail, sendTrackingAlertEmail, sendSystemEmail } = require('./mailer');
 const crypto = require('crypto');
 const axios = require('axios');
 require('dotenv').config();
@@ -15,91 +15,94 @@ app.use(express.json());
 const JWT_SECRET = process.env.JWT_SECRET || 'your_super_secret_jwt_key';
 
 const failed2faAttemptsTracker = {};
+const generateSixDigitCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 // 1. CONDITIONAL LOGIN ENDPOINT WITH 2FA VERIFICATION CHANNELS
 app.post('/api/login', async (req, res) => {
-  const { username, password, pinCode } = req.body;
+  const { username, password } = req.body;
+
   try {
     const result = await pool.query(
-      `SELECT u.*, a.account_type, d.department_name 
+      `SELECT u.u_id, u.password, u.a_id, u.two_fa_enabled, u.is_active, u.uni_email, 
+              a.account_type, d.department_name, u.full_name
        FROM public."User" u
        JOIN public.account a ON u.a_id = a.a_id
        JOIN public.department d ON u.d_id = d.d_id
-       WHERE u.username = $1`, 
+       WHERE u.username = $1`,
       [username]
     );
 
-    if (result.rows.length === 0) return res.status(401).json({ error: 'Invalid username or password' });
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     const user = result.rows[0];
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ error: 'Invalid username or password' });
 
     if (user.is_active === false) {
-      return res.status(403).json({ error: 'Access Revoked: This user profile has been deactivated by administration.' });
+      return res.status(403).json({ error: 'Account disabled. Please contact the ICT Administrator.' });
     }
 
-    if (!failed2faAttemptsTracker[user.u_id]) {
-      failed2faAttemptsTracker[user.u_id] = 0;
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (user.two_fa_enabled && failed2faAttemptsTracker[user.u_id] >= 10) {
-      return res.status(423).json({ 
-        error: 'Security Lockout: 10 consecutive wrong entry combinations detected. Manual security PIN reset required.',
-        requiresPinReset: true 
+    // ----------------------------------------------------
+    // NEW LOGIC: Generate & Email 2FA PIN
+    // ----------------------------------------------------
+    if (user.two_fa_enabled) {
+      const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+
+      await pool.query(
+        'UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', 
+        [generatedPin, user.u_id]
+      );
+
+      await sendSystemEmail(
+        user.uni_email,
+        'BSU-Trace Login Verification',
+        `Your 2FA verification code is: ${generatedPin}. Do not share this with anyone.`
+      );
+
+      return res.status(200).json({
+        u_id: user.u_id,
+        a_id: user.a_id,
+        two_fa_enabled: true
       });
     }
 
-    if (user.two_fa_enabled && !pinCode) {
-      return res.json({ require2FA: true });
-    }
-
-    if (user.two_fa_enabled && pinCode) {
-      if (user.two_fa_code !== pinCode) {
-        failed2faAttemptsTracker[user.u_id] += 1;
-        
-        const remainingAttempts = 10 - failed2faAttemptsTracker[user.u_id];
-        if (remainingAttempts <= 0) {
-          return res.status(423).json({ 
-            error: 'Security Lockout: 10 consecutive wrong entry combinations detected. Manual security PIN reset required.',
-            requiresPinReset: true 
-          });
-        }
-        
-        return res.status(401).json({ 
-          error: `Invalid security PIN code combination. Warning: ${remainingAttempts} attempts remaining before system lockout.` 
-        });
-      }
-      
-      failed2faAttemptsTracker[user.u_id] = 0;
-    }
-
-    // --- NEW SESSION TOKEN GENERATION & DATABASE STORAGE ---
-    const newSessionToken = crypto.randomBytes(16).toString('hex');
-
-    await pool.query(
-      `UPDATE public."User" SET session_token = $1 WHERE u_id = $2`, 
-      [newSessionToken, user.u_id]
-    );
-
-    // Inject the newSessionToken into the JWT payload
+    // ----------------------------------------------------
+    // NORMAL LOGIC: If 2FA is OFF, generate token immediately
+    // ----------------------------------------------------
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await pool.query('UPDATE public."User" SET session_token = $1 WHERE u_id = $2', [sessionToken, user.u_id]);
+    
+    // Maintain the JWT payload structure required by your middleware
     const token = jwt.encode({ 
       u_id: user.u_id, 
-      username: user.username, 
+      username: username, 
       a_id: user.a_id,
-      session_token: newSessionToken 
+      session_token: sessionToken 
     }, JWT_SECRET);
 
-    res.json({ 
-      token, 
-      role: user.a_id, 
+    return res.status(200).json({
+      message: 'Login successful',
+      token,
+      role: user.a_id,
       roleName: user.account_type,
-      fullName: user.full_name, 
-      userId: user.u_id 
+      fullName: user.full_name,
+      userId: user.u_id,
+      two_fa_enabled: false,
+      session_token: sessionToken 
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server logging calculation error' });
+
+  } catch (error) {
+    console.error('Login Error:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
@@ -140,6 +143,99 @@ const requireAuth = async (req, res, next) => {
     return res.status(401).json({ error: 'Invalid or expired token.' });
   }
 };
+
+app.post('/api/login/verify-2fa', async (req, res) => {
+  const { userId, otpCode } = req.body;
+
+  try {
+    // 1. Fetch the user, their OTP, and the extra profile details needed for the frontend JWT
+    const result = await pool.query(
+      `SELECT u.u_id, u.username, u.a_id, u.two_fa_code, u.full_name, a.account_type 
+       FROM public."User" u
+       JOIN public.account a ON u.a_id = a.a_id
+       WHERE u.u_id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = result.rows[0];
+
+    // 2. Compare the input code with the database code
+    if (user.two_fa_code !== otpCode) {
+      return res.status(401).json({ error: 'Invalid verification code' });
+    }
+
+    // 3. If successful, generate the session token
+    const crypto = require('crypto');
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+
+    // 4. Update the token in the DB and clear the temporary OTP code for security
+    await pool.query(
+      'UPDATE public."User" SET session_token = $1 WHERE u_id = $2', 
+      [sessionToken, user.u_id]
+    );
+
+    // 5. Generate the JWT with the full payload
+    const token = jwt.encode({ 
+      u_id: user.u_id, 
+      username: user.username, 
+      a_id: user.a_id,
+      session_token: sessionToken 
+    }, JWT_SECRET);
+
+    // 6. Log the user in with the exact same payload structure as the standard login
+    return res.status(200).json({
+      message: '2FA verification successful',
+      token,
+      role: user.a_id,
+      roleName: user.account_type,
+      fullName: user.full_name,
+      userId: user.u_id,
+      session_token: sessionToken 
+    });
+
+  } catch (error) {
+    console.error('2FA Verification Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/profile/:id/verify-enable-2fa', async (req, res) => {
+  const userId = req.params.id;
+  const { otpCode } = req.body;
+
+  try {
+    // 1. Fetch the user's stored OTP
+    const result = await pool.query(
+      'SELECT two_fa_code FROM public."User" WHERE u_id = $1',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // 2. Check if the code matches
+    if (result.rows[0].two_fa_code !== otpCode) {
+      return res.status(400).json({ error: 'Invalid verification code' });
+    }
+
+    // 3. Code matches! Enable 2FA and clear the temporary OTP code
+    await pool.query(
+      'UPDATE public."User" SET two_fa_enabled = true, two_fa_code = NULL WHERE u_id = $1',
+      [userId]
+    );
+
+    res.status(200).json({ message: 'Two-Factor Authentication has been successfully enabled.' });
+
+  } catch (error) {
+    console.error('Enable 2FA Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // ==========================================
 // REAL-TIME POSTGRESQL NOTIFICATION LISTENER
@@ -293,15 +389,29 @@ app.get('/api/profile/:userId', requireAuth, async (req, res) => {
 
 app.put('/api/profile/:userId', requireAuth, async (req, res) => {
   const { fullName, email, twoFaEnabled, twoFaCode } = req.body;
+  
   try {
+    // 1. Validate that required personal information fields are not empty
+    if (!fullName || !fullName.trim() || !email || !email.trim()) {
+      return res.status(400).json({ error: 'Full Name and University Email are required fields.' });
+    }
+
+    // 2. Enforce 2FA security validation rules for all user types
+    if (twoFaEnabled && (!twoFaCode || twoFaCode.toString().length < 4)) {
+      return res.status(400).json({ error: 'A valid numeric PIN (at least 4 digits) is required to enable Two-Factor Authentication.' });
+    }
+
+    // 3. Execute the update query across the shared "User" table
     await pool.query(
       `UPDATE public."User" 
        SET full_name = $1, uni_email = $2, two_fa_enabled = $3, two_fa_code = $4
        WHERE u_id = $5`,
-      [fullName, email, twoFaEnabled, twoFaCode || null, req.params.userId]
+      [fullName.trim(), email.trim(), twoFaEnabled, twoFaCode || null, req.params.userId]
     );
+    
     res.json({ message: 'Profile variables synchronized successfully!' });
   } catch (err) {
+    console.error("Profile Synchronization Error:", err);
     res.status(500).json({ error: 'Failed to synchronize layout values' });
   }
 });
@@ -320,6 +430,34 @@ app.put('/api/profile/:userId/password', requireAuth, async (req, res) => {
     res.json({ message: 'Credentials records changed cleanly' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to rewrite target security credentials record' });
+  }
+});
+
+// ==========================================
+// REQUEST OTP FOR PROFILE SECURITY CHANGES
+// ==========================================
+app.post('/api/users/:id/request-profile-otp', async (req, res) => {
+  const userId = req.params.id;
+
+  try {
+    const userRes = await pool.query('SELECT uni_email FROM public."User" WHERE u_id = $1', [userId]);
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    
+    const email = userRes.rows[0].uni_email;
+    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [generatedPin, userId]);
+    
+    await sendSystemEmail(
+      email,
+      'BSU-Trace Security Update',
+      `Your verification code to authorize changes to your 2FA settings is: ${generatedPin}. Do not share this with anyone.`
+    );
+    
+    res.status(200).json({ message: 'Verification code sent to email' });
+  } catch (error) {
+    console.error('Request Profile OTP Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1362,28 +1500,28 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
   }
 });
 
-app.post('/api/auth/forgot-pin/reset', async (req, res) => {
-  const { username } = req.body;
-  try {
-    const result = await pool.query(
-      'SELECT u_id, uni_email, full_name FROM public."User" WHERE username = $1',
-      [username.trim()]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Account username reference entry missing.' });
+// app.post('/api/auth/forgot-pin/reset', async (req, res) => {
+//   const { username } = req.body;
+//   try {
+//     const result = await pool.query(
+//       'SELECT u_id, uni_email, full_name FROM public."User" WHERE username = $1',
+//       [username.trim()]
+//     );
+//     if (result.rows.length === 0) return res.status(404).json({ error: 'Account username reference entry missing.' });
 
-    const user = result.rows[0];
-    const newRandomPin = Math.floor(100000 + Math.random() * 900000).toString();
+//     const user = result.rows[0];
+//     const newRandomPin = Math.floor(100000 + Math.random() * 900000).toString();
 
-    await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [newRandomPin, user.u_id]);
-    failed2faAttemptsTracker[user.u_id] = 0; 
+//     await pool.query('UPDATE public."User" SET two_fa_code = $1 WHERE u_id = $2', [newRandomPin, user.u_id]);
+//     failed2faAttemptsTracker[user.u_id] = 0; 
 
-    await sendResetCodeEmail(user.uni_email, user.full_name, `YOUR SECURITY DASHBOARD TWO-FACTOR AUTHENTICATION PIN HAS BEEN RESET TO: ${newRandomPin}`);
+//     await sendResetCodeEmail(user.uni_email, user.full_name, `YOUR SECURITY DASHBOARD TWO-FACTOR AUTHENTICATION PIN HAS BEEN RESET TO: ${newRandomPin}`);
 
-    res.json({ message: 'A fresh verification PIN has been dispatched to your institutional inbox successfully!' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed autonomous self-service recovery tracking code loop.' });
-  }
-});
+//     res.json({ message: 'A fresh verification PIN has been dispatched to your institutional inbox successfully!' });
+//   } catch (err) {
+//     res.status(500).json({ error: 'Failed autonomous self-service recovery tracking code loop.' });
+//   }
+// });
 
 app.post('/api/process-types', async (req, res) => {
   const { processName, stops } = req.body;

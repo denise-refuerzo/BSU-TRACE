@@ -285,51 +285,69 @@ export default function ProcessorDashboard() {
   };
 
   const toggle2FA = async (checked) => {
-    setTwoFaEnabled(checked);
     if (!checked) {
       try {
         const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fullName: profileName,
-            email: profileEmail,
-            twoFaEnabled: false,
-            twoFaCode: null
-          })
+          body: JSON.stringify({ fullName: profileName, email: profileEmail, twoFaEnabled: false })
         });
         if (res.ok) {
-          setTwoFaCode('');
-          minimalSwal.fire({ icon: 'info', title: 'Security Update', text: 'Two-Factor Authentication disabled.' });
+          setTwoFaEnabled(false);
+          minimalSwal.fire({ icon: 'success', title: 'Disabled', text: 'Two-Factor Authentication is now off.' });
         }
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to update security settings.' });
+      }
+      return;
+    }
+
+    try {
+      minimalSwal.fire({
+        title: 'Sending Code...',
+        text: 'Please wait while we dispatch your verification email.',
+        allowOutsideClick: false,
+        didOpen: () => { minimalSwal.showLoading(); }
+      });
+
+      const requestRes = await fetchWithAuth(`http://localhost:5000/api/users/${userId}/request-profile-otp`, { 
+        method: 'POST' 
+      });
+
+      if (!requestRes.ok) throw new Error('Failed to dispatch email.');
+
+      const { value: otpCode } = await minimalSwal.fire({
+        title: 'Verify Your Email',
+        text: `We sent a 6-digit code to ${profileEmail}.`,
+        input: 'text',
+        inputAttributes: { maxLength: 6, style: 'text-align: center; letter-spacing: 0.5em; font-weight: bold;' },
+        showCancelButton: true,
+        confirmButtonText: 'Verify & Enable'
+      });
+
+      if (otpCode) {
+        const verifyRes = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/verify-enable-2fa`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otpCode })
+        });
+
+        if (verifyRes.ok) {
+          setTwoFaEnabled(true);
+          minimalSwal.fire({ icon: 'success', title: 'Secured!', text: 'Email Two-Factor Authentication is now active.' });
+        } else {
+          minimalSwal.fire({ icon: 'error', title: 'Invalid Code', text: 'The verification code was incorrect.' });
+          setTwoFaEnabled(false); 
+        }
+      } else {
+        setTwoFaEnabled(false);
+      }
+    } catch (err) {
+      minimalSwal.fire({ icon: 'error', title: 'Network Error', text: 'Failed to communicate with authentication server.' });
+      setTwoFaEnabled(false);
     }
   };
 
-  const handleSaveCustomPin = async (e) => {
-    e.preventDefault();
-    if (twoFaCode.length < 4 || twoFaCode.length > 6 || isNaN(twoFaCode)) {
-      return minimalSwal.fire({ icon: 'warning', title: 'Invalid PIN', text: 'Please enter a valid 4-6 digit numeric security PIN code.' });
-    }
-    try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: profileName,
-          email: profileEmail,
-          twoFaEnabled: true,
-          twoFaCode: twoFaCode
-        })
-      });
-      if (res.ok) {
-        minimalSwal.fire({ icon: 'success', title: 'PIN Configured', text: 'Custom security PIN configured successfully!' });
-        fetchProcessorMeta();
-      }
-    } catch (err) { 
-      minimalSwal.fire({ icon: 'error', title: 'Configuration Failed', text: 'Failed to save security configuration.' }); 
-    }
-  };
 
   const handleOpenDashboardDetails = (doc) => {
     setSelectedDoc(doc);
@@ -571,7 +589,7 @@ export default function ProcessorDashboard() {
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
           <div className="text-left">
             <h2 className="text-lg font-black text-neutral-900">
-              {activeTab === 'profile' ? 'Profile Hub' : activeTab === 'documents' ? 'Office Processing System' : activeTab === 'history' ? 'Office Transaction Ledger' : 'Processor Dashboard'}
+              {activeTab === 'profile' ? 'Profile Management Hub' : activeTab === 'documents' ? 'Office Processing System' : activeTab === 'history' ? 'Office Transaction Ledger' : 'Processor Dashboard'}
             </h2>
             <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wide">Assigned: {processorOfficeName}</p>
           </div>
@@ -998,15 +1016,6 @@ export default function ProcessorDashboard() {
                         <div className="w-11 h-6 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-700"></div>
                       </label>
                     </div>
-                    {twoFaEnabled && (
-                      <form onSubmit={handleSaveCustomPin} className="border-t border-dashed border-neutral-200 pt-3 space-y-2 animate-in slide-in-from-top-1 duration-150">
-                        <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-wide">Set Your Custom Numeric Security Code PIN</label>
-                        <div className="flex items-center gap-2">
-                          <input type="text" maxLength={6} required placeholder="Enter 4-6 digit numeric pin code" value={twoFaCode} onChange={e => setTwoFaCode(e.target.value.replace(/\D/g, ''))} className="w-full max-w-xs px-4 py-2 text-xs border border-neutral-300 rounded-xl focus:ring-1 focus:ring-red-700 outline-none bg-white font-mono tracking-widest text-neutral-800" />
-                          <button type="submit" className="px-4 py-2 bg-neutral-900 hover:bg-black text-white font-bold text-xs rounded-xl transition-all shadow-xs uppercase tracking-wide">Save PIN</button>
-                        </div>
-                      </form>
-                    )}
                   </div>
                 </div>
               </div>

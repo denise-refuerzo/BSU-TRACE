@@ -1,22 +1,22 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Swal from 'sweetalert2'; // 🚨 Integrated for secure popup confirmation notifications  
+import Swal from 'sweetalert2';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [pinCode, setPinCode] = useState('');
+  
+  // New State variables for the dynamic 2FA flow
   const [require2FA, setRequire2FA] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [tempUserId, setTempUserId] = useState(null); // Holds user ID between step 1 and step 2
+  
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  // --- NEW PRIVACY ACCOUNT LOCKOUT RECOVERY STATE ---
-  // Tracks if the user hit 10 consecutive failed PIN inputs to reveal the secure self-service reset action button
-  const [showForgotPinLink, setShowForgotPinLink] = useState(false);
-
   // Forgot Password Workspace States  
   const [showForgotModal, setShowForgotModal] = useState(false);  
-  const [forgotStep, setForgotStep] = useState(1); // Steps: 1, 2, 3, 4  
+  const [forgotStep, setForgotStep] = useState(1); 
   const [forgotUsername, setForgotUsername] = useState('');  
   const [maskedEmail, setMaskedEmail] = useState('');  
   const [typedEmail, setTypedEmail] = useState('');  
@@ -26,14 +26,12 @@ export default function Login() {
   const [forgotError, setForgotError] = useState('');  
   const [forgotSuccess, setForgotSuccess] = useState('');  
 
-  // Main Sign In visibility control state 
+  // Visibility states
   const [showSignInPassword, setShowSignInPassword] = useState(false);  
-
-  // Forgot Password Modal visibility control states  
   const [showNewPassword, setShowNewPassword] = useState(false);  
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);  
 
-  // --- MAIN AUTHENTICATION CONTROLLER ---
+  // --- STEP 1: INITIAL LOGIN CONTROLLER ---
   const handleSignIn = async (e) => {
     e.preventDefault();
     setError('');
@@ -42,77 +40,85 @@ export default function Login() {
       const response = await fetch('http://localhost:5000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, pinCode: require2FA ? pinCode : undefined })  
+        body: JSON.stringify({ username, password })  
       });
       
       const data = await response.json();
       
-      // 🛠️ FAIL-SAFE ERROR INTERCEPTOR: Checks if the user is locked out on security thresholds[cite: 11]
       if (!response.ok) {
-        if (data.requiresPinReset) {
-          setShowForgotPinLink(true); // 🔓 Exposes the "Forgot PIN" recovery link inside the viewport
-        }
         throw new Error(data.error || 'Login failed');  
       }
 
-      if (data.require2FA) {
+      // Check if backend requires 2FA to complete the login
+      if (data.two_fa_enabled) {
+        setTempUserId(data.u_id);
         setRequire2FA(true);  
-        return;  
+        Swal.fire({
+          title: 'Verification Required',
+          text: 'A 6-digit verification code has been sent to your university email.',
+          icon: 'info',
+          confirmButtonColor: '#800000'
+        });
+        return; 
       }
 
-      localStorage.setItem('token', data.token);  
-      localStorage.setItem('user', data.fullName);  
-      const cleanUserId = String(data.userId).split(':')[0].trim();  
-      localStorage.setItem('userId', cleanUserId);  
-
-      // Redirect handles matching roles securely  
-      if (data.role === 5) {
-        navigate('/admin/dashboard')  
-      } else if (data.role === 2) {
-        navigate('/processor/dashboard');   
-      } else if (data.role === 3) {
-        navigate('/signee/dashboard');   
-      } else if (data.role === 4) {
-        navigate('/gso-dashboard'); 
-      }
-       else {
-        navigate('/dashboard');    
-      }
+      // If 2FA is OFF, log them in immediately
+      completeLogin(data);
+      
     } catch (err) {
       setError(err.message);  
     }
   };
 
-  // --- NEW SELF-SERVICE PIN RESET CONTROLLER ---
-  // Fires an immediate notification to the system recovery route bypassing admin modification tools[cite: 11]
-  const handleTriggerForgotPinReset = async () => {
+  // --- STEP 2: 2FA OTP VERIFICATION CONTROLLER ---
+  const handleVerifyOTP = async (e) => {
+    e.preventDefault();
+    setError('');
+
     try {
-      const res = await fetch('http://localhost:5000/api/auth/forgot-pin/reset', {
+      const response = await fetch('http://localhost:5000/api/login/verify-2fa', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username }) // Passes username safely from sign-in context[cite: 11]
-      });
-      const data = await res.json();
-      
-      if (!res.ok) throw new Error(data.error || 'PIN reset request failed.');
-
-      // Notify user via dynamic SweetAlert notification modal
-      Swal.fire({
-        title: '🛡️ Secure PIN Generated!',
-        text: 'A fresh, randomized 2FA verification PIN has been dispatched to your institutional mailbox. Check your university box!',
-        icon: 'success',
-        confirmButtonColor: '#800000'
+        body: JSON.stringify({ userId: tempUserId, otpCode: otpCode })
       });
 
-      // Clear layout runtime warning parameters smoothly
-      setShowForgotPinLink(false);
-      setRequire2FA(false);
-      setPinCode('');
-      setError('');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Verification failed');
+      }
+
+      // Re-fetch standard login data if needed or decode token if your backend sends it back here.
+      // Since our backend verify route returns u_id, a_id, and session_token, we can proceed.
+      // NOTE: You may need to ensure your backend `/verify-2fa` endpoint also returns `token`, `role`, `roleName`, `fullName` just like the normal login does, OR you fetch it here.
+      // For now, assuming the backend `/verify-2fa` is updated to return the same payload as standard login:
+      completeLogin(data);
+
     } catch (err) {
-      Swal.fire('Recovery Loop Error', err.message, 'error');
+      setError(err.message);
     }
-  };
+  }
+
+  // --- FINAL ROUTING ---
+  const completeLogin = (data) => {
+    localStorage.setItem('token', data.token);  
+    localStorage.setItem('user', data.fullName);  
+    const cleanUserId = String(data.userId || data.u_id).split(':')[0].trim();  
+    localStorage.setItem('userId', cleanUserId);  
+
+    const role = data.role || data.a_id;
+    if (role === 5) {
+      navigate('/admin/dashboard')  
+    } else if (role === 2) {
+      navigate('/processor/dashboard');   
+    } else if (role === 3) {
+      navigate('/signee/dashboard');   
+    } else if (role === 4) {
+      navigate('/gso-dashboard'); 
+    } else {
+      navigate('/dashboard');    
+    }
+  }
 
   // FORGOT PASSWORD STEP 1: Verify Username exists  
   const handleIdentifyUser = async (e) => {
@@ -204,30 +210,19 @@ export default function Login() {
           <div className="bg-white p-6 rounded-2xl border shadow-2xl max-w-sm w-full text-center space-y-4 animate-in zoom-in-95 duration-100">  
             <div className="w-12 h-12 bg-red-50 text-red-800 rounded-full flex items-center justify-center mx-auto text-xl">🛡️</div>  
             <div>
-              <h4 className="font-bold text-neutral-900 text-base">Two-Factor Authentication</h4>  
-              <p className="text-xs text-neutral-400 mt-1">Please type your numeric combination code pin setup.</p>  
+              <h4 className="font-bold text-neutral-900 text-base">Security Verification</h4>  
+              <p className="text-xs text-neutral-400 mt-1">Check your email for the 6-digit OTP code to continue.</p>  
             </div>
             {error && <div className="p-2 bg-red-50 text-red-600 text-[11px] rounded border border-red-100">{error}</div>}  
-            <form onSubmit={handleSignIn} className="space-y-3">  
+            <form onSubmit={handleVerifyOTP} className="space-y-3">  
               <input 
-                type="text" maxLength={6} required value={pinCode} onChange={e => setPinCode(e.target.value.replace(/\D/g, ""))}  
-                placeholder="Enter 6-digit code pin" className="w-full border px-4 py-2 text-center font-mono text-sm tracking-widest rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
+                type="text" maxLength={6} required value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, ""))}  
+                placeholder="Enter 6-digit code" className="w-full border px-4 py-2 text-center font-mono text-sm tracking-widest rounded-lg focus:ring-1 focus:ring-red-700 outline-none" 
               />
-              
-              {/* 🛠️ ENHANCED UX: Offers a secondary breakout link inside the challenge card if counter triggers */}
-              {showForgotPinLink && (
-                <button 
-                  type="button"
-                  onClick={handleTriggerForgotPinReset}
-                  className="w-full text-center text-[10px] font-bold text-red-800 hover:underline bg-red-50 p-1.5 rounded-md uppercase tracking-wider border border-red-100"
-                >
-                  🔒 Locked Out? Reset via Email
-                </button>
-              )}
 
               <div className="flex gap-2">  
-                <button type="button" onClick={() => { setRequire2FA(false); setPinCode(''); setError(''); setShowForgotPinLink(false); }} className="w-1/2 border py-2 text-xs font-semibold text-gray-500 rounded-lg hover:bg-neutral-50">Cancel</button>  
-                <button type="submit" className="w-1/2 bg-red-800 hover:bg-red-900 text-white text-xs font-semibold rounded-lg">Verify Pin</button>  
+                <button type="button" onClick={() => { setRequire2FA(false); setOtpCode(''); setError(''); setTempUserId(null); }} className="w-1/2 border py-2 text-xs font-semibold text-gray-500 rounded-lg hover:bg-neutral-50">Cancel</button>  
+                <button type="submit" className="w-1/2 bg-red-800 hover:bg-red-900 text-white text-xs font-semibold rounded-lg">Confirm</button>  
               </div>
             </form>
           </div>
@@ -424,17 +419,6 @@ export default function Login() {
                   Forgot Password?  
                 </button>  
               </div>
-
-              {/* 🛠️ AUTOMATED DISPATCH TRIGGER TRIGGER: Appears dynamically under the 10 failed combination threshold */}
-              {showForgotPinLink && (
-                <button 
-                  type="button"
-                  onClick={handleTriggerForgotPinReset}
-                  className="w-full text-center text-xs font-black text-red-800 hover:underline bg-red-50 border border-red-100 py-2.5 rounded-lg transition-all uppercase tracking-wide cursor-pointer block animate-pulse"
-                >
-                  🔒 Locked Out? Reset PIN via University Mailbox
-                </button>
-              )}
 
               <button type="submit" className="w-full bg-red-700 text-white py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 hover:bg-red-700 transition-colors">  
                 SIGN IN <span>→</span>  

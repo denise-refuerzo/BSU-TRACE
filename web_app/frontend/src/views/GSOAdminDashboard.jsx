@@ -439,36 +439,78 @@ const handleAddAssetSubmit = async (e) => {
   };
 
   const toggle2FA = async (checked) => {
-    setTwoFaEnabled(checked);
+    // 1. If turning OFF, just update the profile directly
     if (!checked) {
       try {
         const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fullName: profileName, email: profileEmail, twoFaEnabled: false, twoFaCode: null })
+          body: JSON.stringify({ fullName: profileName, email: profileEmail, twoFaEnabled: false })
         });
         if (res.ok) {
-          setTwoFaCode('');
-          minimalSwal.fire({ icon: 'info', title: 'Security Update', text: 'Two-Factor PIN verification disabled.' });
+          setTwoFaEnabled(false);
+          minimalSwal.fire({ icon: 'success', title: 'Disabled', text: 'Two-Factor Authentication is now off.' });
         }
-      } catch (err) { console.error(err); }
-    }
-  };
-
-  const handleSaveCustomPin = async (e) => {
-    e.preventDefault();
-    if (twoFaCode.length < 4 || twoFaCode.length > 6 || isNaN(twoFaCode)) return minimalSwal.fire({ icon: 'warning', title: 'Invalid PIN', text: 'PIN must be a 4-6 digit numeric code.' });
-    try {
-      const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName: profileName, email: profileEmail, twoFaEnabled: true, twoFaCode })
-      });
-      if (res.ok) {
-        minimalSwal.fire({ icon: 'success', title: 'PIN Configured', text: 'Custom security authentication PIN configured.' });
-        fetchGSOMeta();
+      } catch (err) {
+        minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to update security settings.' });
       }
-    } catch (err) { minimalSwal.fire({ icon: 'error', title: 'Error', text: 'Failed to update credentials security PIN.' }); }
+      return;
+    }
+
+    // 2. If turning ON, trigger the OTP email first
+    try {
+      minimalSwal.fire({
+        title: 'Sending Code...',
+        text: 'Please wait while we dispatch your verification email.',
+        allowOutsideClick: false,
+        didOpen: () => { minimalSwal.showLoading(); }
+      });
+
+      const requestRes = await fetchWithAuth(`http://localhost:5000/api/users/${userId}/request-profile-otp`, { 
+        method: 'POST' 
+      });
+
+      if (!requestRes.ok) throw new Error('Failed to dispatch email.');
+
+      // 3. Prompt the user to enter the code they received
+      const { value: otpCode } = await minimalSwal.fire({
+        title: 'Verify Your Email',
+        text: `We sent a 6-digit code to ${profileEmail}.`,
+        input: 'text',
+        inputAttributes: {
+          maxLength: 6,
+          pattern: '[0-9]*',
+          style: 'text-align: center; letter-spacing: 0.5em; font-weight: bold;'
+        },
+        showCancelButton: true,
+        confirmButtonText: 'Verify & Enable',
+        cancelButtonText: 'Cancel'
+      });
+
+      // 4. Verify the entered code
+      if (otpCode) {
+        const verifyRes = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/verify-enable-2fa`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ otpCode })
+        });
+
+        if (verifyRes.ok) {
+          setTwoFaEnabled(true);
+          minimalSwal.fire({ icon: 'success', title: 'Secured!', text: 'Email Two-Factor Authentication is now active.' });
+        } else {
+          minimalSwal.fire({ icon: 'error', title: 'Invalid Code', text: 'The verification code was incorrect.' });
+          setTwoFaEnabled(false); 
+        }
+      } else {
+        setTwoFaEnabled(false); // Revert toggle if they cancel the prompt
+      }
+
+    } catch (err) {
+      console.error(err);
+      minimalSwal.fire({ icon: 'error', title: 'Network Error', text: 'Failed to communicate with the authentication server.' });
+      setTwoFaEnabled(false);
+    }
   };
 
   // --- Hybrid Functional Actions ---
@@ -2159,25 +2201,16 @@ const handleAddAssetSubmit = async (e) => {
                   </div>
 
                   <div className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-4 hover:bg-neutral-50/50 transition-colors">
-                    <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between">
                       <div>
-                        <h5 className="text-xs font-black text-neutral-900">Secondary Two-Factor Authentication PIN</h5>
-                        <p className="text-[11px] text-neutral-400 mt-0.5 font-medium">Enforce secondary multi-factor challenge prompt criteria upon account entry checkpoints.</p>
+                        <h5 className="text-xs font-black text-neutral-900">Two-Factor Authentication (2FA)</h5>
+                        <p className="text-[11px] text-neutral-400 mt-0.5 font-medium">Secure your account access with an email OTP verification.</p>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer select-none">
                         <input type="checkbox" checked={twoFaEnabled} onChange={e => toggle2FA(e.target.checked)} className="sr-only peer" />
                         <div className="w-11 h-6 bg-neutral-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-800"></div>
                       </label>
                     </div>
-                    {twoFaEnabled && (
-                      <form onSubmit={handleSaveCustomPin} className="border-t border-dashed border-neutral-200 pt-3 space-y-2 animate-in slide-in-from-top-1 duration-150">
-                        <label className="block text-[10px] font-black text-neutral-400 uppercase tracking-wide">Set Your Custom Authority Code Validation PIN</label>
-                        <div className="flex items-center gap-2">
-                          <input type="text" maxLength={6} required placeholder="Enter numeric validation pin" value={twoFaCode} onChange={e => setTwoFaCode(e.target.value.replace(/\D/g, ''))} className="w-full max-w-xs px-4 py-2 text-xs border border-neutral-300 rounded-xl outline-none focus:ring-1 focus:ring-red-700 font-mono tracking-widest text-neutral-800" />
-                          <button type="submit" className="px-4 py-2 bg-neutral-900 hover:bg-black text-white font-bold text-xs rounded-xl uppercase tracking-wide shadow-sm transition-all">Save PIN</button>
-                        </div>
-                      </form>
-                    )}
                   </div>
                 </div>
               </div>

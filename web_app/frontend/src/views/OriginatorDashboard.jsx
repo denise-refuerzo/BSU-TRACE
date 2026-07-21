@@ -5,7 +5,19 @@ import { LayoutDashboard, FileText, School, Bell, User, Plus, Search, Filter, X,
 import DocumentsHub from './DocumentsHub';
 import ResourceScheduler from './ResourceScheduler';
 import OfficeChatHub from './OfficeChatHub';
+import Swal from 'sweetalert2'; 
 import { fetchWithAuth } from '../api';
+
+const minimalSwal = Swal.mixin({
+  customClass: {
+    confirmButton: 'px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-red-800 hover:bg-red-900 shadow-md mx-2',
+    cancelButton: 'px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-neutral-600 border border-neutral-200 bg-white hover:bg-neutral-50 mx-2',
+    popup: 'rounded-3xl border border-neutral-100 shadow-2xl',
+    title: 'text-lg font-black text-neutral-900',
+    htmlContainer: 'text-sm font-medium text-neutral-500'
+  },
+  buttonsStyling: false
+});
 
 export default function OriginatorDashboard() {
   const navigate = useNavigate();
@@ -241,10 +253,6 @@ export default function OriginatorDashboard() {
     if (!profile.fullName.trim() || !profile.email.trim()) {
       return alert("Validation Error: Personal Information fields cannot be left empty.");
     }
-
-    if (profile.twoFaEnabled && (!profile.twoFaCode || profile.twoFaCode.length < 4)) {
-      return alert("Please set up a valid numeric code pin combination first.");
-    }
     
     try {
       const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
@@ -425,7 +433,7 @@ export default function OriginatorDashboard() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b border-neutral-200 bg-white px-8 flex items-center justify-between shadow-sm flex-shrink-0 relative">
-          <h2 className="text-lg font-bold text-neutral-800 capitalize">{activeTab} Hub</h2>
+          <h2 className="text-lg font-bold text-neutral-800 capitalize">{activeTab} Management Hub</h2>
           <div className="flex items-center gap-4 text-neutral-600">
             <div className="relative" ref={notificationRef}>
               <button onClick={() => setShowNotifications(!showNotifications)} className="p-2 rounded-full hover:bg-neutral-100 relative">
@@ -690,17 +698,129 @@ export default function OriginatorDashboard() {
                           <p className="text-xs font-bold text-neutral-900">Two-Factor Authentication (2FA)</p>
                           <p className="text-[11px] text-neutral-400 mt-0.5">Secure your account access with a secondary code combination pin prompt.</p>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" checked={profile.twoFaEnabled} onChange={e => setProfile({...profile, twoFaEnabled: e.target.checked, twoFaCode: e.target.checked ? profile.twoFaCode : ''})} className="sr-only peer" />
-                          <div className="w-9 h-5 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-700"></div>
-                        </label>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={profile.twoFaEnabled} 
+                        onChange={async (e) => {
+                          const checked = e.target.checked;
+                          if (!checked) {
+                            // If turning off, update immediately
+                            try {
+                              const res = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                  fullName: profile.fullName, 
+                                  email: profile.email, 
+                                  twoFaEnabled: false,
+                                  twoFaCode: null 
+                                })
+                              });
+                              if (res.ok) {
+                                setProfile({...profile, twoFaEnabled: false});
+                                minimalSwal.fire({ 
+                                  icon: 'success', 
+                                  title: 'Disabled', 
+                                  text: 'Two-Factor Authentication is now off.' 
+                                });
+                              }
+                            } catch (err) {
+                              minimalSwal.fire({ 
+                                icon: 'error', 
+                                title: 'Error', 
+                                text: 'Failed to update security settings.' 
+                              });
+                            }
+                            return;
+                          }
+                          
+                          // IF TURNING ON - Show loading state
+                          minimalSwal.fire({
+                            title: 'Sending Code...',
+                            text: 'Please wait while we dispatch your verification email.',
+                            allowOutsideClick: false,
+                            didOpen: () => { minimalSwal.showLoading(); }
+                          });
+
+                          try {
+                            // Trigger OTP email dispatch
+                            const requestRes = await fetchWithAuth(`http://localhost:5000/api/users/${userId}/request-profile-otp`, { 
+                              method: 'POST' 
+                            });
+
+                            if (!requestRes.ok) throw new Error('Failed to dispatch email.');
+
+                            // Close the loading dialog
+                            minimalSwal.close();
+
+                            // Prompt for code input
+                            const { value: otpCode } = await minimalSwal.fire({
+                              title: 'Verify Your Email',
+                              text: `We sent a 6-digit code to ${profile.email}.`,
+                              input: 'text',
+                              inputAttributes: { maxLength: 6, style: 'text-align: center; letter-spacing: 0.5em; font-weight: bold;' },
+                              showCancelButton: true,
+                              confirmButtonText: 'Verify & Enable',
+                              cancelButtonText: 'Cancel'
+                            });
+
+                            if (otpCode) {
+                              const verifyRes = await fetchWithAuth(`http://localhost:5000/api/profile/${userId}/verify-enable-2fa`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ otpCode })
+                              });
+
+                              if (verifyRes.ok) {
+                                setProfile({...profile, twoFaEnabled: true});
+                                minimalSwal.fire({ 
+                                  icon: 'success', 
+                                  title: 'Secured!', 
+                                  text: 'Email Two-Factor Authentication is now active.' 
+                                });
+                              } else {
+                                minimalSwal.fire({ 
+                                  icon: 'error', 
+                                  title: 'Invalid Code', 
+                                  text: 'The verification code was incorrect.' 
+                                });
+                                // Keep 2FA disabled since verification failed
+                                setProfile({...profile, twoFaEnabled: false});
+                              }
+                            } else {
+                              // User cancelled the input
+                              setProfile({...profile, twoFaEnabled: false});
+                            }
+                          } catch (err) {
+                            minimalSwal.close();
+                            minimalSwal.fire({ 
+                              icon: 'error', 
+                              title: 'Error', 
+                              text: 'Failed to communicate with authentication server.' 
+                            });
+                            setProfile({...profile, twoFaEnabled: false});
+                          }
+                        }} 
+                        className="sr-only peer" 
+                      />
+                        <div className="w-9 h-5 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-700"></div>
+                      </label>
                       </div>
 
                       {profile.twoFaEnabled && (
                         <div className="pt-3 border-t border-dashed animate-in fade-in duration-100">
-                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Set Your Custom Numeric Security Code PIN</label>
-                          <input type="text" maxLength={6} placeholder="Enter 4-6 digit numeric pin" value={profile.twoFaCode} onChange={e => setProfile({...profile, twoFaCode: e.target.value.replace(/\D/g, "")})}
-                                 className="w-48 border px-3 py-1.5 font-mono tracking-widest text-xs rounded-lg outline-none focus:ring-1 focus:ring-red-700" />
+                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+                            Set Your Custom Numeric Security Code PIN
+                          </label>
+                          <input 
+                            type="password" 
+                            maxLength={6} 
+                            placeholder="••••••" 
+                            value={profile.twoFaCode} 
+                            onChange={e => setProfile({...profile, twoFaCode: e.target.value.replace(/\D/g, "")})}
+                            className="w-48 border px-3 py-1.5 font-mono tracking-widest text-xs rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-white shadow-sm" 
+                          />
                         </div>
                       )}
                     </div>

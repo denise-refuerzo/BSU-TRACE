@@ -78,5 +78,22 @@ const sendTrackingAlertEmail = async (toEmail, fullName, documentTitle, currentS
     }
 };
 
+const sendSystemEmail = async (toEmail, subject, textBody) => {
+    try {
+      const mailOptions = {
+        from: process.env.EMAIL_USER, // Your configured email address
+        to: toEmail,
+        subject: subject,
+        text: textBody
+      };
+  
+      await transporter.sendMail(mailOptions);
+      return { success: true };
+    } catch (error) {
+      console.error('Error sending system email:', error);
+      return { success: false, error };
+    }
+  };
+
 // EXPORT BOTH SYSTEM HANDLERS AT THE BOTTOM
-module.exports = { sendResetCodeEmail, sendTrackingAlertEmail };
+module.exports = { sendResetCodeEmail, sendTrackingAlertEmail, sendSystemEmail };
