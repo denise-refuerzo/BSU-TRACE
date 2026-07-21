@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
-import 'dart:async'; // Added for Auto-Reload Timer
+import 'dart:async'; 
 import 'package:http/http.dart' as http;
 import '../../../theme/app_theme.dart';
 import '../../../widgets/app_bar_helper.dart';
@@ -20,6 +20,11 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
   List<dynamic> _users = [];
   bool _isLoading = true;
   
+  // Search and Sort State
+  String _searchQuery = '';
+  String _sortBy = 'Name (A-Z)'; 
+  final TextEditingController _searchController = TextEditingController();
+
   // Pagination State
   int _currentPage = 1;
   final int _itemsPerPage = 5;
@@ -32,7 +37,6 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
     super.initState();
     _fetchUsers();
     
-    // Set up Auto-Reload to fetch new data silently every 30 seconds
     _autoReloadTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       _fetchUsers();
     });
@@ -40,8 +44,8 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
 
   @override
   void dispose() {
-    // Prevent memory leaks by cancelling the timer when leaving the screen
     _autoReloadTimer?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -53,11 +57,6 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
         if (mounted) {
           setState(() {
             _users = json.decode(response.body);
-            // Reset to page 1 if the current page exceeds new total pages
-            final int totalPages = (_users.length / _itemsPerPage).ceil();
-            if (_currentPage > totalPages && totalPages > 0) {
-              _currentPage = totalPages;
-            }
             _isLoading = false;
           });
         }
@@ -75,12 +74,115 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
     }
   }
 
+  // ==========================================
+  // SEARCH & SORT LOGIC
+  // ==========================================
+  List<dynamic> get _filteredAndSortedUsers {
+    // 1. Filter based on Search Query
+    List<dynamic> filtered = _users.where((user) {
+      final name = (user['full_name'] ?? '').toString().toLowerCase();
+      final email = (user['uni_email'] ?? '').toString().toLowerCase();
+      final role = (user['role'] ?? '').toString().toLowerCase();
+      final dept = (user['department'] ?? '').toString().toLowerCase();
+      final search = _searchQuery.toLowerCase();
+
+      return name.contains(search) || 
+             email.contains(search) || 
+             role.contains(search) || 
+             dept.contains(search);
+    }).toList();
+
+    // 2. Sort the Filtered List
+    filtered.sort((a, b) {
+      final nameA = (a['full_name'] ?? '').toString().toLowerCase();
+      final nameB = (b['full_name'] ?? '').toString().toLowerCase();
+      final roleA = (a['role'] ?? '').toString().toLowerCase();
+      final roleB = (b['role'] ?? '').toString().toLowerCase();
+      final deptA = (a['department'] ?? '').toString().toLowerCase();
+      final deptB = (b['department'] ?? '').toString().toLowerCase();
+
+      switch (_sortBy) {
+        case 'Name (Z-A)':
+          return nameB.compareTo(nameA);
+        case 'Role':
+          int roleCompare = roleA.compareTo(roleB);
+          if (roleCompare == 0) return nameA.compareTo(nameB);
+          return roleCompare;
+        case 'Department':
+          int deptCompare = deptA.compareTo(deptB);
+          if (deptCompare == 0) return nameA.compareTo(nameB);
+          return deptCompare;
+        case 'Name (A-Z)':
+        default:
+          return nameA.compareTo(nameB);
+      }
+    });
+
+    return filtered;
+  }
+
+  void _showSortFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Sort By', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  ...['Name (A-Z)', 'Name (Z-A)', 'Role', 'Department'].map((sortOption) {
+                    return RadioListTile<String>(
+                      title: Text(sortOption),
+                      value: sortOption,
+                      groupValue: _sortBy,
+                      activeColor: AppTheme.primaryRed,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (value) {
+                        if (value != null) {
+                          setModalState(() => _sortBy = value);
+                          setState(() {
+                            _sortBy = value;
+                            _currentPage = 1; // Reset to first page on sort change
+                          });
+                          Navigator.pop(context);
+                        }
+                      },
+                    );
+                  }),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            );
+          }
+        );
+      }
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final int totalPages = (_users.length / _itemsPerPage).ceil();
-    final List<dynamic> displayedUsers = _users.isEmpty 
+    // Apply filters and sorting before paginating
+    final List<dynamic> processedUsers = _filteredAndSortedUsers;
+    
+    int totalPages = (processedUsers.length / _itemsPerPage).ceil();
+    if (totalPages == 0) totalPages = 1;
+
+    // Safety check if search reduces total pages below current page
+    if (_currentPage > totalPages) {
+      _currentPage = 1;
+    }
+
+    final List<dynamic> displayedUsers = processedUsers.isEmpty 
         ? [] 
-        : _users.skip((_currentPage - 1) * _itemsPerPage).take(_itemsPerPage).toList();
+        : processedUsers.skip((_currentPage - 1) * _itemsPerPage).take(_itemsPerPage).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -90,15 +192,11 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
       drawer: const AppDrawer(),
       body: _isLoading && _users.isEmpty
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primaryRed))
-          
-          // ADDED: RefreshIndicator for Pull-Down to Refresh
           : RefreshIndicator(
               color: AppTheme.primaryRed,
               backgroundColor: Colors.white,
               onRefresh: _fetchUsers,
-              
               child: SingleChildScrollView(
-                // ADDED: AlwaysScrollableScrollPhysics ensures the pull-down works even if the list is short
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(20.0),
                 child: Column(
@@ -112,20 +210,19 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
                     _buildSearchAndFilter(),
                     const SizedBox(height: 24),
                     
-                    if (_users.isEmpty)
+                    if (processedUsers.isEmpty)
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(32.0),
                         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade100)),
-                        child: const Center(child: Text('No users found', style: TextStyle(color: Colors.grey))),
+                        child: const Center(child: Text('No users found matching your search.', style: TextStyle(color: Colors.grey))),
                       ),
 
                     ...displayedUsers.map((user) => _buildUserTile(user)),
 
-                    if (totalPages > 1) 
+                    if (processedUsers.isNotEmpty && totalPages > 1) 
                       _buildPaginationControls(totalPages),
                       
-                    // Added a little bottom padding so the last item isn't blocked by the FAB
                     const SizedBox(height: 60),
                   ],
                 ),
@@ -139,7 +236,6 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
             barrierDismissible: false,
             builder: (context) => const AddUserModal(),
           );
-          // Instant Auto-Reload when returning from adding a user
           if (result == true) {
             _fetchUsers();
           }
@@ -156,8 +252,15 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
       children: [
         Expanded(
           child: TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value;
+                _currentPage = 1; // Reset to page 1 on new search
+              });
+            },
             decoration: InputDecoration(
-              hintText: 'Search by name, email, or faculty ID...',
+              hintText: 'Search name, email, role, or dept...',
               hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
               prefixIcon: const Icon(Icons.search, color: Colors.grey),
               filled: true,
@@ -165,13 +268,28 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
               contentPadding: const EdgeInsets.symmetric(vertical: 0),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.red.shade100)),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppTheme.primaryRed)),
+              suffixIcon: _searchQuery.isNotEmpty 
+                ? IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.grey, size: 20),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() {
+                        _searchQuery = '';
+                        _currentPage = 1;
+                      });
+                    },
+                  ) 
+                : null,
             ),
           ),
         ),
         const SizedBox(width: 12),
         Container(
           decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.red.shade100)),
-          child: IconButton(icon: const Icon(Icons.filter_list, color: AppTheme.primaryRed), onPressed: () {}),
+          child: IconButton(
+            icon: const Icon(Icons.filter_list, color: AppTheme.primaryRed), 
+            onPressed: _showSortFilterModal
+          ),
         )
       ],
     );
@@ -212,7 +330,9 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          Row(
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -222,11 +342,13 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
                   children: [
                     const Icon(Icons.security, size: 14, color: Colors.orange),
                     const SizedBox(width: 6),
-                    Text(role, style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 120),
+                      child: Text(role, style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(6)),
@@ -235,7 +357,10 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
                   children: [
                     const Icon(Icons.domain, size: 14, color: Colors.blue),
                     const SizedBox(width: 6),
-                    Text(department, style: const TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 150),
+                      child: Text(department, style: const TextStyle(color: Colors.blue, fontSize: 11, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                    ),
                   ],
                 ),
               ),
@@ -250,7 +375,6 @@ class _IctAdminAccountsScreenState extends State<IctAdminAccountsScreen> {
                   context,
                   MaterialPageRoute(builder: (context) => ManageAccountScreen(user: user)),
                 );
-                // Instant Auto-Reload when returning from Managing a user
                 if (result == true) {
                   _fetchUsers();
                 }

@@ -131,51 +131,6 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Welcome Banner
-                    Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      color: const Color(0xFF800000),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Row(
-                          children: [
-                            const CircleAvatar(
-                              radius: 28,
-                              backgroundColor: Colors.white24,
-                              child: Icon(Icons.admin_panel_settings,
-                                  size: 32, color: Colors.white),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Welcome, $_adminName',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'System Infrastructure & Access Control',
-                                    style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                     const SizedBox(height: 20),
 
                     // Metrics Grid
@@ -198,6 +153,8 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                     const SizedBox(height: 24),
 
                     // LIVE SYSTEM-WIDE AUDIT STREAM FEED
+                    
+                    const Text('Live System-Wide Audit Stream Feed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     Card(
                       elevation: 1,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -206,7 +163,6 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('LIVE SYSTEM-WIDE AUDIT STREAM FEED', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF800000))),
                             const SizedBox(height: 4),
                             Text('Real-time rolling ledger tracing pipeline checkpoints and structural user actions campus-wide.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                             const SizedBox(height: 16),
@@ -261,6 +217,7 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                     const SizedBox(height: 24),
 
                     // STALLED QUEUE CONGESTION ALERTS
+                    const Text('Stalled Queue Congestion', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     Card(
                       elevation: 1,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -270,10 +227,6 @@ class _IctAdminDashboardState extends State<IctAdminDashboard> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
-                              children: const [
-                                Text('🎉 ', style: TextStyle(fontSize: 16)),
-                                Expanded(child: Text('STALLED QUEUE CONGESTION ALERTS', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF800000)))),
-                              ],
                             ),
                             const SizedBox(height: 4),
                             Text('Identifies critical workflows sitting inside an office destination past 48 hours without release scans.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
