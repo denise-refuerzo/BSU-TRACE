@@ -53,12 +53,37 @@ class _SigneeDocumentDetailsModalState
     }
   }
 
+  // Generates 1 to 2 letter initials dynamically from full name
+  String _getInitials(String name) {
+    if (name.trim().isEmpty) return 'U';
+    final parts = name.trim().split(' ');
+    if (parts.length == 1) {
+      return parts[0][0].toUpperCase();
+    }
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final String qrCode = widget.document['qr_code'] ?? 'N/A';
     final String title = widget.document['title'] ?? 'No Title';
     final String formType = widget.document['form_type'] ?? 'N/A';
-    final String originOffice = widget.document['origin_office'] ?? 'N/A';
+
+    // Safely extract Originating Office and replace placeholder
+    final String rawOriginOffice = widget.document['origin_office'] ??
+        widget.document['originatingOffice'] ??
+        'N/A';
+    final String originOffice = rawOriginOffice == 'ORIGINATING_COLLEGE_DYNAMIC'
+        ? 'Originating Department'
+        : rawOriginOffice;
+
+    // Safely extract Originator / Requestor Name
+    final String requestorName = widget.document['requestor'] ??
+        widget.document['originator_name'] ??
+        widget.document['full_name'] ??
+        'Unknown Requestor';
+    final String requestorInitials = _getInitials(requestorName);
+
     final String rawStatus = widget.document['status'] ?? 'Pending';
     final String status = rawStatus.isEmpty
         ? 'Pending'
@@ -137,7 +162,7 @@ class _SigneeDocumentDetailsModalState
               ],
             ),
             const SizedBox(height: 12),
-            _buildRequestorCard('System Originator', 'SO'),
+            _buildRequestorCard(requestorName, requestorInitials),
             const SizedBox(height: 32),
             const Text(
               'PROCESSING ROUTE',
@@ -185,7 +210,6 @@ class _SigneeDocumentDetailsModalState
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      // FIXED: Passing document to AdHoc modal
                       onPressed: () => showDialog(
                         context: context,
                         builder: (context) =>
@@ -341,9 +365,12 @@ class _SigneeDocumentDetailsModalState
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                name,
-                style: const TextStyle(fontSize: 14, color: Colors.black87),
+              Expanded(
+                child: Text(
+                  name,
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),

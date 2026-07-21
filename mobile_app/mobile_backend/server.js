@@ -844,20 +844,27 @@ app.get('/api/signees/:id/pending-documents', async (req, res) => {
     }
     const o_id = userRes.rows[0].o_id;
 
-    // 2. Fetch documents currently at the Signee's office waiting to be signed
+    // 2. Fetch documents with dynamic origin office and requestor name
     const query = `
       SELECT 
         i.qr_code, 
         i.title, 
         p.process_name AS form_type, 
         u.full_name AS requestor,
+        CASE 
+          WHEN origin_o.o_id = 999 THEN d.department_name 
+          ELSE origin_o.office_name 
+        END AS origin_office,
         s.current_status AS status, 
         TO_CHAR(pd.time_in, 'YYYY-MM-DD"T"HH24:MI:SS"+08:00"') AS time_in
       FROM public.processed_document pd
       JOIN public.initial_document i ON pd.ini_id = i.ini_id
       JOIN public.process_type p ON i.p_id = p.p_id
+      JOIN public.route r ON p.r_id = r.r_id
+      LEFT JOIN public.offices origin_o ON r.stop_1 = origin_o.o_id
       JOIN public.status s ON pd.s_id = s.s_id
       JOIN public."User" u ON i.u_id = u.u_id
+      LEFT JOIN public.department d ON u.d_id = d.d_id
       WHERE pd.current_office_id = $1
         AND pd.time_in IS NOT NULL 
         AND pd.time_out IS NULL
