@@ -1722,8 +1722,45 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // ==========================================
 // 22. FETCH ICT ADMIN DASHBOARD STATS
 // ==========================================
-// GET /api/admin/ict-stats
-app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  // Grab the user ID from the query string (or body for POST requests)
+  const userId = req.query.u_id || req.body.u_id;
+
+  if (!token || !userId) {
+    return res.status(401).json({ error: 'Access denied. Missing token or user ID.' });
+  }
+
+  try {
+    // Check the database for the active session token
+    const result = await db.query(
+      `SELECT session_token FROM "User" WHERE u_id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'User not found.' });
+    }
+
+    const dbToken = result.rows[0].session_token;
+
+    // If the token doesn't match, or if it's null (logged out), reject
+    if (!dbToken || token !== dbToken) {
+      return res.status(401).json({ error: 'Invalid or expired session token.' });
+    }
+
+    // Token is valid, proceed to the route
+    next();
+  } catch (err) {
+    console.error('Session verification error:', err);
+    res.status(500).json({ error: 'Internal server error during authentication.' });
+  }
+};
+
+app.get('/api/admin/ict-stats', authenticateToken, async (req, res) => {
   try {
     const userId = req.query.u_id;
     let adminName = 'System Administrator';
