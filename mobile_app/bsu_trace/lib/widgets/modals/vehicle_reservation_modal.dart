@@ -1,25 +1,64 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../../theme/app_theme.dart';
+import '../../config.dart';
 
 class VehicleReservationModal extends StatefulWidget {
-  const VehicleReservationModal({super.key});
+  final Map<String, dynamic>? bookingData;
+
+  const VehicleReservationModal({super.key, this.bookingData});
 
   @override
   State<VehicleReservationModal> createState() => _VehicleReservationModalState();
 }
 
 class _VehicleReservationModalState extends State<VehicleReservationModal> {
-  // Checklist State
   bool _formChecked = false;
   bool _intentChecked = false;
   bool _idChecked = false;
   bool _clearanceChecked = false;
+  bool _isSubmitting = false;
 
-  // Helper to check if all documents are verified
   bool get _isAllChecked => _formChecked && _intentChecked && _idChecked && _clearanceChecked;
+
+  Future<void> _confirmReservation() async {
+    if (widget.bookingData == null || widget.bookingData!['booking_id'] == null) {
+      Navigator.pop(context);
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final bookingId = widget.bookingData!['booking_id'];
+      final response = await http.put(
+        Uri.parse('${AppConfig.baseUrl}/scheduler/bookings/$bookingId'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'status': 'Confirmed'}),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to confirm reservation')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error confirming vehicle reservation: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final requestor = widget.bookingData?['requestor'] ?? 'Varsity Sports Council';
+    final vehicle = widget.bookingData?['destination'] ?? 'TOYOTA COASTER #4';
+    final date = widget.bookingData?['reservation_date'] ?? 'Dec 10, 2023';
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       backgroundColor: Colors.white,
@@ -29,7 +68,6 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // --- RED HEADER ---
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               color: AppTheme.primaryRed,
@@ -40,16 +78,10 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: const [
-                        Text(
-                          'Vehicle Reservation', 
-                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Toyota Coaster #4 (SCREEN_46 Reference)', 
-                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)
-                        ),
+                      children: [
+                        const Text('Vehicle Reservation', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text(vehicle, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -60,27 +92,19 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                 ],
               ),
             ),
-            
             Padding(
               padding: const EdgeInsets.all(24.0),
               child: Column(
                 children: [
-                  // --- INFO SECTION ---
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: _buildInfo('REQUESTOR', 'Varsity Sports\nCouncil')
-                      ),
+                      Expanded(child: _buildInfo('REQUESTOR', requestor)),
                       const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildInfo('DATE & TIME', 'Dec 10, 2023 |\n04:00 PM -\n07:00 PM')
-                      ),
+                      Expanded(child: _buildInfo('DATE', date)),
                     ],
                   ),
                   const SizedBox(height: 24),
-
-                  // --- CHECKLIST SECTION ---
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -91,20 +115,17 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: const [
+                        const Row(
+                          children: [
                             Icon(Icons.assignment_outlined, size: 16, color: Colors.black54),
                             SizedBox(width: 8),
-                            Text(
-                              'DOCUMENT CHECKLIST', 
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black54, letterSpacing: 0.5)
-                            ),
+                            Text('DOCUMENT CHECKLIST', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black54, letterSpacing: 0.5)),
                           ],
                         ),
                         const SizedBox(height: 16),
                         _buildCheckboxRow('Approved Request Form', _formChecked, (v) => setState(() => _formChecked = v!)),
                         _buildCheckboxRow('Letter of Intent', _intentChecked, (v) => setState(() => _intentChecked = v!)),
-                        _buildCheckboxRow('Student/Faculty ID\nPhotocopy', _idChecked, (v) => setState(() => _idChecked = v!)),
+                        _buildCheckboxRow('Student/Faculty ID Photocopy', _idChecked, (v) => setState(() => _idChecked = v!)),
                         _buildCheckboxRow('Facility Clearance Slip', _clearanceChecked, (v) => setState(() => _clearanceChecked = v!)),
                       ],
                     ),
@@ -112,11 +133,7 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                 ],
               ),
             ),
-
-            // --- DIVIDER ---
             Divider(height: 1, color: Colors.grey.shade200, thickness: 1),
-
-            // --- FOOTER BUTTONS ---
             Padding(
               padding: const EdgeInsets.all(24.0),
               child: Row(
@@ -135,21 +152,16 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: _isAllChecked ? () {
-                        // Handle confirmation logic here
-                        Navigator.pop(context);
-                      } : null, // Disables button if not all checked
+                      onPressed: (_isAllChecked && !_isSubmitting) ? _confirmReservation : null, 
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _isAllChecked ? AppTheme.primaryRed : Colors.grey.shade400,
                         disabledBackgroundColor: Colors.grey.shade400,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
                       ), 
-                      child: const Text(
-                        'Confirm\nReservation', 
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, height: 1.2)
-                      )
+                      child: _isSubmitting 
+                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Confirm Reservation', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold))
                     )
                   ),
                 ],
@@ -160,8 +172,6 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
       ),
     );
   }
-
-  // --- REUSABLE WIDGETS ---
 
   Widget _buildInfo(String label, String value) {
     return Column(
@@ -194,12 +204,8 @@ class _VehicleReservationModalState extends State<VehicleReservationModal> {
           const SizedBox(width: 12),
           Expanded(
             child: Padding(
-              // Align the text nicely with the top of the checkbox
               padding: const EdgeInsets.only(top: 1.0),
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3),
-              ),
+              child: Text(label, style: const TextStyle(fontSize: 14, color: Colors.black87, height: 1.3)),
             ),
           ),
         ],

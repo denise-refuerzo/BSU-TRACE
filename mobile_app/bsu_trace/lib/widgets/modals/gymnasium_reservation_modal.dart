@@ -14,45 +14,69 @@ class GymnasiumReservationModal extends StatefulWidget {
 }
 
 class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
+  // Checklist State
   bool _formChecked = false;
   bool _intentChecked = false;
   bool _idChecked = false;
   bool _clearanceChecked = false;
   bool _isSubmitting = false;
 
+  // Helper to check if all documents are verified
   bool get _isAllChecked => _formChecked && _intentChecked && _idChecked && _clearanceChecked;
 
   Future<void> _confirmReservation() async {
     if (widget.bookingData == null || widget.bookingData!['booking_id'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error: Booking ID is missing from record.')),
+      );
       Navigator.pop(context);
       return;
     }
 
     setState(() => _isSubmitting = true);
+    
     try {
       final bookingId = widget.bookingData!['booking_id'];
-      final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/scheduler/bookings'),
+      final url = '${AppConfig.baseUrl}/scheduler/bookings/$bookingId';
+      
+      debugPrint('--- SENDING RESERVATION CONFIRMATION ---');
+      debugPrint('URL: $url');
+      debugPrint('Payload: {"status": "Confirmed"}');
+
+      final response = await http.put(
+        Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'booking_id': bookingId,
-          'status': 'Confirmed',
-        }),
+        body: json.encode({'status': 'Confirmed'}),
       );
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        if (mounted) Navigator.pop(context, true);
+      debugPrint('Response Status Code: ${response.statusCode}');
+      debugPrint('Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Reservation successfully confirmed!')),
+          );
+          Navigator.pop(context, true); // Returns true to trigger screen refresh
+        }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to confirm: ${response.body}')),
+            SnackBar(content: Text('Server Error (${response.statusCode}): ${response.body}')),
           );
         }
       }
     } catch (e) {
-      debugPrint('Error confirming reservation: $e');
+      debugPrint('Network/Connection Exception: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection Failed: $e')),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -73,6 +97,7 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // --- RED HEADER ---
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                 color: AppTheme.primaryRed,
@@ -80,15 +105,22 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(
+                    const Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text('Gymnasium Reservation', 
-                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Georgia')
+                        children: [
+                          Text(
+                            'Gymnasium Reservation', 
+                            style: TextStyle(
+                              color: Colors.white, 
+                              fontSize: 18, 
+                              fontWeight: FontWeight.bold,
+                              fontFamily: 'Georgia',
+                            )
                           ),
                           SizedBox(height: 4),
-                          Text('Court #1 Booking Verification', 
+                          Text(
+                            'Court #1 Booking Verification', 
                             style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)
                           ),
                         ],
@@ -101,6 +133,8 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
+              
+              // --- BODY SECTION ---
               Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
@@ -108,12 +142,18 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: _buildInfo('REQUESTOR', requestor)),
+                        Expanded(
+                          child: _buildInfo('REQUESTOR', requestor)
+                        ),
                         const SizedBox(width: 16),
-                        Expanded(child: _buildInfo('DATE & TIME', '$date |\n$time')),
+                        Expanded(
+                          child: _buildInfo('DATE & TIME', '$date |\n$time')
+                        ),
                       ],
                     ),
                     const SizedBox(height: 24),
+
+                    // --- CHECKLIST SECTION ---
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -124,11 +164,12 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: const [
+                          const Row(
+                            children: [
                               Icon(Icons.assignment_outlined, size: 16, color: Colors.black54),
                               SizedBox(width: 8),
-                              Text('DOCUMENT CHECKLIST', 
+                              Text(
+                                'DOCUMENT CHECKLIST', 
                                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black54, letterSpacing: 0.5)
                               ),
                             ],
@@ -144,7 +185,11 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                   ],
                 ),
               ),
+
+              // --- DIVIDER ---
               Divider(height: 1, color: Colors.red.shade100, thickness: 1),
+
+              // --- FOOTER BUTTONS ---
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(24.0),
@@ -165,7 +210,15 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: (_isAllChecked && !_isSubmitting) ? _confirmReservation : null, 
+                        onPressed: (_isAllChecked && !_isSubmitting) 
+                            ? _confirmReservation 
+                            : () {
+                                if (!_isAllChecked) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Please check all items in the checklist first.')),
+                                  );
+                                }
+                              }, 
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _isAllChecked ? AppTheme.primaryRed : Colors.grey.shade200,
                           disabledBackgroundColor: Colors.grey.shade200, 
@@ -174,10 +227,19 @@ class _GymnasiumReservationModalState extends State<GymnasiumReservationModal> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))
                         ), 
                         child: _isSubmitting 
-                          ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : Text('Confirm Reservation', 
+                          ? const SizedBox(
+                              height: 16, 
+                              width: 16, 
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)
+                            )
+                          : Text(
+                              'Confirm Reservation', 
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: _isAllChecked ? Colors.white : Colors.grey.shade400, fontSize: 11, fontWeight: FontWeight.bold)
+                              style: TextStyle(
+                                color: _isAllChecked ? Colors.white : Colors.grey.shade400, 
+                                fontSize: 11, 
+                                fontWeight: FontWeight.bold
+                              )
                             )
                       ),
                     ),

@@ -2504,13 +2504,13 @@ app.put('/api/scheduler/bookings/:id', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
+      return res.status(404).json({ error: 'Reservation ID does not exist' });
     }
 
     res.status(200).json({ message: 'Booking status updated successfully' });
   } catch (error) {
     console.error('Update Booking Error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message });
   }
 });
 
