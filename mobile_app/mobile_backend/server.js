@@ -1719,6 +1719,44 @@ app.post('/api/auth/reset-password', async (req, res) => {
     }
 });
 
+// ==========================================
+// 22. FETCH ICT ADMIN DASHBOARD STATS
+// ==========================================
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  const userId = req.query.u_id || req.body.u_id;
+
+  if (!token || !userId) {
+    return res.status(401).json({ error: 'Access denied. Missing token or user ID.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT session_token FROM public."User" WHERE u_id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'User not found.' });
+    }
+
+    const dbToken = result.rows[0].session_token;
+
+    if (!dbToken || token !== dbToken) {
+      return res.status(401).json({ error: 'Invalid or expired session token.' });
+    }
+
+    next();
+  } catch (err) {
+    console.error('Session verification error:', err);
+    res.status(500).json({ error: 'Internal server error during authentication.' });
+  }
+};
+
+// FIX: Changed authenticateToken to verifyToken
 app.get('/api/admin/ict-stats', verifyToken, async (req, res) => {
   try {
     const userId = req.query.u_id;
