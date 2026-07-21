@@ -808,21 +808,7 @@ export default function OriginatorDashboard() {
                       </label>
                       </div>
 
-                      {profile.twoFaEnabled && (
-                        <div className="pt-3 border-t border-dashed animate-in fade-in duration-100">
-                          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-                            Set Your Custom Numeric Security Code PIN
-                          </label>
-                          <input 
-                            type="password" 
-                            maxLength={6} 
-                            placeholder="••••••" 
-                            value={profile.twoFaCode} 
-                            onChange={e => setProfile({...profile, twoFaCode: e.target.value.replace(/\D/g, "")})}
-                            className="w-48 border px-3 py-1.5 font-mono tracking-widest text-xs rounded-lg outline-none focus:ring-1 focus:ring-red-700 bg-white shadow-sm" 
-                          />
-                        </div>
-                      )}
+                      
                     </div>
                   </div>
                 </div>

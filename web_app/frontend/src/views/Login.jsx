@@ -5,6 +5,10 @@ import Swal from 'sweetalert2';
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Terms & Conditions States
+  const [showTerms, setShowTerms] = useState(false);
+  const [pendingLoginData, setPendingLoginData] = useState(null);
   
   // New State variables for the dynamic 2FA flow
   const [require2FA, setRequire2FA] = useState(false);
@@ -63,7 +67,8 @@ export default function Login() {
       }
 
       // If 2FA is OFF, log them in immediately
-      completeLogin(data);
+      setPendingLoginData(data);
+      setShowTerms(true);
       
     } catch (err) {
       setError(err.message);  
@@ -92,8 +97,9 @@ export default function Login() {
       // Since our backend verify route returns u_id, a_id, and session_token, we can proceed.
       // NOTE: You may need to ensure your backend `/verify-2fa` endpoint also returns `token`, `role`, `roleName`, `fullName` just like the normal login does, OR you fetch it here.
       // For now, assuming the backend `/verify-2fa` is updated to return the same payload as standard login:
-      completeLogin(data);
-
+      setPendingLoginData(data);
+      setShowTerms(true);
+      setRequire2FA(false);
     } catch (err) {
       setError(err.message);
     }
@@ -229,6 +235,84 @@ export default function Login() {
         </div>
       )}
 
+      {/* TERMS & CONDITIONS OVERLAY */}
+      {showTerms && (
+        <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl border shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col animate-in zoom-in-95 duration-100">
+            
+            <div className="border-b pb-4 mb-4 text-center shrink-0">
+              <h2 className="text-xl font-bold text-red-800">BSU-Trace Terms & Conditions</h2>
+              <p className="text-xs text-gray-500 uppercase tracking-widest">Smart Campus Resource Management System</p>
+            </div>
+
+            <div className="overflow-y-auto flex-1 pr-2 space-y-4 text-sm text-gray-700">
+              <div>
+                <h3 className="font-bold text-red-800 mb-1 border-l-4 border-red-800 pl-2">1. Introduction and Scope</h3>
+                <p className="text-justify">Welcome to BSU-Trace. By logging into and utilizing this system, you agree to comply with the terms and privacy notices outlined below. BSU-Trace is designed to optimize administrative document tracking, manage facility reservations (including the Multimedia Room and Assemblyman Rafael R. Recto Gymnasium), and coordinate van scheduling for Batangas State University - Lipa Campus staff.</p>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-red-800 mb-1 border-l-4 border-red-800 pl-2">2. Data Collection and Privacy Notice</h3>
+                <p className="mb-2 text-justify">In accordance with institutional guidelines, BSU-Trace collects and processes specific administrative data to ensure operational efficiency:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Digital Audit Trail:</strong> The system utilizes a QR-hybrid tracking mechanism to monitor the physical movement of documents. Scanning events ("Receive" and "Release") are logged with timestamps to provide transparent tracking.</li>
+                  <li><strong>Data Integrity:</strong> Your interaction logs, routing configurations, and van scheduling requests are securely stored to facilitate institutional resource management.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-red-800 mb-1 border-l-4 border-red-800 pl-2">3. Analytical Processing and Usage</h3>
+                <p className="mb-2 text-justify">To continuously improve campus operations, BSU-Trace applies data-driven intelligence to historical administrative logs:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li><strong>Bottleneck Analysis:</strong> The system conducts an analytical evaluation process on document "dwell times" at various offices. This identifies constraints and operational friction without automated intervention, allowing governance to address delays proactively.</li>
+                  <li><strong>Predictive Forecasting:</strong> Historical scheduling data is used to forecast peak demand for van scheduling and facility usage, ensuring optimal distribution of institutional assets.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-red-800 mb-1 border-l-4 border-red-800 pl-2">4. User Responsibilities and Limitations</h3>
+                <p className="mb-2 text-justify">As a user of BSU-Trace, you acknowledge the following constraints:</p>
+                <ul className="list-disc pl-5 space-y-1">
+                  <li>The system strictly handles official business for BSU staff; student-related requests fall outside its scope.</li>
+                  <li>All digital resource reservations remain in a <em className="font-semibold">provisional state</em> until hard-copy documents with required "wet signatures" are physically verified by the General Services Office (GSO).</li>
+                  <li>Users are expected to provide accurate status updates and qualitative remarks when processing or returning documents for correction.</li>
+                </ul>
+              </div>
+
+              <div>
+                <h3 className="font-bold text-red-800 mb-1 border-l-4 border-red-800 pl-2">5. User Consent</h3>
+                <p className="text-justify">By proceeding, you consent to the collection, processing, and analytical evaluation of your administrative transactions within the BSU-Trace ecosystem. If you decline, you will be securely logged out of the portal.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 pt-4 mt-4 border-t shrink-0">
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowTerms(false);
+                  setPendingLoginData(null);
+                }} 
+                className="w-1/2 border-2 border-red-800 py-2.5 text-sm font-bold text-red-800 rounded-lg hover:bg-red-50 transition-colors uppercase tracking-wider"
+              >
+                Decline
+              </button>
+              
+              <button 
+                type="button" 
+                onClick={() => {
+                  setShowTerms(false);
+                  completeLogin(pendingLoginData);
+                }} 
+                className="w-1/2 bg-red-800 hover:bg-red-900 text-white text-sm font-bold rounded-lg transition-colors uppercase tracking-wider"
+              >
+                Accept
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {/* MULTI-STEP FORGOT PASSWORD MODAL OVERLAY */}  
       {showForgotModal && (
         <div className="fixed inset-0 bg-neutral-950/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">  
@@ -357,31 +441,43 @@ export default function Login() {
 
       {/* Left Branding Column */}  
       <div className="hidden lg:flex w-1/2 bg-cover bg-center relative items-center justify-center p-12 text-white" 
-           style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.65), rgba(0,0,0,0.75)), url('https://images.unsplash.com/photo-1541339907198-e08756dedf3f?q=80&w=1470')" }}>  
+           style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.70), rgba(0,0,0,0.85)), url('/BSU.webp')" }}>  
         <div className="text-center max-w-md">  
-          <div className="text-5xl mb-4 flex justify-center">🎓</div>  
-          <h1 className="text-3xl font-bold tracking-wide uppercase mb-4">BSU Institutional Portal</h1>  
+          <div className="mb-6 flex justify-center">
+            <img 
+              src="/bsu-logo.png" 
+              alt="BatStateU Logo" 
+              className="h-28 w-auto object-contain drop-shadow-lg" 
+            />
+          </div>
+          <h1 className="text-3xl font-bold tracking-wide uppercase mb-4">BatStateU Portal</h1>  
           <p className="text-gray-200 text-sm leading-relaxed mb-8">  
-            Access the university's central administrative hub. Manage academic resources, institutional documentation, and faculty communications in one integrated ecosystem.  
+            Access The National Engineering University's central administrative hub. Optimize institutional documentation, facility reservations, and vehicle scheduling in one smart campus ecosystem.
           </p>
           <div className="grid grid-cols-3 gap-4 border-t border-white/20 pt-6">  
-            <div><p className="text-2xl font-bold">15k+</p><p className="text-xs text-gray-300">Students</p></div>  
-            <div><p className="text-2xl font-bold">800+</p><p className="text-xs text-gray-300">Faculty</p></div>  
-            <div><p className="text-2xl font-bold">45</p><p className="text-xs text-gray-300">Programs</p></div>  
+            <div><p className="text-2xl font-bold">61k+</p><p className="text-xs text-gray-300">Red Spartans</p></div>  
+            <div><p className="text-2xl font-bold">223</p><p className="text-xs text-gray-300">Degree Programs</p></div>  
+            <div><p className="text-2xl font-bold">46</p><p className="text-xs text-gray-300">Eng. Programs</p></div>  
           </div>
         </div>
-        <p className="absolute bottom-4 text-xs text-white/40">© 2024 BSU Institutional Management. All Rights Reserved.</p>  
+        <p className="absolute bottom-4 text-xs text-white/40">© 2026 Batangas State University. All Rights Reserved.</p>  
       </div>
 
       {/* Right Form Input Column */}  
       <div className="w-full lg:w-1/2 flex flex-col justify-between p-8 bg-[#FAF8F5]">  
-        <div className="m-auto w-full max-w-md">  
+      <div className="m-auto w-full max-w-md">  
           <div className="text-center mb-8">  
-            <div className="text-red-700 text-4xl mb-2 flex justify-center">🛑</div>  
-            <h2 className="text-2xl font-bold text-red-800">University Portal</h2>  
-            <p className="text-xs text-gray-500 uppercase tracking-widest">BSU Institutional Portal</p>  
+            <div className="mb-4 flex justify-center">
+              <img 
+                src="/bsu-logo.png" 
+                alt="Batangas State University Logo" 
+                className="h-24 w-auto object-contain drop-shadow-sm" 
+              />
+            </div>  
+            <h2 className="text-2xl font-bold text-red-800 tracking-tight">University Portal</h2>  
+            <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold mt-1">BatStateU The NEU</p>  
           </div>
-
+          
           <div className="bg-white p-8 rounded-2xl shadow-sm border border-neutral-200/60">  
             <h3 className="text-xl font-bold text-center text-red-700 tracking-wider mb-6">SIGN IN</h3>  
             
